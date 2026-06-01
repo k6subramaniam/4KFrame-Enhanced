@@ -1,6 +1,7 @@
 {
-  "_comment": "Register this receiver at https://cast.google.com/publish and paste the generated application id below. The 'url' must be an HTTPS endpoint serving the built /display app.",
+  "_comment": "Register this receiver at https://cast.google.com/publish and paste the generated application id below. The 'url' must be an HTTPS endpoint serving the built /display app. The sender (admin) and receiver (display) exchange control messages on the custom namespace below.",
   "applicationId": "REPLACE_WITH_CAST_APP_ID",
   "url": "https://your-frame.example/",
-  "type": "CUSTOM_RECEIVER"
+  "type": "CUSTOM_RECEIVER",
+  "namespace": "urn:x-cast:com.4kframe.control"
 }

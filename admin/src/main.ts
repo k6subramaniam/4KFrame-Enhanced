@@ -8,7 +8,7 @@
 import type { MediaItem } from '@4kframe/shared';
 import { fetchItems, fetchData, castItem, deleteItem, upload, thumbUrl } from './api.js';
 import { renderSettings } from './settings.js';
-import { initCastSender } from './cast-sender.js';
+import { initCastSender, isCastReady, castControl, toggleCastSession } from './cast-sender.js';
 
 type Mode = 'cast' | 'view' | 'delete';
 let mode: Mode = 'cast';
@@ -38,7 +38,9 @@ function renderGrid(): void {
 
 async function onTileClick(item: MediaItem): Promise<void> {
   if (mode === 'cast') {
-    await castItem(item.id);
+    // Prefer a live Cast session (native Google Cast); fall back to the LAN REST flow.
+    const sent = await castControl({ type: 'cast', id: item.id });
+    if (!sent) await castItem(item.id);
   } else if (mode === 'view') {
     window.open(`/photos/${item.file}`, '_blank');
   } else if (mode === 'delete') {
@@ -71,6 +73,18 @@ function wireModes(): void {
   });
 }
 
+function wireCast(): void {
+  const btn = document.getElementById('cast-device') as HTMLButtonElement | null;
+  if (!btn) return;
+  const sync = (isConnected: boolean): void => {
+    btn.classList.toggle('hidden', !isCastReady());
+    btn.classList.toggle('active', isConnected);
+    btn.textContent = isConnected ? '◉ Casting' : '▶ Cast device';
+  };
+  btn.addEventListener('click', () => { toggleCastSession().catch(() => {}); });
+  initCastSender(sync);
+}
+
 function wireUpload(): void {
   const drop = document.getElementById('drop') as HTMLElement;
   const file = document.getElementById('file') as HTMLInputElement;
@@ -90,7 +104,7 @@ function wireUpload(): void {
   });
 }
 
-initCastSender();
+wireCast();
 wireModes();
 wireUpload();
 setMode('cast');

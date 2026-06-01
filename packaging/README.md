@@ -8,6 +8,11 @@ This directory holds the thin per-platform wrappers.
 - Register an application id at the [Cast SDK Developer Console](https://cast.google.com/publish)
   and point it at that URL. Put the id in `packaging/cast/receiver.json` and set
   `VITE_CAST_APP_ID` when building the admin (sender).
+- Sender ↔ receiver control flows over the custom namespace
+  `urn:x-cast:com.4kframe.control`: the admin sends `ControlMessage`s (`cast` / `next` /
+  `previous` / `config`), and the display receiver bridges them onto its backend WebSocket,
+  reusing the exact protocol used by the in-browser admin. The receiver framework is loaded
+  on-device only (Chromecast/Android TV user-agents), so other displays stay dependency-free.
 
 ## Samsung TV (Tizen)
 - Tizen apps are HTML5/JS. `packaging/tizen/config.xml` points the app at the display.

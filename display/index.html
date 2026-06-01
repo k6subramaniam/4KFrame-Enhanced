@@ -30,6 +30,16 @@
       <div id="qr" class="overlay hidden"><img alt="Scan to manage" /></div>
       <div id="status" class="overlay">Connecting…</div>
     </div>
+    <!-- Load the Cast receiver framework only on Chromecast/Android TV (CrKey) devices, so
+         regular TV browsers never block on an external dependency. The receiver bridge in
+         main.ts waits briefly for it to become available. -->
+    <script>
+      if (/\bCrKey\b/.test(navigator.userAgent)) {
+        var s = document.createElement('script');
+        s.src = 'https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js';
+        document.head.appendChild(s);
+      }
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

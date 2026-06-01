@@ -65,5 +65,12 @@ export type FrameEvent =
 
 export type WsMessage = ControlMessage | FrameEvent;
 
+/**
+ * Custom Google Cast namespace. The companion sender posts {@link ControlMessage}s on
+ * this namespace; the display (Custom Web Receiver) bridges them onto its WebSocket so
+ * native Cast reuses the exact same control protocol as the admin app.
+ */
+export const CAST_NAMESPACE = 'urn:x-cast:com.4kframe.control';
+
 export const DEFAULT_HTTP_PORT = 9095;
 export const DEFAULT_HTTPS_PORT = 9096;

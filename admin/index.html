@@ -42,7 +42,9 @@
         <button data-mode="view">View</button>
         <button data-mode="delete">Delete</button>
       </div>
+      <button id="cast-device" class="hidden" title="Cast the frame to a TV" style="margin-left:.5rem">▶ Cast device</button>
     </header>
+    <script async src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
     <main>
       <div id="drop">Drag &amp; drop photos or videos here, or
         <label style="color:var(--accent);cursor:pointer">browse<input id="file" type="file" accept="image/*,video/*" multiple hidden /></label>
