@@ -6,7 +6,7 @@
  * Chromecast receiver when applicable.
  */
 
-import { defaultConfig, type FrameConfig, type FrameEvent, type MediaItem } from '@4kframe/shared';
+import { defaultConfig, type ControlMessage, type FrameConfig, type FrameEvent, type MediaItem } from '@4kframe/shared';
 import { GLRenderer } from './gl.js';
 import { compose } from './compositor.js';
 import { applyOverlays, setCaption, setStatus } from './overlays.js';
@@ -19,6 +19,14 @@ const renderer = new GLRenderer(canvas);
 let config: FrameConfig = defaultConfig();
 let prevFrame: HTMLCanvasElement | null = null;
 let showingVideo = false;
+let socket: WebSocket | null = null;
+
+/** Forward a control message to the backend (used to bridge Cast custom messages). */
+function sendControl(msg: ControlMessage): void {
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify(msg));
+  }
+}
 
 async function renderItems(items: MediaItem[], interactive: boolean): Promise<void> {
   const videoItem = items.find((i) => i.kind === 'video');
@@ -84,16 +92,18 @@ function handleEvent(event: FrameEvent): void {
 function connect(): void {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  socket = ws;
   ws.onopen = () => setStatus('');
   ws.onmessage = (ev) => {
     try { handleEvent(JSON.parse(ev.data) as FrameEvent); } catch { /* ignore */ }
   };
   ws.onclose = () => {
+    if (socket === ws) socket = null;
     setStatus('Reconnecting…');
     setTimeout(connect, 2000);
   };
   ws.onerror = () => ws.close();
 }
 
-initCastReceiver();
+initCastReceiver(sendControl);
 connect();
