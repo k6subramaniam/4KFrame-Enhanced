@@ -10,10 +10,14 @@ services:
     volumes:
       - frame-data:/data
     environment:
-      # Optional — enables Google Photos import & auto-sync.
+      # Optional — enables Google Photos import via the Photo Picker API.
       # GOOGLE_CLIENT_ID: ""
       # GOOGLE_CLIENT_SECRET: ""
       # GOOGLE_REDIRECT_URI: "http://<frame-host>:9095/api/google/callback"
+      # HTTPS on :9096 is self-signed by default. To use your own cert, mount it and set:
+      # FRAME_TLS_CERT: /data/cert.pem
+      # FRAME_TLS_KEY: /data/key.pem
+      # FRAME_DISABLE_HTTPS: "1"   # to turn HTTPS off entirely
       FRAME_DATA_DIR: /data
 
 volumes:

@@ -11,8 +11,8 @@ COPY . .
 RUN npm run build
 
 FROM node:22-bookworm-slim AS runtime
-# ffmpeg powers video posters/transcoding; omit to run photo-only.
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+# ffmpeg powers video posters/transcoding; openssl self-signs the HTTPS cert on first boot.
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg openssl \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production

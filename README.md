@@ -49,12 +49,22 @@ appears on the display.
 docker compose up --build -d   # serves admin + display + API on :9095 (and :9096 HTTPS)
 ```
 
-- Display: `http://<frame-host>:9095/`
+- Display: `http://<frame-host>:9095/` (or `https://<frame-host>:9096/`)
 - Admin:   `http://<frame-host>:9095/admin/`
+
+### HTTPS
+HTTPS is served on **:9096**. On first boot the server **self-signs** a certificate (via
+`openssl`) into the data volume, with `localhost` and the LAN IP in its SAN — browsers will
+show a one-time "not trusted" warning. To use your own (trusted) certificate, set
+`FRAME_TLS_CERT` / `FRAME_TLS_KEY` to its paths, or disable HTTPS with `FRAME_DISABLE_HTTPS=1`.
+HTTPS is required for PWA install and to serve the display as a publicly reachable Cast
+receiver.
 
 ### Runtime dependencies
 - **ffmpeg** (in the Docker image) — video posters & transcoding. Without it, videos are
   served as-is and posters are skipped.
+- **openssl** (in the Docker image) — self-signs the HTTPS cert on first boot. Without it,
+  HTTPS is skipped and HTTP still serves.
 - **sharp** (optional npm dependency) — image variant generation. Without it, originals
   are served as-is.
 
