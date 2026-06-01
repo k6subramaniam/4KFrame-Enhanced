@@ -30,7 +30,7 @@ import { refresh } from '../slideshow.js';
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
-const REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI ?? 'http://localhost:9095/api/google/callback';
+const REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:9095/api/google/callback';
 const SCOPE = 'https://www.googleapis.com/auth/photospicker.mediaitems.readonly';
 const PICKER_API = 'https://photospicker.googleapis.com/v1';
 

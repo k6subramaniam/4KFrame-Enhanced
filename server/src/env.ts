@@ -17,15 +17,17 @@ export const DB_FILE = path.join(DATA_DIR, 'frame.json');
 export const DISPLAY_DIST = path.resolve(__dirname, '../../display/dist');
 export const ADMIN_DIST = path.resolve(__dirname, '../../admin/dist');
 
-export const HTTP_PORT = Number(process.env.FRAME_HTTP_PORT ?? DEFAULT_HTTP_PORT);
-export const HTTPS_PORT = Number(process.env.FRAME_HTTPS_PORT ?? DEFAULT_HTTPS_PORT);
-export const HOST = process.env.FRAME_HOST ?? '0.0.0.0';
+// Note: empty-string env values (which `.env` / compose interpolation can produce) are
+// treated as "unset" via `||`, so they fall back to defaults rather than breaking.
+export const HTTP_PORT = Number(process.env.FRAME_HTTP_PORT) || DEFAULT_HTTP_PORT;
+export const HTTPS_PORT = Number(process.env.FRAME_HTTPS_PORT) || DEFAULT_HTTPS_PORT;
+export const HOST = process.env.FRAME_HOST || '0.0.0.0';
 
 /** HTTPS is served on {@link HTTPS_PORT} unless explicitly disabled. */
 export const HTTPS_ENABLED = process.env.FRAME_DISABLE_HTTPS !== '1';
 /** TLS material. Point these at your own cert/key, or leave unset to auto self-sign. */
-export const TLS_CERT_FILE = process.env.FRAME_TLS_CERT ?? path.join(DATA_DIR, 'cert.pem');
-export const TLS_KEY_FILE = process.env.FRAME_TLS_KEY ?? path.join(DATA_DIR, 'key.pem');
+export const TLS_CERT_FILE = process.env.FRAME_TLS_CERT || path.join(DATA_DIR, 'cert.pem');
+export const TLS_KEY_FILE = process.env.FRAME_TLS_KEY || path.join(DATA_DIR, 'key.pem');
 
 /** Best-effort LAN IPv4 address (used for the QR code and the cert's SAN). */
 export function detectLanIp(): string | null {
