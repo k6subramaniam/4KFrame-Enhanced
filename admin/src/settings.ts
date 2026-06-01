@@ -3,7 +3,7 @@
  * the original frame controls and adding the enhanced options.
  */
 
-import { EFFECT_PRESETS, PHOTO_PERIOD_PRESETS, TRANSITIONS, type ApiDataPayload } from '@4kframe/shared';
+import { EFFECT_PRESETS, FRAME_ASPECTS, PHOTO_PERIOD_PRESETS, TRANSITIONS, type ApiDataPayload } from '@4kframe/shared';
 import {
   updateData,
   googleStatus,
@@ -26,7 +26,10 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload): P
   const period = Math.round(Number(data.photoPeriod ?? 15));
   const transPeriod = Number(data.transitionPeriod ?? 0.75);
   const fill = (data.frameFill ?? 'true') === 'true';
+  const fillMode = data.fillMode ?? (fill ? 'cover' : 'contain');
+  const frameAspect = data.frameAspect ?? 'auto';
   const qr = (data.showQr ?? 'true') === 'true';
+  const aspectLabels: Record<string, string> = { auto: 'Auto', '16:9': '16:9', '9:16': '9:16 ↕', '4:3': '4:3', '3:4': '3:4 ↕', '1:1': '1:1', '21:9': '21:9' };
   const transition = data.transition ?? 'fade.glsl';
   const usedMB = Math.round(Number(data.storageUsed ?? 0) / 1e6);
   const freeMB = Math.round(Number(data.storageFree ?? 0) / 1e6);
@@ -52,10 +55,15 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload): P
     </div>
     <div class="panel">
       <h2>Scaling</h2>
-      ${seg('frameFill', [
-        { label: 'Fill Frame', value: 'true', active: fill },
-        { label: 'Fit Frame', value: 'false', active: !fill },
+      ${seg('fillMode', [
+        { label: 'Cover', value: 'cover', active: fillMode === 'cover' },
+        { label: 'Contain', value: 'contain', active: fillMode === 'contain' },
+        { label: 'Blur Fill', value: 'blur', active: fillMode === 'blur' },
       ])}
+      <div class="muted" style="margin-top:.4rem">Cover crops to fill · Contain letterboxes · Blur fills bars with a blurred copy.</div>
+      <h2 style="margin-top:1rem">Aspect Ratio</h2>
+      ${seg('frameAspect', FRAME_ASPECTS.map((a) => ({ label: aspectLabels[a] ?? a, value: a, active: a === frameAspect })))}
+      <div class="muted" style="margin-top:.4rem">Auto matches each screen (TV, ultrawide, square, portrait). Others force that shape, centered.</div>
     </div>
     <div class="panel">
       <h2>QR Code</h2>

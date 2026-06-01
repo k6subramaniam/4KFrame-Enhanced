@@ -94,6 +94,14 @@ removed by Google.)
 - **Companion / web** — the admin PWA's Cast mode pushes any item to the frame over the
   LAN via `POST /api/cast/:id`.
 
+### Aspect ratios & framing
+Every display composes each frame to **its own real screen**, so the same library casts
+correctly to 16:9 TVs, ultrawide, 4:3, square, and portrait frames — and multiple displays
+of different shapes can run at once, each framed correctly. In **Admin → Scaling** choose how
+content fits — **Cover** (crop to fill), **Contain** (letterbox), or **Blur Fill** (a blurred,
+zoomed copy fills the bars) — and an **Aspect Ratio**: **Auto** (match each screen) or a forced
+shape (16:9, 9:16, 4:3, 3:4, 1:1, 21:9) centered within the screen.
+
 ## API (original-compatible)
 
 `/api/progress` · `/api/next` · `/api/previous` · `/api/current` · `/api/data` ·
