@@ -39,12 +39,8 @@ export interface GooglePhotosConfig {
   connected: boolean;
   /** Email of the connected account, when known. */
   account?: string;
-  /** Album ids selected for automatic syncing. */
-  syncAlbumIds: string[];
-  /** Auto-sync poll interval in minutes. 0 disables auto-sync. */
-  syncIntervalMinutes: number;
-  /** Epoch ms of the last successful sync. */
-  lastSyncAt?: number;
+  /** Epoch ms of the last successful Picker import. */
+  lastImportAt?: number;
 }
 
 export interface OverlayConfig {
@@ -114,8 +110,6 @@ export function defaultConfig(): FrameConfig {
     videoLoop: true,
     googlePhotos: {
       connected: false,
-      syncAlbumIds: [],
-      syncIntervalMinutes: 60,
     },
     overlays: { clock: false, weather: false, caption: false },
     lanAddress: '',

@@ -18,7 +18,6 @@ import { initStore, getConfig, setConfig } from './store.js';
 import { registerApi } from './routes/api.js';
 import { registerWs } from './ws.js';
 import { startSlideshow } from './slideshow.js';
-import { startSyncWorker } from './integrations/googlePhotos.js';
 import { imageProcessingAvailable } from './media/images.js';
 import { videoProcessingAvailable } from './media/video.js';
 
@@ -58,7 +57,6 @@ async function main(): Promise<void> {
   }));
 
   startSlideshow();
-  startSyncWorker();
 
   await app.listen({ port: HTTP_PORT, host: HOST });
   app.log.info(`4KFrame Enhanced listening on ${detectLanAddress(HTTP_PORT)}`);

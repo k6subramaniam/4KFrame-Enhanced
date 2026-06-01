@@ -4,7 +4,13 @@
  */
 
 import { EFFECT_PRESETS, PHOTO_PERIOD_PRESETS, TRANSITIONS, type ApiDataPayload } from '@4kframe/shared';
-import { updateData, googleStatus } from './api.js';
+import {
+  updateData,
+  googleStatus,
+  createPickerSession,
+  pollPickerSession,
+  importPickerSession,
+} from './api.js';
 
 const PERIOD_LABELS: Record<number, string> = {
   0: 'Paused', 10: '10s', 15: '15s', 20: '20s', 40: '40s', 60: '60s', 300: '5 min',
@@ -65,10 +71,13 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload): P
     <div class="panel">
       <h2>Google Photos</h2>
       ${gp.connected
-        ? '<div class="muted">Connected. Selected albums auto-sync to the frame.</div><div class="row"><button id="gsync">Sync now</button></div>'
+        ? '<div class="muted">Connected. Pick photos &amp; videos to import onto the frame.</div>'
+          + '<div class="row"><button id="gpick">Import from Google Photos</button>'
+          + '<a href="/api/google/disconnect" class="muted" style="margin-left:.75rem">Disconnect</a></div>'
+          + '<div class="muted" id="gpick-status"></div>'
         : gp.configured
           ? '<div class="row"><a href="/api/google/auth"><button>Connect Google Photos</button></a></div>'
-          : '<div class="muted">Set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET on the server to enable Google Photos import &amp; auto-sync.</div>'}
+          : '<div class="muted">Set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET on the server to enable Google Photos import.</div>'}
     </div>
   `;
 
@@ -85,5 +94,61 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload): P
     });
   });
 
-  root.querySelector('#gsync')?.addEventListener('click', () => fetch('/api/google/sync', { method: 'POST' }));
+  wirePickerImport(root);
+}
+
+/**
+ * Drive the Google Photos Picker import: create a session, open Google's picker in a new
+ * tab, poll until the user has finished selecting, then import the chosen items.
+ */
+function wirePickerImport(root: HTMLElement): void {
+  const btn = root.querySelector<HTMLButtonElement>('#gpick');
+  const status = root.querySelector<HTMLElement>('#gpick-status');
+  if (!btn || !status) return;
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    status.textContent = 'Opening Google Photos…';
+    try {
+      const session = await createPickerSession();
+      // Pop the picker; if the browser blocks it, fall back to a manual link.
+      const picker = window.open(session.pickerUri, '_blank', 'noopener');
+      if (!picker) {
+        status.innerHTML = `<a href="${session.pickerUri}" target="_blank" rel="noopener">Open Google Photos to pick →</a>`;
+      } else {
+        status.textContent = 'Waiting for you to pick photos…';
+      }
+
+      const ready = await waitForSelection(session.id, session.pollIntervalMs);
+      if (!ready) {
+        status.textContent = 'Timed out waiting for a selection. Try again.';
+        return;
+      }
+      status.textContent = 'Importing…';
+      const imported = await importPickerSession(session.id);
+      status.textContent = imported
+        ? `Imported ${imported} item${imported === 1 ? '' : 's'}.`
+        : 'No items were imported.';
+    } catch {
+      status.textContent = 'Import failed. Please try again.';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
+/** Poll the session until the user has picked items, or a 5-minute deadline passes. */
+async function waitForSelection(id: string, pollIntervalMs: number): Promise<boolean> {
+  const deadline = Date.now() + 5 * 60_000;
+  const interval = Math.min(Math.max(pollIntervalMs, 1500), 10_000);
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, interval));
+    try {
+      const s = await pollPickerSession(id);
+      if (s.mediaItemsSet) return true;
+    } catch {
+      /* transient — keep polling until the deadline */
+    }
+  }
+  return false;
 }

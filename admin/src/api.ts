@@ -43,6 +43,35 @@ export async function googleStatus(): Promise<GoogleStatus> {
   return (await res.json()) as GoogleStatus;
 }
 
+export interface PickerSession {
+  id: string;
+  pickerUri: string;
+  mediaItemsSet: boolean;
+  pollIntervalMs: number;
+}
+
+/** Create a Google Photos Picker session (returns the URI the user opens to pick). */
+export async function createPickerSession(): Promise<PickerSession> {
+  const res = await fetch('/api/google/picker/session', { method: 'POST' });
+  if (!res.ok) throw new Error('failed to create picker session');
+  return (await res.json()) as PickerSession;
+}
+
+/** Poll a Picker session to see whether the user has finished selecting. */
+export async function pollPickerSession(id: string): Promise<PickerSession> {
+  const res = await fetch(`/api/google/picker/session/${encodeURIComponent(id)}`);
+  if (!res.ok) throw new Error('failed to poll picker session');
+  return (await res.json()) as PickerSession;
+}
+
+/** Import the items the user picked in a session. Returns how many were added. */
+export async function importPickerSession(id: string): Promise<number> {
+  const res = await fetch(`/api/google/picker/session/${encodeURIComponent(id)}/import`, { method: 'POST' });
+  if (!res.ok) throw new Error('failed to import picked items');
+  const json = (await res.json()) as { imported: number };
+  return json.imported;
+}
+
 export function thumbUrl(item: MediaItem): string {
   return `/photos/${item.thumb}`;
 }

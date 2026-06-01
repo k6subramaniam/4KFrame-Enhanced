@@ -3,8 +3,8 @@
 An enhanced, **web-first** re-imagining of the original *4kFrame – Photo Slideshow
 Server*. It displays a looping 4K slideshow of **photos and videos** with beautiful GPU
 transitions, and is managed from any browser on your network. Compared to the original
-Android-only app it adds **video playback**, **Google Photos** (manual import *and*
-automatic album sync), and **casting** (native Google Cast, a companion PWA, and the
+Android-only app it adds **video playback**, **Google Photos** (on-demand import via
+Google's Photo Picker), and **casting** (native Google Cast, a companion PWA, and the
 classic web "cast to frame").
 
 ## Why web-first?
@@ -60,7 +60,10 @@ docker compose up --build -d   # serves admin + display + API on :9095 (and :909
 
 ## Google Photos
 
-Set on the server to enable import + auto-sync:
+Import is built on Google's **[Photo Picker API](https://developers.google.com/photos/picker)**.
+Google retired broad Library API access in March 2025, so apps can no longer list a user's
+albums or auto-sync them — instead the user explicitly **picks** the photos/videos to import,
+and the frame downloads just those. Configure OAuth on the server:
 
 ```
 GOOGLE_CLIENT_ID=...
@@ -68,8 +71,11 @@ GOOGLE_CLIENT_SECRET=...
 GOOGLE_REDIRECT_URI=http://<frame-host>:9095/api/google/callback
 ```
 
-Then **Connect Google Photos** in the admin, pick albums to auto-sync, or import items
-on demand.
+Enable the **Photos Picker API** for your Google Cloud project and add the
+`photospicker.mediaitems.readonly` scope to the OAuth consent screen. Then in the admin:
+**Connect Google Photos**, click **Import from Google Photos**, pick items in the Google UI,
+and they're imported onto the frame. (There is no automatic album sync — that capability was
+removed by Google.)
 
 ## Casting
 
