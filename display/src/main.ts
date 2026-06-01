@@ -29,6 +29,7 @@ let socket: WebSocket | null = null;
 let lastItems: MediaItem[] | null = null;
 let lastVideoItem: MediaItem | null = null;
 let showingVideo = false;
+let paused = false;
 
 /** Forward a control message to the backend (used to bridge Cast custom messages). */
 function sendControl(msg: ControlMessage): void {
@@ -146,10 +147,44 @@ function handleEvent(event: FrameEvent): void {
     case 'library':
       // No-op for the display; the server drives what is shown.
       break;
+    case 'paused':
+      paused = event.paused;
+      if (showingVideo) {
+        if (paused) video.pause();
+        else video.play().catch(() => undefined);
+      }
+      setStatus(paused ? '⏸ Paused' : '');
+      break;
     case 'log':
       if (event.level === 'error') console.error(event.message);
       break;
   }
+}
+
+/**
+ * TV remote / keyboard control. D-pad and OK on TV browsers arrive as arrow + Enter keys;
+ * media remotes send the Media* keys. All control flows through the same WebSocket protocol.
+ */
+function wireRemote(): void {
+  window.addEventListener('keydown', (e) => {
+    switch (e.key) {
+      case 'ArrowRight': case 'ArrowDown': case 'PageDown':
+      case 'MediaTrackNext': case 'n': case 'N':
+        sendControl({ type: 'next' });
+        break;
+      case 'ArrowLeft': case 'ArrowUp': case 'PageUp':
+      case 'MediaTrackPrevious': case 'p': case 'P':
+        sendControl({ type: 'previous' });
+        break;
+      case 'Enter': case ' ': case 'Spacebar':
+      case 'MediaPlayPause': case 'MediaPlay': case 'MediaPause':
+        sendControl({ type: paused ? 'resume' : 'pause' });
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+  });
 }
 
 function connect(): void {
@@ -175,5 +210,6 @@ window.addEventListener('resize', () => {
   resizeTimer = setTimeout(() => rerender().catch((err) => console.error(err)), 150);
 });
 
+wireRemote();
 initCastReceiver(sendControl);
 connect();

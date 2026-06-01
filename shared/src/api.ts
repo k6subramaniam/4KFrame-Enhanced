@@ -50,11 +50,13 @@ export interface ThumbsResponse {
 
 // --- WebSocket protocol (`/ws`) ---
 
-/** Commands a controller (admin / cast sender) sends to the server. */
+/** Commands a controller (admin / cast sender / display remote) sends to the server. */
 export type ControlMessage =
   | { type: 'progress' }
   | { type: 'next' }
   | { type: 'previous' }
+  | { type: 'pause' }
+  | { type: 'resume' }
   | { type: 'cast'; id: string }
   | { type: 'config'; patch: Partial<FrameConfig> | ApiDataPayload };
 
@@ -63,6 +65,7 @@ export type FrameEvent =
   | { type: 'show'; items: MediaItem[]; interactive: boolean }
   | { type: 'config'; config: FrameConfig }
   | { type: 'library'; items: MediaItem[] }
+  | { type: 'paused'; paused: boolean }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; message: string };
 
 export type WsMessage = ControlMessage | FrameEvent;

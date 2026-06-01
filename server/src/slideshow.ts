@@ -19,6 +19,7 @@ import { hub } from './hub.js';
 let pointer = 0;
 let current: MediaItem[] = [];
 let timer: NodeJS.Timeout | undefined;
+let paused = false;
 
 function isPortrait(i: MediaItem): boolean {
   return i.height > i.width && i.width > 0;
@@ -56,9 +57,22 @@ function durationMs(items: MediaItem[]): number {
 
 function schedule(): void {
   if (timer) clearTimeout(timer);
+  if (paused) return; // hold on the current item until resumed
   const ms = durationMs(current);
-  if (ms <= 0) return; // paused
+  if (ms <= 0) return; // paused via photoPeriod = 0
   timer = setTimeout(() => advance(1, false), ms);
+}
+
+/** Pause/resume automatic progression (e.g. from the TV remote). Manual next/previous still work. */
+export function setPaused(value: boolean): void {
+  if (paused === value) return;
+  paused = value;
+  if (paused) {
+    if (timer) clearTimeout(timer);
+  } else {
+    schedule();
+  }
+  hub.emitEvent({ type: 'paused', paused });
 }
 
 function show(interactive: boolean): void {
