@@ -65,6 +65,8 @@ function parseControl(data: unknown): ControlMessage | null {
     case 'progress':
     case 'next':
     case 'previous':
+    case 'pause':
+    case 'resume':
       return { type };
     case 'cast': {
       const id = (raw as { id?: unknown }).id;

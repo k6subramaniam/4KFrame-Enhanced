@@ -10,7 +10,7 @@ import type { FastifyInstance } from 'fastify';
 import type { ControlMessage, FrameEvent } from '@4kframe/shared';
 import { hub } from './hub.js';
 import { getConfig, setConfig } from './store.js';
-import { cast, next, previous, progress, getCurrent, refresh } from './slideshow.js';
+import { cast, next, previous, progress, getCurrent, refresh, setPaused } from './slideshow.js';
 
 export async function registerWs(app: FastifyInstance): Promise<void> {
   app.get('/ws', { websocket: true }, (socket) => {
@@ -37,6 +37,8 @@ export async function registerWs(app: FastifyInstance): Promise<void> {
         case 'progress': progress(); break;
         case 'next': next(); break;
         case 'previous': previous(); break;
+        case 'pause': setPaused(true); break;
+        case 'resume': setPaused(false); break;
         case 'cast': await cast(msg.id); break;
         case 'config': {
           // Accept either a typed partial or the loose string payload.

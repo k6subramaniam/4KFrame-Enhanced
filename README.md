@@ -122,6 +122,12 @@ pick items in Google's UI, and they're imported onto the frame.
 - **Companion / web** — the admin PWA's Cast mode pushes any item to the frame over the
   LAN via `POST /api/cast/:id`.
 
+### TV remote / keyboard control
+When the display is open in a TV browser, the remote drives it directly:
+**→ / ↓ / Next = next**, **← / ↑ / Prev = previous**, **OK / Play-Pause = pause/resume**
+(pausing stops auto-advance and pauses the current video). Pause state is shared, so all
+displays and any Cast sender stay in sync.
+
 ### Aspect ratios & framing
 Every display composes each frame to **its own real screen**, so the same library casts
 correctly to 16:9 TVs, ultrawide, 4:3, square, and portrait frames — and multiple displays
