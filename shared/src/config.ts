@@ -43,6 +43,32 @@ export interface GooglePhotosConfig {
   lastImportAt?: number;
 }
 
+/** How a photo/video is fitted to the frame when its aspect differs from the screen. */
+export const FILL_MODES = ['cover', 'contain', 'blur'] as const;
+export type FillMode = (typeof FILL_MODES)[number];
+
+/**
+ * Target frame aspect. `auto` matches each display's real screen (so the same library casts
+ * correctly to 16:9 TVs, ultrawide, 4:3, square, and portrait frames simultaneously). Any
+ * other value forces that aspect, centered within the screen.
+ */
+export const FRAME_ASPECTS = ['auto', '16:9', '9:16', '4:3', '3:4', '1:1', '21:9'] as const;
+export type FrameAspect = (typeof FRAME_ASPECTS)[number];
+
+/** Numeric width/height ratio for a {@link FrameAspect}, or null for `auto` (use the screen). */
+export function aspectRatio(a: FrameAspect): number | null {
+  switch (a) {
+    case '16:9': return 16 / 9;
+    case '9:16': return 9 / 16;
+    case '4:3': return 4 / 3;
+    case '3:4': return 3 / 4;
+    case '1:1': return 1;
+    case '21:9': return 21 / 9;
+    case 'auto':
+    default: return null;
+  }
+}
+
 export interface OverlayConfig {
   clock: boolean;
   weather: boolean;
@@ -69,8 +95,12 @@ export interface FrameConfig {
 
   // --- Appearance ---
   transition: TransitionName | string;
-  /** Fill = crop to fill the frame; false = fit with letterboxing. */
+  /** Legacy boolean (cover vs contain). Mirrors {@link fillMode}; kept for original tooling. */
   frameFill: boolean;
+  /** How content is fitted: cover (crop), contain (letterbox), or blur (blurred-fill). */
+  fillMode: FillMode;
+  /** Target frame aspect; `auto` follows each display's real screen. */
+  frameAspect: FrameAspect;
   frameWidth: number;
   frameHeight: number;
   showInfo: boolean;
@@ -102,6 +132,8 @@ export function defaultConfig(): FrameConfig {
     checkPeriod: 0.5,
     transition: 'fade.glsl',
     frameFill: true,
+    fillMode: 'cover',
+    frameAspect: 'auto',
     frameWidth: 3840,
     frameHeight: 2160,
     showInfo: true,
@@ -130,7 +162,9 @@ export function toApiData(c: FrameConfig): ApiDataPayload {
     interactiveTransitionPeriod: String(c.interactiveTransitionPeriod),
     checkPeriod: String(c.checkPeriod),
     transition: String(c.transition),
-    frameFill: String(c.frameFill),
+    frameFill: String(c.fillMode === 'cover'),
+    fillMode: c.fillMode,
+    frameAspect: c.frameAspect,
     frameWidth: String(c.frameWidth),
     frameHeight: String(c.frameHeight),
     showInfo: String(c.showInfo),
@@ -145,6 +179,19 @@ export function toApiData(c: FrameConfig): ApiDataPayload {
 
 const truthy = (v: string | undefined, fallback: boolean) =>
   v === undefined ? fallback : v === 'true' || v === '1';
+
+/** Resolve fill mode from an explicit `fillMode`, else the legacy `frameFill` boolean. */
+function parseFillMode(patch: ApiDataPayload, fallback: FillMode): FillMode {
+  if (patch.fillMode && (FILL_MODES as readonly string[]).includes(patch.fillMode)) {
+    return patch.fillMode as FillMode;
+  }
+  if (patch.frameFill !== undefined) return truthy(patch.frameFill, fallback === 'cover') ? 'cover' : 'contain';
+  return fallback;
+}
+
+function parseAspect(v: string | undefined, fallback: FrameAspect): FrameAspect {
+  return v && (FRAME_ASPECTS as readonly string[]).includes(v) ? (v as FrameAspect) : fallback;
+}
 const num = (v: string | undefined, fallback: number) => {
   const n = v === undefined ? NaN : Number(v);
   return Number.isFinite(n) ? n : fallback;
@@ -159,7 +206,9 @@ export function fromApiData(current: FrameConfig, patch: ApiDataPayload): FrameC
     interactiveTransitionPeriod: num(patch.interactiveTransitionPeriod, current.interactiveTransitionPeriod),
     checkPeriod: num(patch.checkPeriod, current.checkPeriod),
     transition: patch.transition ?? current.transition,
-    frameFill: truthy(patch.frameFill, current.frameFill),
+    fillMode: parseFillMode(patch, current.fillMode),
+    frameAspect: parseAspect(patch.frameAspect, current.frameAspect),
+    frameFill: parseFillMode(patch, current.fillMode) === 'cover',
     frameWidth: num(patch.frameWidth, current.frameWidth),
     frameHeight: num(patch.frameHeight, current.frameHeight),
     showInfo: truthy(patch.showInfo, current.showInfo),
