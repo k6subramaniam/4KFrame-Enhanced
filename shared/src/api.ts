@@ -33,6 +33,8 @@ export interface MediaItem {
   source: 'upload' | 'google-photos';
   /** Optional caption (EXIF/description derived). */
   caption?: string;
+  /** True while a background H.264 transcode is in progress (video only). */
+  transcoding?: boolean;
 }
 
 /** Response of `/api/current` — the active item(s) plus the loose config payload. */

@@ -61,8 +61,11 @@ HTTPS is required for PWA install and to serve the display as a publicly reachab
 receiver.
 
 ### Runtime dependencies
-- **ffmpeg** (in the Docker image) — video posters & transcoding. Without it, videos are
-  served as-is and posters are skipped.
+- **ffmpeg** (in the Docker image) — video posters & transcoding. Videos that aren't already
+  a TV-friendly H.264/AAC MP4 are **automatically transcoded in the background** (to H.264 /
+  yuv420p + AAC, `+faststart`, ≤4K) so they play on Chromecast/TV browsers; the original is
+  served until the transcode finishes. Without ffmpeg, videos are served as-is and posters
+  are skipped.
 - **openssl** (in the Docker image) — self-signs the HTTPS cert on first boot. Without it,
   HTTPS is skipped and HTTP still serves.
 - **sharp** (optional npm dependency) — image variant generation. Without it, originals

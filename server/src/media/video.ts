@@ -17,7 +17,7 @@ import { spawn } from 'node:child_process';
 import { buildFilename, newIdentity, type MediaItem } from '@4kframe/shared';
 import { MEDIA_DIR } from '../env.js';
 
-function run(cmd: string, args: string[], input?: Buffer): Promise<{ code: number; stdout: Buffer; stderr: string }> {
+export function run(cmd: string, args: string[], input?: Buffer): Promise<{ code: number; stdout: Buffer; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { stdio: ['pipe', 'pipe', 'pipe'] });
     const out: Buffer[] = [];
@@ -45,32 +45,61 @@ export async function videoProcessingAvailable(): Promise<boolean> {
   return ffmpegChecked;
 }
 
-interface Probe {
+export interface Probe {
   width: number;
   height: number;
   durationSec: number;
+  videoCodec: string;
+  audioCodec: string;
+  pixFmt: string;
+}
+
+interface FfStream {
+  codec_type?: string;
+  codec_name?: string;
+  width?: number;
+  height?: number;
+  pix_fmt?: string;
 }
 
 async function probe(file: string): Promise<Probe | null> {
   try {
     const { stdout, code } = await run('ffprobe', [
       '-v', 'error',
-      '-select_streams', 'v:0',
-      '-show_entries', 'stream=width,height:format=duration',
+      '-show_entries', 'stream=codec_type,codec_name,width,height,pix_fmt:format=duration',
       '-of', 'json',
       file,
     ]);
     if (code !== 0) return null;
-    const json = JSON.parse(stdout.toString());
-    const stream = json.streams?.[0] ?? {};
+    const json = JSON.parse(stdout.toString()) as { streams?: FfStream[]; format?: { duration?: string } };
+    const streams = json.streams ?? [];
+    const v = streams.find((s) => s.codec_type === 'video');
+    const a = streams.find((s) => s.codec_type === 'audio');
     return {
-      width: Number(stream.width) || 0,
-      height: Number(stream.height) || 0,
+      width: Number(v?.width) || 0,
+      height: Number(v?.height) || 0,
       durationSec: Number(json.format?.duration) || 0,
+      videoCodec: v?.codec_name ?? '',
+      audioCodec: a?.codec_name ?? '',
+      pixFmt: v?.pix_fmt ?? '',
     };
   } catch {
     return null;
   }
+}
+
+/**
+ * Whether a source needs transcoding to play reliably on TV browsers / Chromecast.
+ * The safe target is an H.264 (yuv420p) + AAC MP4 within 4K.
+ */
+export function needsTranscode(ext: string, p: Probe | null): boolean {
+  if (!p) return false; // couldn't probe — leave the original untouched
+  const okContainer = ext === 'mp4' || ext === 'm4v';
+  const okVideo = p.videoCodec === 'h264';
+  const okAudio = p.audioCodec === '' || p.audioCodec === 'aac';
+  const okPix = p.pixFmt === '' || p.pixFmt === 'yuv420p' || p.pixFmt === 'yuvj420p';
+  const tooBig = p.width > 3840 || p.height > 2160;
+  return tooBig || !(okContainer && okVideo && okAudio && okPix);
 }
 
 /** Ingest raw video bytes: probe, write the file, extract a poster, return a MediaItem. */
@@ -93,6 +122,7 @@ export async function ingestVideo(
   let height = 0;
   let durationSec = 0;
   let posterName: string | undefined;
+  let transcoding = false;
 
   if (available) {
     const p = await probe(tmpPath);
@@ -102,6 +132,7 @@ export async function ingestVideo(
       durationSec = p.durationSec;
     }
     posterName = await extractPoster(tmpPath, identity, width, height);
+    transcoding = needsTranscode(cleanExt, p);
   }
 
   // Rename the video file to embed real dimensions, for parity with the convention.
@@ -123,6 +154,7 @@ export async function ingestVideo(
     createdAt: Date.now(),
     source,
     caption,
+    ...(transcoding ? { transcoding: true } : {}),
   };
   return { item };
 }

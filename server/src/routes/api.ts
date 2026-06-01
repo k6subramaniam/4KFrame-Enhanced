@@ -25,6 +25,7 @@ import {
 } from '../store.js';
 import { ingestImage } from '../media/images.js';
 import { ingestVideo } from '../media/video.js';
+import { enqueueTranscode } from '../media/transcode.js';
 import { cast, next, previous, progress, getCurrent, refresh } from '../slideshow.js';
 import { hub } from '../hub.js';
 import * as gphotos from '../integrations/googlePhotos.js';
@@ -98,6 +99,7 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
         ? await ingestVideo(buf, ext, 'upload')
         : await ingestImage(buf, 'upload');
       await addItem(item);
+      enqueueTranscode(item);
       added.push(item);
     }
     refresh();
