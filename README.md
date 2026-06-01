@@ -73,19 +73,44 @@ receiver.
 Import is built on Google's **[Photo Picker API](https://developers.google.com/photos/picker)**.
 Google retired broad Library API access in March 2025, so apps can no longer list a user's
 albums or auto-sync them — instead the user explicitly **picks** the photos/videos to import,
-and the frame downloads just those. Configure OAuth on the server:
-
-```
-GOOGLE_CLIENT_ID=...
-GOOGLE_CLIENT_SECRET=...
-GOOGLE_REDIRECT_URI=http://<frame-host>:9095/api/google/callback
-```
-
-Enable the **Photos Picker API** for your Google Cloud project and add the
-`photospicker.mediaitems.readonly` scope to the OAuth consent screen. Then in the admin:
-**Connect Google Photos**, click **Import from Google Photos**, pick items in the Google UI,
-and they're imported onto the frame. (There is no automatic album sync — that capability was
+and the frame downloads just those. (There is no automatic album sync — that capability was
 removed by Google.)
+
+### 1. Create OAuth credentials (not an API key)
+The Photos Picker API authorizes per user via **OAuth 2.0** — an **API key will not work**, and
+note this is the *Photos* Picker API, not the similarly-named *Google Picker API* (a Drive widget).
+
+In [Google Cloud Console](https://console.cloud.google.com/):
+1. **APIs & Services → Library →** enable **"Photos Picker API"**.
+2. **OAuth consent screen →** add the scope `…/auth/photospicker.mediaitems.readonly`, and add
+   your Google account under **Test users** (while the app is in *Testing*).
+3. **Credentials → Create credentials → OAuth client ID → Web application.** Add an
+   **Authorized redirect URI** matching your deployment (see below). Copy the **Client ID** and
+   **Client secret**.
+
+### 2. Configure the frame
+Copy `.env.example` to `.env` (gitignored) and fill in:
+
+```
+GOOGLE_CLIENT_ID=...apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=...
+GOOGLE_REDIRECT_URI=<frame-url>/api/google/callback
+```
+
+Pick the `<frame-url>` that matches where you run it — and register that **exact** value as the
+OAuth redirect URI:
+
+| Deployment | `GOOGLE_REDIRECT_URI` |
+|---|---|
+| Docker on a LAN host | `http://<frame-host>:9095/api/google/callback` |
+| GitHub Codespace | `https://<codespace>-9095.app.github.dev/api/google/callback` |
+| Local dev | `http://localhost:9095/api/google/callback` |
+
+> **Codespace note:** set the forwarded **port 9095 to Public** during the OAuth flow, so
+> Google's redirect back to the callback isn't intercepted by GitHub's auth page.
+
+Then `docker compose up -d`. In the admin: **Connect Google Photos → Import from Google Photos**,
+pick items in Google's UI, and they're imported onto the frame.
 
 ## Casting
 
