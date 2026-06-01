@@ -1,0 +1,22 @@
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+.env
+.env.local
+*.log
+npm-debug.log*
+
+# Runtime data (media library, database, certs)
+data/
+storage/
+*.sqlite
+*.sqlite-journal
+*.db
+certs/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
