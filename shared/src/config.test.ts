@@ -43,4 +43,25 @@ test('fromApiData prefers explicit fillMode, supports legacy frameFill, validate
   assert.equal(fromApiData(portrait, { frameAspect: 'nope' }).frameAspect, '1:1');
   assert.equal(fromApiData(base, { frameAspect: '21:9' }).frameAspect, '21:9');
   assert.equal(fromApiData(base, { fillMode: 'sideways' }).fillMode, base.fillMode);
+  assert.equal(fromApiData(base, { fillMode: 'stretch' }).fillMode, 'stretch');
+});
+
+test('zoom/pan are clamped and motion is validated', () => {
+  const base = defaultConfig();
+  assert.equal(fromApiData(base, { zoom: '1.5' }).zoom, 1.5);
+  assert.equal(fromApiData(base, { zoom: '9' }).zoom, 3);       // clamp high
+  assert.equal(fromApiData(base, { zoom: '0' }).zoom, 1);       // clamp low
+  assert.equal(fromApiData(base, { panX: '2' }).panX, 1);       // clamp high
+  assert.equal(fromApiData(base, { panY: '-5' }).panY, -1);     // clamp low
+  assert.equal(fromApiData(base, { panX: '-0.4' }).panX, -0.4);
+
+  assert.equal(fromApiData(base, { motion: 'zoompan' }).motion, 'zoompan');
+  assert.equal(fromApiData(base, { motion: 'nope' }).motion, base.motion); // unknown ignored
+
+  // Round-trip through the loose payload.
+  const d = toApiData({ ...base, zoom: 2, panX: 0.5, panY: -0.25, motion: 'pan' });
+  assert.equal(d.zoom, '2');
+  assert.equal(d.motion, 'pan');
+  assert.equal(fromApiData(base, d).zoom, 2);
+  assert.equal(fromApiData(base, d).panX, 0.5);
 });

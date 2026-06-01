@@ -3,7 +3,7 @@
  * the original frame controls and adding the enhanced options.
  */
 
-import { EFFECT_PRESETS, FRAME_ASPECTS, PHOTO_PERIOD_PRESETS, TRANSITIONS, type ApiDataPayload } from '@4kframe/shared';
+import { EFFECT_PRESETS, FRAME_ASPECTS, MOTION_MODES, PHOTO_PERIOD_PRESETS, TRANSITIONS, type ApiDataPayload } from '@4kframe/shared';
 import {
   updateData,
   googleStatus,
@@ -28,8 +28,13 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload): P
   const fill = (data.frameFill ?? 'true') === 'true';
   const fillMode = data.fillMode ?? (fill ? 'cover' : 'contain');
   const frameAspect = data.frameAspect ?? 'auto';
+  const zoom = Number(data.zoom ?? 1);
+  const panX = Number(data.panX ?? 0);
+  const panY = Number(data.panY ?? 0);
+  const motion = data.motion ?? 'off';
   const qr = (data.showQr ?? 'true') === 'true';
   const aspectLabels: Record<string, string> = { auto: 'Auto', '16:9': '16:9', '9:16': '9:16 ↕', '4:3': '4:3', '3:4': '3:4 ↕', '1:1': '1:1', '21:9': '21:9' };
+  const motionLabels: Record<string, string> = { off: 'Off', zoom: 'Zoom', pan: 'Pan', zoompan: 'Zoom + Pan' };
   const transition = data.transition ?? 'fade.glsl';
   const usedMB = Math.round(Number(data.storageUsed ?? 0) / 1e6);
   const freeMB = Math.round(Number(data.storageFree ?? 0) / 1e6);
@@ -59,11 +64,23 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload): P
         { label: 'Cover', value: 'cover', active: fillMode === 'cover' },
         { label: 'Contain', value: 'contain', active: fillMode === 'contain' },
         { label: 'Blur Fill', value: 'blur', active: fillMode === 'blur' },
+        { label: 'Stretch', value: 'stretch', active: fillMode === 'stretch' },
       ])}
-      <div class="muted" style="margin-top:.4rem">Cover crops to fill · Contain letterboxes · Blur fills bars with a blurred copy.</div>
+      <div class="muted" style="margin-top:.4rem">Cover crops · Contain letterboxes · Blur fills bars · Stretch distorts to fill.</div>
       <h2 style="margin-top:1rem">Aspect Ratio</h2>
       ${seg('frameAspect', FRAME_ASPECTS.map((a) => ({ label: aspectLabels[a] ?? a, value: a, active: a === frameAspect })))}
       <div class="muted" style="margin-top:.4rem">Auto matches each screen (TV, ultrawide, square, portrait). Others force that shape, centered.</div>
+    </div>
+    <div class="panel">
+      <h2>Zoom &amp; Pan</h2>
+      <label class="field">Zoom <span class="muted" id="zoom-val">${Math.round(zoom * 100)}%</span>
+        <input type="range" id="zoom" min="100" max="300" step="5" value="${Math.round(zoom * 100)}" /></label>
+      <label class="field">Pan X <input type="range" id="panX" min="-100" max="100" step="5" value="${Math.round(panX * 100)}" /></label>
+      <label class="field">Pan Y <input type="range" id="panY" min="-100" max="100" step="5" value="${Math.round(panY * 100)}" /></label>
+      <div class="muted">Pan only has an effect when zoomed in (or content overflows the frame).</div>
+      <h2 style="margin-top:1rem">Motion (Ken Burns)</h2>
+      ${seg('motion', MOTION_MODES.map((m) => ({ label: motionLabels[m] ?? m, value: m, active: m === motion })))}
+      <div class="muted" style="margin-top:.4rem">Slowly zooms/pans each photo while it's shown.</div>
     </div>
     <div class="panel">
       <h2>QR Code</h2>
@@ -101,6 +118,16 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload): P
       });
     });
   });
+
+  // Zoom / pan sliders (range 0–300 / -100–100 map to the 1× / -1..1 config values).
+  const zoomEl = root.querySelector<HTMLInputElement>('#zoom');
+  const zoomVal = root.querySelector<HTMLElement>('#zoom-val');
+  zoomEl?.addEventListener('input', () => { if (zoomVal) zoomVal.textContent = `${zoomEl.value}%`; });
+  zoomEl?.addEventListener('change', () => updateData({ zoom: String(Number(zoomEl.value) / 100) }));
+  for (const id of ['panX', 'panY'] as const) {
+    const el = root.querySelector<HTMLInputElement>(`#${id}`);
+    el?.addEventListener('change', () => updateData({ [id]: String(Number(el.value) / 100) }));
+  }
 
   wirePickerImport(root);
 }

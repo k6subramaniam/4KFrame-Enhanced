@@ -55,10 +55,19 @@ function screenPixels(): { w: number; h: number } {
 
 function composeCurrent(items: MediaItem[]): Promise<HTMLCanvasElement> {
   const { w, h } = screenPixels();
-  return compose(items, { screenWidth: w, screenHeight: h, fillMode: config.fillMode, aspect: config.frameAspect });
+  return compose(items, {
+    screenWidth: w,
+    screenHeight: h,
+    fillMode: config.fillMode,
+    aspect: config.frameAspect,
+    zoom: config.zoom,
+    panX: config.panX,
+    panY: config.panY,
+  });
 }
 
 async function renderItems(items: MediaItem[], interactive: boolean): Promise<void> {
+  stopMotion();
   const videoItem = items.find((i) => i.kind === 'video');
   if (videoItem) {
     lastItems = null;
@@ -79,6 +88,43 @@ async function renderItems(items: MediaItem[], interactive: boolean): Promise<vo
   }
   prevFrame = toFrame;
   setCaption(items, config);
+  // Ken Burns motion only for single photos (not dual layout), and never while paused.
+  if (items.length === 1 && !paused) startMotion();
+}
+
+// --- Ken Burns ambient motion (CSS transform on the GL canvas, GPU-composited) ---
+
+let motionAnim: Animation | null = null;
+
+function stopMotion(): void {
+  motionAnim?.cancel();
+  motionAnim = null;
+  canvas.style.transform = '';
+}
+
+function startMotion(): void {
+  stopMotion();
+  if (config.motion === 'off') return;
+  const seconds = config.photoPeriod > 0 ? config.photoPeriod : 12;
+  const z = 1.18;
+  const sign = () => (Math.random() < 0.5 ? -1 : 1);
+  const px = (sign() * 3).toFixed(2);
+  const py = (sign() * 2).toFixed(2);
+  let from: string;
+  let to: string;
+  if (config.motion === 'zoom') {
+    [from, to] = ['scale(1)', `scale(${z})`];
+  } else if (config.motion === 'pan') {
+    // Pan needs a little zoom so there's room to move within the screen.
+    [from, to] = [`scale(${z}) translate(${px}%, ${py}%)`, `scale(${z}) translate(${-Number(px)}%, ${-Number(py)}%)`];
+  } else {
+    [from, to] = ['scale(1) translate(0,0)', `scale(${z}) translate(${px}%, ${py}%)`];
+  }
+  motionAnim = canvas.animate([{ transform: from }, { transform: to }], {
+    duration: seconds * 1000,
+    easing: 'ease-out',
+    fill: 'forwards',
+  });
 }
 
 async function renderVideo(item: MediaItem): Promise<void> {
@@ -100,7 +146,7 @@ function layoutVideo(item: MediaItem): void {
   video.style.top = `${r.y}px`;
   video.style.width = `${r.w}px`;
   video.style.height = `${r.h}px`;
-  video.style.objectFit = config.fillMode === 'cover' ? 'cover' : 'contain';
+  video.style.objectFit = config.fillMode === 'cover' ? 'cover' : config.fillMode === 'stretch' ? 'fill' : 'contain';
 
   // Opaque backdrop hides the stale photo behind any bars; blurred poster in blur mode.
   videoBg.classList.add('visible');
@@ -121,8 +167,9 @@ function hideVideo(): void {
   video.load();
 }
 
-/** Recompose the current content for a new screen size or fill/aspect change (no transition). */
+/** Recompose the current content for a new screen size or fill/aspect/zoom change (no transition). */
 async function rerender(): Promise<void> {
+  stopMotion();
   if (showingVideo && lastVideoItem) {
     layoutVideo(lastVideoItem);
     return;
@@ -131,6 +178,7 @@ async function rerender(): Promise<void> {
     const frame = await composeCurrent(lastItems);
     renderer.show(frame);
     prevFrame = frame;
+    if (lastItems.length === 1 && !paused) startMotion();
   }
 }
 
@@ -152,6 +200,10 @@ function handleEvent(event: FrameEvent): void {
       if (showingVideo) {
         if (paused) video.pause();
         else video.play().catch(() => undefined);
+      } else if (paused) {
+        motionAnim?.pause();
+      } else {
+        motionAnim?.play();
       }
       setStatus(paused ? '⏸ Paused' : '');
       break;
@@ -164,17 +216,54 @@ function handleEvent(event: FrameEvent): void {
 /**
  * TV remote / keyboard control. D-pad and OK on TV browsers arrive as arrow + Enter keys;
  * media remotes send the Media* keys. All control flows through the same WebSocket protocol.
+ *
+ * When zoomed in (zoom > 1), the D-pad arrows pan the image instead of navigating; zoom out
+ * to 1× to navigate again. `+`/`-` zoom, `0` resets.
  */
+function clampN(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
+}
+function adjustConfig(patch: Partial<FrameConfig>): void {
+  sendControl({ type: 'config', patch });
+}
+
 function wireRemote(): void {
   window.addEventListener('keydown', (e) => {
+    const zoomed = config.zoom > 1.01;
+    const STEP = 0.15;
     switch (e.key) {
-      case 'ArrowRight': case 'ArrowDown': case 'PageDown':
-      case 'MediaTrackNext': case 'n': case 'N':
+      case 'ArrowRight':
+        if (zoomed) adjustConfig({ panX: clampN(config.panX + STEP, -1, 1) });
+        else sendControl({ type: 'next' });
+        break;
+      case 'ArrowLeft':
+        if (zoomed) adjustConfig({ panX: clampN(config.panX - STEP, -1, 1) });
+        else sendControl({ type: 'previous' });
+        break;
+      case 'ArrowDown':
+        if (zoomed) adjustConfig({ panY: clampN(config.panY + STEP, -1, 1) });
+        else sendControl({ type: 'next' });
+        break;
+      case 'ArrowUp':
+        if (zoomed) adjustConfig({ panY: clampN(config.panY - STEP, -1, 1) });
+        else sendControl({ type: 'previous' });
+        break;
+      case 'PageDown': case 'MediaTrackNext': case 'n': case 'N':
         sendControl({ type: 'next' });
         break;
-      case 'ArrowLeft': case 'ArrowUp': case 'PageUp':
-      case 'MediaTrackPrevious': case 'p': case 'P':
+      case 'PageUp': case 'MediaTrackPrevious': case 'p': case 'P':
         sendControl({ type: 'previous' });
+        break;
+      case '+': case '=': case 'Add':
+        adjustConfig({ zoom: clampN(config.zoom + 0.2, 1, 3) });
+        break;
+      case '-': case '_': case 'Subtract': {
+        const z = clampN(config.zoom - 0.2, 1, 3);
+        adjustConfig(z <= 1.001 ? { zoom: 1, panX: 0, panY: 0 } : { zoom: z });
+        break;
+      }
+      case '0':
+        adjustConfig({ zoom: 1, panX: 0, panY: 0 });
         break;
       case 'Enter': case ' ': case 'Spacebar':
       case 'MediaPlayPause': case 'MediaPlay': case 'MediaPause':
