@@ -3,8 +3,8 @@
 An enhanced, **web-first** re-imagining of the original *4kFrame – Photo Slideshow
 Server*. It displays a looping 4K slideshow of **photos and videos** with beautiful GPU
 transitions, and is managed from any browser on your network. Compared to the original
-Android-only app it adds **video playback**, **Google Photos** (manual import *and*
-automatic album sync), and **casting** (native Google Cast, a companion PWA, and the
+Android-only app it adds **video playback**, **Google Photos** (on-demand import via
+Google's Photo Picker), and **casting** (native Google Cast, a companion PWA, and the
 classic web "cast to frame").
 
 ## Why web-first?
@@ -49,18 +49,31 @@ appears on the display.
 docker compose up --build -d   # serves admin + display + API on :9095 (and :9096 HTTPS)
 ```
 
-- Display: `http://<frame-host>:9095/`
+- Display: `http://<frame-host>:9095/` (or `https://<frame-host>:9096/`)
 - Admin:   `http://<frame-host>:9095/admin/`
+
+### HTTPS
+HTTPS is served on **:9096**. On first boot the server **self-signs** a certificate (via
+`openssl`) into the data volume, with `localhost` and the LAN IP in its SAN — browsers will
+show a one-time "not trusted" warning. To use your own (trusted) certificate, set
+`FRAME_TLS_CERT` / `FRAME_TLS_KEY` to its paths, or disable HTTPS with `FRAME_DISABLE_HTTPS=1`.
+HTTPS is required for PWA install and to serve the display as a publicly reachable Cast
+receiver.
 
 ### Runtime dependencies
 - **ffmpeg** (in the Docker image) — video posters & transcoding. Without it, videos are
   served as-is and posters are skipped.
+- **openssl** (in the Docker image) — self-signs the HTTPS cert on first boot. Without it,
+  HTTPS is skipped and HTTP still serves.
 - **sharp** (optional npm dependency) — image variant generation. Without it, originals
   are served as-is.
 
 ## Google Photos
 
-Set on the server to enable import + auto-sync:
+Import is built on Google's **[Photo Picker API](https://developers.google.com/photos/picker)**.
+Google retired broad Library API access in March 2025, so apps can no longer list a user's
+albums or auto-sync them — instead the user explicitly **picks** the photos/videos to import,
+and the frame downloads just those. Configure OAuth on the server:
 
 ```
 GOOGLE_CLIENT_ID=...
@@ -68,8 +81,11 @@ GOOGLE_CLIENT_SECRET=...
 GOOGLE_REDIRECT_URI=http://<frame-host>:9095/api/google/callback
 ```
 
-Then **Connect Google Photos** in the admin, pick albums to auto-sync, or import items
-on demand.
+Enable the **Photos Picker API** for your Google Cloud project and add the
+`photospicker.mediaitems.readonly` scope to the OAuth consent screen. Then in the admin:
+**Connect Google Photos**, click **Import from Google Photos**, pick items in the Google UI,
+and they're imported onto the frame. (There is no automatic album sync — that capability was
+removed by Google.)
 
 ## Casting
 

@@ -1,14 +1,19 @@
 /**
- * Google Photos integration.
+ * Google Photos integration — Picker API.
  *
- * Supports BOTH usage modes requested:
- *   - Manual import: list albums / recent media and import selected items on demand.
- *   - Auto-sync: a scheduled worker pulls new media from selected albums.
+ * Google retired broad Library API access in March 2025: third-party apps can no longer
+ * list a user's albums or search their whole library. The supported path is now the
+ * **Photos Picker API**, where the user explicitly selects items in Google's own UI and the
+ * app imports just those. This is on-demand selection — there is no album auto-sync.
  *
- * The OAuth2 + Library API calls are implemented for real and become active once
- * `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are provided in the environment.
- * Without credentials the module reports `configured: false` so the admin UI can guide
- * the user through setup, and the rest of the server runs unaffected.
+ * Flow:
+ *   1. createSession()  -> returns a `pickerUri` the user opens to pick photos.
+ *   2. getSession(id)   -> poll until `mediaItemsSet` is true.
+ *   3. importSession(id)-> list the picked items, download each (Bearer-authenticated),
+ *                          ingest into the library, then delete the session.
+ *
+ * OAuth2 becomes active once `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` are set; without
+ * them the module reports `configured: false` and the rest of the server runs unaffected.
  */
 
 import {
@@ -26,8 +31,8 @@ import { refresh } from '../slideshow.js';
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI ?? 'http://localhost:9095/api/google/callback';
-const SCOPE = 'https://www.googleapis.com/auth/photoslibrary.readonly';
-const API = 'https://photoslibrary.googleapis.com/v1';
+const SCOPE = 'https://www.googleapis.com/auth/photospicker.mediaitems.readonly';
+const PICKER_API = 'https://photospicker.googleapis.com/v1';
 
 export function isConfigured(): boolean {
   return Boolean(CLIENT_ID && CLIENT_SECRET);
@@ -75,6 +80,13 @@ export async function handleCallback(code: string): Promise<void> {
   await setConfig({ ...cfg, googlePhotos: { ...cfg.googlePhotos, connected: true } });
 }
 
+/** Disconnect the account (clears stored tokens). */
+export async function disconnect(): Promise<void> {
+  await setGoogleTokens(undefined);
+  const cfg = getConfig();
+  await setConfig({ ...cfg, googlePhotos: { ...cfg.googlePhotos, connected: false } });
+}
+
 async function accessToken(): Promise<string> {
   const tokens = getGoogleTokens();
   if (!tokens) throw new Error('Google Photos not connected');
@@ -95,122 +107,145 @@ async function accessToken(): Promise<string> {
   return json.access_token;
 }
 
-export interface GoogleAlbum {
+// --- Picker sessions ---
+
+interface PickerSession {
   id: string;
-  title: string;
-  mediaItemsCount?: string;
-  coverPhotoBaseUrl?: string;
+  pickerUri: string;
+  mediaItemsSet?: boolean;
+  pollingConfig?: { pollInterval?: string; timeoutIn?: string };
 }
 
-export async function listAlbums(): Promise<GoogleAlbum[]> {
+/** Public summary returned to the admin to drive the picker UI. */
+export interface PickerSessionInfo {
+  id: string;
+  pickerUri: string;
+  mediaItemsSet: boolean;
+  /** Recommended poll interval in milliseconds. */
+  pollIntervalMs: number;
+}
+
+function toInfo(s: PickerSession): PickerSessionInfo {
+  return {
+    id: s.id,
+    pickerUri: s.pickerUri,
+    mediaItemsSet: Boolean(s.mediaItemsSet),
+    pollIntervalMs: durationToMs(s.pollingConfig?.pollInterval, 3000),
+  };
+}
+
+/** Create a Picker session; the user opens `pickerUri` to choose media. */
+export async function createSession(): Promise<PickerSessionInfo> {
   const token = await accessToken();
-  const albums: GoogleAlbum[] = [];
+  const res = await fetch(`${PICKER_API}/sessions`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: '{}',
+  });
+  if (!res.ok) throw new Error(`Picker session create failed: ${res.status}`);
+  return toInfo((await res.json()) as PickerSession);
+}
+
+/** Poll a Picker session to learn whether the user has finished selecting. */
+export async function getSession(id: string): Promise<PickerSessionInfo> {
+  const token = await accessToken();
+  const res = await fetch(`${PICKER_API}/sessions/${encodeURIComponent(id)}`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`Picker session poll failed: ${res.status}`);
+  return toInfo((await res.json()) as PickerSession);
+}
+
+/** Delete a Picker session (best-effort cleanup). */
+export async function deleteSession(id: string): Promise<void> {
+  try {
+    const token = await accessToken();
+    await fetch(`${PICKER_API}/sessions/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${token}` },
+    });
+  } catch {
+    /* ignore cleanup failures */
+  }
+}
+
+// --- Picked media import ---
+
+interface PickedMediaItem {
+  id: string;
+  type?: string; // 'PHOTO' | 'VIDEO' | 'TYPE_UNSPECIFIED'
+  mediaFile?: {
+    baseUrl?: string;
+    mimeType?: string;
+    filename?: string;
+  };
+}
+
+async function listPickedItems(sessionId: string): Promise<PickedMediaItem[]> {
+  const token = await accessToken();
+  const items: PickedMediaItem[] = [];
   let pageToken: string | undefined;
   do {
-    const url = new URL(`${API}/albums`);
-    url.searchParams.set('pageSize', '50');
+    const url = new URL(`${PICKER_API}/mediaItems`);
+    url.searchParams.set('sessionId', sessionId);
+    url.searchParams.set('pageSize', '100');
     if (pageToken) url.searchParams.set('pageToken', pageToken);
     const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
     if (!res.ok) break;
-    const json = (await res.json()) as { albums?: GoogleAlbum[]; nextPageToken?: string };
-    albums.push(...(json.albums ?? []));
-    pageToken = json.nextPageToken;
-  } while (pageToken);
-  return albums;
-}
-
-interface GoogleMediaItem {
-  id: string;
-  baseUrl: string;
-  mimeType: string;
-  filename: string;
-  mediaMetadata?: { width?: string; height?: string };
-}
-
-async function mediaItemsForAlbum(albumId: string): Promise<GoogleMediaItem[]> {
-  const token = await accessToken();
-  const items: GoogleMediaItem[] = [];
-  let pageToken: string | undefined;
-  do {
-    const res = await fetch(`${API}/mediaItems:search`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ albumId, pageSize: 100, pageToken }),
-    });
-    if (!res.ok) break;
-    const json = (await res.json()) as { mediaItems?: GoogleMediaItem[]; nextPageToken?: string };
+    const json = (await res.json()) as { mediaItems?: PickedMediaItem[]; nextPageToken?: string };
     items.push(...(json.mediaItems ?? []));
     pageToken = json.nextPageToken;
   } while (pageToken);
   return items;
 }
 
-/** Download a Google media item at full resolution and ingest it into the library. */
-async function importMediaItem(m: GoogleMediaItem): Promise<void> {
-  const isVideo = m.mimeType.startsWith('video/');
-  // `=d` downloads the original bytes; `=w<n>-h<n>` would size an image.
-  const downloadUrl = isVideo ? `${m.baseUrl}=dv` : `${m.baseUrl}=d`;
-  const res = await fetch(downloadUrl);
-  if (!res.ok) throw new Error(`Download failed for ${m.filename}: ${res.status}`);
+/** Download one picked item at full resolution and ingest it into the library. */
+async function importPicked(m: PickedMediaItem): Promise<void> {
+  const file = m.mediaFile;
+  if (!file?.baseUrl) throw new Error('picked item missing baseUrl');
+  const isVideo = m.type === 'VIDEO' || Boolean(file.mimeType?.startsWith('video/'));
+  // Picker baseUrls require the OAuth bearer token and a download suffix (=d photo, =dv video).
+  const token = await accessToken();
+  const res = await fetch(`${file.baseUrl}=${isVideo ? 'dv' : 'd'}`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`download failed (${res.status}) for ${file.filename ?? m.id}`);
   const buf = Buffer.from(await res.arrayBuffer());
+  const filename = file.filename ?? `${m.id}.${isVideo ? 'mp4' : 'jpg'}`;
   const { item } = isVideo
-    ? await ingestVideo(buf, m.filename.split('.').pop() ?? 'mp4', 'google-photos', m.filename)
-    : await ingestImage(buf, 'google-photos', m.filename);
+    ? await ingestVideo(buf, filename.split('.').pop() ?? 'mp4', 'google-photos', filename)
+    : await ingestImage(buf, 'google-photos', filename);
   await addItem(item);
 }
 
-/** Import a specific set of media items (manual import flow). */
-export async function importItems(items: GoogleMediaItem[]): Promise<number> {
-  let n = 0;
-  for (const m of items) {
+/**
+ * Import all items the user picked in a session, then delete the session.
+ * Returns the number of items successfully imported.
+ */
+export async function importSession(sessionId: string): Promise<number> {
+  const picked = await listPickedItems(sessionId);
+  let imported = 0;
+  for (const m of picked) {
     try {
-      await importMediaItem(m);
-      n++;
+      await importPicked(m);
+      imported++;
     } catch (err) {
       hub.emitEvent({ type: 'log', level: 'warn', message: `Google import skipped: ${(err as Error).message}` });
     }
   }
-  if (n) refresh();
-  return n;
-}
-
-/** Run one auto-sync pass over the configured albums. */
-export async function syncAlbums(): Promise<number> {
-  if (!isConnected()) return 0;
-  const cfg = getConfig();
-  let imported = 0;
-  for (const albumId of cfg.googlePhotos.syncAlbumIds) {
-    const media = await mediaItemsForAlbum(albumId);
-    imported += await importItems(media);
+  if (imported) {
+    const cfg = getConfig();
+    await setConfig({ ...cfg, googlePhotos: { ...cfg.googlePhotos, lastImportAt: Date.now() } });
+    refresh();
+    hub.emitEvent({ type: 'log', level: 'info', message: `Google Photos import added ${imported} item(s)` });
   }
-  await setConfig({ ...cfg, googlePhotos: { ...cfg.googlePhotos, lastSyncAt: Date.now() } });
+  await deleteSession(sessionId);
   return imported;
 }
 
-let syncTimer: NodeJS.Timeout | undefined;
-
-/** Start the background auto-sync worker honouring the configured interval. */
-export function startSyncWorker(): void {
-  const tick = async () => {
-    const cfg = getConfig();
-    const minutes = cfg.googlePhotos.syncIntervalMinutes;
-    if (isConnected() && minutes > 0 && cfg.googlePhotos.syncAlbumIds.length) {
-      try {
-        const n = await syncAlbums();
-        if (n) hub.emitEvent({ type: 'log', level: 'info', message: `Google Photos sync imported ${n} item(s)` });
-      } catch (err) {
-        hub.emitEvent({ type: 'log', level: 'error', message: `Google Photos sync failed: ${(err as Error).message}` });
-      }
-    }
-    const next = Math.max(1, getConfig().googlePhotos.syncIntervalMinutes || 60);
-    syncTimer = setTimeout(tick, next * 60_000);
-  };
-  // First pass shortly after boot, then on the configured cadence.
-  syncTimer = setTimeout(tick, 10_000);
+/** Parse a protobuf Duration string (e.g. "3s", "2.5s") to milliseconds. */
+function durationToMs(value: string | undefined, fallback: number): number {
+  if (!value) return fallback;
+  const seconds = Number(value.endsWith('s') ? value.slice(0, -1) : value);
+  return Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds * 1000) : fallback;
 }
-
-export function stopSyncWorker(): void {
-  if (syncTimer) clearTimeout(syncTimer);
-}
-
-export type { GoogleMediaItem };

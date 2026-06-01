@@ -21,15 +21,25 @@ export const HTTP_PORT = Number(process.env.FRAME_HTTP_PORT ?? DEFAULT_HTTP_PORT
 export const HTTPS_PORT = Number(process.env.FRAME_HTTPS_PORT ?? DEFAULT_HTTPS_PORT);
 export const HOST = process.env.FRAME_HOST ?? '0.0.0.0';
 
-/** Best-effort LAN address used for the QR code and `lanAddress` config field. */
-export function detectLanAddress(port: number = HTTP_PORT): string {
+/** HTTPS is served on {@link HTTPS_PORT} unless explicitly disabled. */
+export const HTTPS_ENABLED = process.env.FRAME_DISABLE_HTTPS !== '1';
+/** TLS material. Point these at your own cert/key, or leave unset to auto self-sign. */
+export const TLS_CERT_FILE = process.env.FRAME_TLS_CERT ?? path.join(DATA_DIR, 'cert.pem');
+export const TLS_KEY_FILE = process.env.FRAME_TLS_KEY ?? path.join(DATA_DIR, 'key.pem');
+
+/** Best-effort LAN IPv4 address (used for the QR code and the cert's SAN). */
+export function detectLanIp(): string | null {
   const ifaces = os.networkInterfaces();
   for (const name of Object.keys(ifaces)) {
     for (const net of ifaces[name] ?? []) {
-      if (net.family === 'IPv4' && !net.internal) {
-        return `http://${net.address}:${port}`;
-      }
+      if (net.family === 'IPv4' && !net.internal) return net.address;
     }
   }
-  return `http://localhost:${port}`;
+  return null;
+}
+
+/** Best-effort LAN address used for the QR code and `lanAddress` config field. */
+export function detectLanAddress(port: number = HTTP_PORT): string {
+  const ip = detectLanIp();
+  return ip ? `http://${ip}:${port}` : `http://localhost:${port}`;
 }

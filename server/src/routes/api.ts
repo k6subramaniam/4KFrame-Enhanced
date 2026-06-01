@@ -124,12 +124,28 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
     return reply.redirect('/admin/');
   });
 
-  app.get('/api/google/albums', async (_req, reply) => {
-    if (!gphotos.isConnected()) return reply.code(400).send({ error: 'not connected' });
-    return { albums: await gphotos.listAlbums() };
+  app.get('/api/google/disconnect', async (_req, reply) => {
+    await gphotos.disconnect();
+    return reply.redirect('/admin/');
   });
 
-  app.post('/api/google/sync', async () => ({ imported: await gphotos.syncAlbums() }));
+  // Picker API: create a selection session, poll it, then import the picked items.
+  app.post('/api/google/picker/session', async (_req, reply) => {
+    if (!gphotos.isConnected()) return reply.code(400).send({ error: 'not connected' });
+    return gphotos.createSession();
+  });
+
+  app.get('/api/google/picker/session/:id', async (req, reply) => {
+    if (!gphotos.isConnected()) return reply.code(400).send({ error: 'not connected' });
+    return gphotos.getSession((req.params as { id: string }).id);
+  });
+
+  app.post('/api/google/picker/session/:id/import', async (req, reply) => {
+    if (!gphotos.isConnected()) return reply.code(400).send({ error: 'not connected' });
+    const imported = await gphotos.importSession((req.params as { id: string }).id);
+    if (imported) hub.emitEvent({ type: 'library', items: listItems() });
+    return { imported };
+  });
 
   // --- Logs (replaces original `/api/logcat`) ---
   app.get('/api/logs', async (_req, reply) => {

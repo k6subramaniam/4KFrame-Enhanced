@@ -6,32 +6,38 @@
  *  - the WebSocket control/event channel
  *  - raw media under /photos
  *  - the built display SPA (also the Chromecast receiver) and admin PWA, when present
+ *
+ * Listens on HTTP ({@link HTTP_PORT}) and, unless disabled, HTTPS ({@link HTTPS_PORT}) with
+ * a self-signed certificate. Both listeners are independent Fastify instances sharing the
+ * same in-process state (store, event hub, slideshow), so a client on either protocol sees
+ * the same frame.
  */
 
 import { existsSync } from 'node:fs';
-import Fastify from 'fastify';
+import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import fastifyMultipart from '@fastify/multipart';
 import fastifyWebsocket from '@fastify/websocket';
-import { MEDIA_DIR, DISPLAY_DIST, ADMIN_DIST, HTTP_PORT, HOST, detectLanAddress } from './env.js';
+import {
+  MEDIA_DIR, DISPLAY_DIST, ADMIN_DIST,
+  HTTP_PORT, HTTPS_PORT, HOST, HTTPS_ENABLED,
+  detectLanAddress, detectLanIp,
+} from './env.js';
 import { initStore, getConfig, setConfig } from './store.js';
 import { registerApi } from './routes/api.js';
 import { registerWs } from './ws.js';
 import { startSlideshow } from './slideshow.js';
-import { startSyncWorker } from './integrations/googlePhotos.js';
 import { imageProcessingAvailable } from './media/images.js';
 import { videoProcessingAvailable } from './media/video.js';
+import { loadOrCreateTls, type TlsMaterial } from './tls.js';
 
-async function main(): Promise<void> {
-  await initStore();
-
-  // Record the LAN address for the QR code / config payload.
-  const cfg = getConfig();
-  if (!cfg.lanAddress) {
-    await setConfig({ ...cfg, lanAddress: detectLanAddress(HTTP_PORT) });
-  }
-
-  const app = Fastify({ logger: true, bodyLimit: 1024 * 1024 * 512 });
+/** Build a fully-configured Fastify instance. Pass TLS material to serve HTTPS. */
+async function buildApp(https?: TlsMaterial): Promise<FastifyInstance> {
+  const app = Fastify({
+    logger: true,
+    bodyLimit: 1024 * 1024 * 512,
+    ...(https ? { https } : {}),
+  });
 
   await app.register(fastifyMultipart, { limits: { fileSize: 1024 * 1024 * 1024 } });
   await app.register(fastifyWebsocket);
@@ -57,16 +63,47 @@ async function main(): Promise<void> {
     videoProcessing: await videoProcessingAvailable(),
   }));
 
-  startSlideshow();
-  startSyncWorker();
+  return app;
+}
 
-  await app.listen({ port: HTTP_PORT, host: HOST });
-  app.log.info(`4KFrame Enhanced listening on ${detectLanAddress(HTTP_PORT)}`);
+async function main(): Promise<void> {
+  await initStore();
+
+  // Record the LAN address for the QR code / config payload.
+  const cfg = getConfig();
+  if (!cfg.lanAddress) {
+    await setConfig({ ...cfg, lanAddress: detectLanAddress(HTTP_PORT) });
+  }
+
+  // HTTP listener.
+  const httpApp = await buildApp();
+  await httpApp.listen({ port: HTTP_PORT, host: HOST });
+  httpApp.log.info(`4KFrame Enhanced listening on ${detectLanAddress(HTTP_PORT)}`);
+
+  // HTTPS listener (self-signed by default). Best-effort: HTTP keeps working if it fails.
+  if (HTTPS_ENABLED) {
+    const lanIp = detectLanIp();
+    const tls = await loadOrCreateTls(lanIp ? [lanIp] : []);
+    if (tls) {
+      try {
+        const httpsApp = await buildApp(tls);
+        await httpsApp.listen({ port: HTTPS_PORT, host: HOST });
+        httpsApp.log.info(`HTTPS listening on https://${lanIp ?? 'localhost'}:${HTTPS_PORT}`);
+      } catch (err) {
+        httpApp.log.warn(`HTTPS listener failed to start: ${(err as Error).message}`);
+      }
+    } else {
+      httpApp.log.warn('HTTPS disabled — no certificate found and `openssl` unavailable to generate one.');
+    }
+  }
+
+  startSlideshow();
+
   if (!(await imageProcessingAvailable())) {
-    app.log.warn('sharp not available — image variants will not be generated (originals served as-is).');
+    httpApp.log.warn('sharp not available — image variants will not be generated (originals served as-is).');
   }
   if (!(await videoProcessingAvailable())) {
-    app.log.warn('ffmpeg not found — video posters/transcoding disabled (videos served as-is).');
+    httpApp.log.warn('ffmpeg not found — video posters/transcoding disabled (videos served as-is).');
   }
 }
 

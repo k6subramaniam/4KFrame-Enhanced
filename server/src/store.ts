@@ -119,10 +119,6 @@ export async function promoteItem(id: string): Promise<void> {
   await flush();
 }
 
-export function hasGoogleItem(googleId: string): boolean {
-  return db().items.some((i) => i.source === 'google-photos' && i.id === googleId);
-}
-
 // --- Google tokens ---
 
 export function getGoogleTokens(): DbDocument['googleTokens'] {
