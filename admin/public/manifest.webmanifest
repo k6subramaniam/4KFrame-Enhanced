@@ -1,0 +1,16 @@
+{
+  "name": "4KFrame Admin",
+  "short_name": "4KFrame",
+  "start_url": "/admin/",
+  "scope": "/admin/",
+  "display": "standalone",
+  "background_color": "#0b0d12",
+  "theme_color": "#0b0d12",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='28' fill='%234c8dff'/%3E%3Ctext x='96' y='126' font-size='84' font-family='sans-serif' fill='white' text-anchor='middle'%3E4K%3C/text%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    }
+  ]
+}

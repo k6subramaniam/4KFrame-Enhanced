@@ -1,0 +1,6 @@
+{
+  "_comment": "Register this receiver at https://cast.google.com/publish and paste the generated application id below. The 'url' must be an HTTPS endpoint serving the built /display app.",
+  "applicationId": "REPLACE_WITH_CAST_APP_ID",
+  "url": "https://your-frame.example/",
+  "type": "CUSTOM_RECEIVER"
+}

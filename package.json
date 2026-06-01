@@ -1,0 +1,28 @@
+{
+  "name": "4kframe-enhanced",
+  "private": true,
+  "version": "0.1.0",
+  "description": "An enhanced, web-first re-imagining of the 4kFrame photo & video slideshow server with Google Photos and casting support.",
+  "type": "module",
+  "workspaces": [
+    "shared",
+    "server",
+    "display",
+    "admin"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace shared && npm run build --workspace server && npm run build --workspace display && npm run build --workspace admin",
+    "build:shared": "npm run build --workspace shared",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "dev:server": "npm run dev --workspace server",
+    "dev:display": "npm run dev --workspace display",
+    "dev:admin": "npm run dev --workspace admin",
+    "start": "npm run start --workspace server"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}
