@@ -102,6 +102,15 @@ export async function addItem(item: MediaItem): Promise<MediaItem> {
   return item;
 }
 
+/** Shallow-merge a patch onto an existing item (e.g. swap `file` after transcoding). */
+export async function updateItem(id: string, patch: Partial<MediaItem>): Promise<MediaItem | undefined> {
+  const item = db().items.find((i) => i.id === id);
+  if (!item) return undefined;
+  Object.assign(item, patch);
+  await flush();
+  return item;
+}
+
 export async function removeItem(id: string): Promise<MediaItem | undefined> {
   const d = db();
   const idx = d.items.findIndex((i) => i.id === id);

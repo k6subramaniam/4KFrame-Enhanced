@@ -25,6 +25,7 @@ import {
 } from '../store.js';
 import { ingestImage } from '../media/images.js';
 import { ingestVideo } from '../media/video.js';
+import { enqueueTranscode } from '../media/transcode.js';
 import { hub } from '../hub.js';
 import { refresh } from '../slideshow.js';
 
@@ -216,6 +217,7 @@ async function importPicked(m: PickedMediaItem): Promise<void> {
     ? await ingestVideo(buf, filename.split('.').pop() ?? 'mp4', 'google-photos', filename)
     : await ingestImage(buf, 'google-photos', filename);
   await addItem(item);
+  enqueueTranscode(item);
 }
 
 /**

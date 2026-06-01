@@ -30,7 +30,8 @@ function renderGrid(): void {
     const tile = document.createElement('div');
     tile.className = `tile ${mode}`;
     tile.innerHTML = `<img loading="lazy" src="${thumbUrl(item)}" alt="" />` +
-      (item.kind === 'video' ? '<span class="badge">▶ video</span>' : '');
+      (item.kind === 'video' ? '<span class="badge">▶ video</span>' : '') +
+      (item.transcoding ? '<span class="badge badge-proc">⏳ processing</span>' : '');
     tile.addEventListener('click', () => onTileClick(item));
     grid.appendChild(tile);
   }
