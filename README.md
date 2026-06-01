@@ -125,16 +125,20 @@ pick items in Google's UI, and they're imported onto the frame.
 ### TV remote / keyboard control
 When the display is open in a TV browser, the remote drives it directly:
 **→ / ↓ / Next = next**, **← / ↑ / Prev = previous**, **OK / Play-Pause = pause/resume**
-(pausing stops auto-advance and pauses the current video). Pause state is shared, so all
-displays and any Cast sender stay in sync.
+(pausing stops auto-advance and pauses the current video). **`+` / `-` zoom**, and once
+zoomed in the **arrows pan** the image (zoom back to 1× to navigate again); **`0` resets**.
+Pause state is shared, so all displays and any Cast sender stay in sync.
 
 ### Aspect ratios & framing
 Every display composes each frame to **its own real screen**, so the same library casts
 correctly to 16:9 TVs, ultrawide, 4:3, square, and portrait frames — and multiple displays
-of different shapes can run at once, each framed correctly. In **Admin → Scaling** choose how
-content fits — **Cover** (crop to fill), **Contain** (letterbox), or **Blur Fill** (a blurred,
-zoomed copy fills the bars) — and an **Aspect Ratio**: **Auto** (match each screen) or a forced
-shape (16:9, 9:16, 4:3, 3:4, 1:1, 21:9) centered within the screen.
+of different shapes can run at once, each framed correctly. In **Admin → Scaling**:
+
+- **Fit:** **Cover** (crop to fill) · **Contain** (letterbox) · **Blur Fill** (a blurred, zoomed
+  copy fills the bars) · **Stretch** (distort to fill).
+- **Aspect Ratio:** **Auto** (match each screen) or a forced shape (16:9, 9:16, 4:3, 3:4, 1:1, 21:9).
+- **Zoom & Pan:** a manual zoom level (1–3×) and pan position, settable from Admin sliders or the remote.
+- **Motion (Ken Burns):** Off / Zoom / Pan / Zoom+Pan — a slow ambient zoom-and-pan across each photo.
 
 ## API (original-compatible)
 

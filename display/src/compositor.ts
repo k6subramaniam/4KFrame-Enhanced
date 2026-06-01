@@ -24,6 +24,11 @@ export interface ComposeOptions {
   screenHeight: number;
   fillMode: FillMode;
   aspect: FrameAspect;
+  /** Manual zoom factor (1 = none). */
+  zoom: number;
+  /** Manual pan -1..1 (0 = centered), applied within any overflow. */
+  panX: number;
+  panY: number;
 }
 
 export interface Rect {
@@ -64,23 +69,46 @@ export function contentRect(screenW: number, screenH: number, aspect: FrameAspec
   return { x: (screenW - w) / 2, y: (screenH - h) / 2, w, h };
 }
 
+/** Image transform within a rect: base fit (cover/contain/stretch) × zoom, with pan. */
+interface Transform {
+  fit: 'cover' | 'contain' | 'stretch';
+  zoom: number;
+  panX: number;
+  panY: number;
+}
+
 function drawCover(ctx: CanvasRenderingContext2D, img: HTMLImageElement, r: Rect): void {
-  const scale = Math.max(r.w / img.width, r.h / img.height);
-  const dw = img.width * scale;
-  const dh = img.height * scale;
+  drawTransformed(ctx, img, r, { fit: 'cover', zoom: 1, panX: 0, panY: 0 });
+}
+
+/**
+ * Draw `img` into rect `r` applying fit + zoom + pan, clipped to the rect.
+ * Pan moves the image within whatever overflows the rect (no effect when it fits exactly).
+ */
+function drawTransformed(ctx: CanvasRenderingContext2D, img: HTMLImageElement, r: Rect, t: Transform): void {
+  let dw: number;
+  let dh: number;
+  if (t.fit === 'stretch') {
+    dw = r.w * t.zoom;
+    dh = r.h * t.zoom;
+  } else {
+    const base = t.fit === 'cover'
+      ? Math.max(r.w / img.width, r.h / img.height)
+      : Math.min(r.w / img.width, r.h / img.height);
+    const scale = base * t.zoom;
+    dw = img.width * scale;
+    dh = img.height * scale;
+  }
+  const overflowX = Math.max(0, dw - r.w);
+  const overflowY = Math.max(0, dh - r.h);
+  const dx = r.x + (r.w - dw) / 2 - (t.panX * overflowX) / 2;
+  const dy = r.y + (r.h - dh) / 2 - (t.panY * overflowY) / 2;
   ctx.save();
   ctx.beginPath();
   ctx.rect(r.x, r.y, r.w, r.h);
   ctx.clip();
-  ctx.drawImage(img, r.x + (r.w - dw) / 2, r.y + (r.h - dh) / 2, dw, dh);
+  ctx.drawImage(img, dx, dy, dw, dh);
   ctx.restore();
-}
-
-function drawContain(ctx: CanvasRenderingContext2D, img: HTMLImageElement, r: Rect): void {
-  const scale = Math.min(r.w / img.width, r.h / img.height);
-  const dw = img.width * scale;
-  const dh = img.height * scale;
-  ctx.drawImage(img, r.x + (r.w - dw) / 2, r.y + (r.h - dh) / 2, dw, dh);
 }
 
 /** Fill the whole canvas with a blurred, screen-covering copy of the image. */
@@ -129,10 +157,10 @@ export async function compose(items: MediaItem[], opts: ComposeOptions): Promise
     const [a, b] = splitRect(rect);
     drawCover(ctx, valid[0], a);
     drawCover(ctx, valid[1], b);
-  } else if (opts.fillMode === 'cover') {
-    drawCover(ctx, valid[0], rect);
   } else {
-    drawContain(ctx, valid[0], rect);
+    // blur shows the sharp image "contained" over the blurred background; others use their mode.
+    const fit = opts.fillMode === 'blur' ? 'contain' : opts.fillMode;
+    drawTransformed(ctx, valid[0], rect, { fit, zoom: opts.zoom, panX: opts.panX, panY: opts.panY });
   }
   return canvas;
 }

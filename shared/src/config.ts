@@ -43,9 +43,16 @@ export interface GooglePhotosConfig {
   lastImportAt?: number;
 }
 
-/** How a photo/video is fitted to the frame when its aspect differs from the screen. */
-export const FILL_MODES = ['cover', 'contain', 'blur'] as const;
+/**
+ * How a photo/video is fitted to the frame when its aspect differs from the screen:
+ * cover (crop), contain (letterbox), blur (blurred-fill), stretch (distort to fill).
+ */
+export const FILL_MODES = ['cover', 'contain', 'blur', 'stretch'] as const;
 export type FillMode = (typeof FILL_MODES)[number];
+
+/** Ken Burns ambient motion applied to each photo while it's shown. */
+export const MOTION_MODES = ['off', 'zoom', 'pan', 'zoompan'] as const;
+export type MotionMode = (typeof MOTION_MODES)[number];
 
 /**
  * Target frame aspect. `auto` matches each display's real screen (so the same library casts
@@ -97,10 +104,17 @@ export interface FrameConfig {
   transition: TransitionName | string;
   /** Legacy boolean (cover vs contain). Mirrors {@link fillMode}; kept for original tooling. */
   frameFill: boolean;
-  /** How content is fitted: cover (crop), contain (letterbox), or blur (blurred-fill). */
+  /** How content is fitted: cover, contain, blur, or stretch. */
   fillMode: FillMode;
   /** Target frame aspect; `auto` follows each display's real screen. */
   frameAspect: FrameAspect;
+  /** Manual zoom factor (1 = none … 3 = 3×), applied on top of the fill mode. */
+  zoom: number;
+  /** Manual pan when zoomed/overflowing: -1 (left/top) … 0 (center) … 1 (right/bottom). */
+  panX: number;
+  panY: number;
+  /** Ken Burns ambient motion on each photo. */
+  motion: MotionMode;
   frameWidth: number;
   frameHeight: number;
   showInfo: boolean;
@@ -134,6 +148,10 @@ export function defaultConfig(): FrameConfig {
     frameFill: true,
     fillMode: 'cover',
     frameAspect: 'auto',
+    zoom: 1,
+    panX: 0,
+    panY: 0,
+    motion: 'off',
     frameWidth: 3840,
     frameHeight: 2160,
     showInfo: true,
@@ -165,6 +183,10 @@ export function toApiData(c: FrameConfig): ApiDataPayload {
     frameFill: String(c.fillMode === 'cover'),
     fillMode: c.fillMode,
     frameAspect: c.frameAspect,
+    zoom: String(c.zoom),
+    panX: String(c.panX),
+    panY: String(c.panY),
+    motion: c.motion,
     frameWidth: String(c.frameWidth),
     frameHeight: String(c.frameHeight),
     showInfo: String(c.showInfo),
@@ -192,6 +214,12 @@ function parseFillMode(patch: ApiDataPayload, fallback: FillMode): FillMode {
 function parseAspect(v: string | undefined, fallback: FrameAspect): FrameAspect {
   return v && (FRAME_ASPECTS as readonly string[]).includes(v) ? (v as FrameAspect) : fallback;
 }
+
+function parseMotion(v: string | undefined, fallback: MotionMode): MotionMode {
+  return v && (MOTION_MODES as readonly string[]).includes(v) ? (v as MotionMode) : fallback;
+}
+
+const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
 const num = (v: string | undefined, fallback: number) => {
   const n = v === undefined ? NaN : Number(v);
   return Number.isFinite(n) ? n : fallback;
@@ -208,6 +236,10 @@ export function fromApiData(current: FrameConfig, patch: ApiDataPayload): FrameC
     transition: patch.transition ?? current.transition,
     fillMode: parseFillMode(patch, current.fillMode),
     frameAspect: parseAspect(patch.frameAspect, current.frameAspect),
+    zoom: clamp(num(patch.zoom, current.zoom), 1, 3),
+    panX: clamp(num(patch.panX, current.panX), -1, 1),
+    panY: clamp(num(patch.panY, current.panY), -1, 1),
+    motion: parseMotion(patch.motion, current.motion),
     frameFill: parseFillMode(patch, current.fillMode) === 'cover',
     frameWidth: num(patch.frameWidth, current.frameWidth),
     frameHeight: num(patch.frameHeight, current.frameHeight),
