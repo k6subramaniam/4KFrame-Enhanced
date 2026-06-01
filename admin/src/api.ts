@@ -27,10 +27,20 @@ export async function deleteItem(id: string): Promise<void> {
   await fetch(`/api/delete/${id}`);
 }
 
-export async function upload(files: FileList | File[]): Promise<void> {
+export interface UploadResult {
+  ok: boolean;
+  added: MediaItem[];
+  errors?: { filename: string; error: string }[];
+}
+
+export async function upload(files: FileList | File[]): Promise<UploadResult> {
   const form = new FormData();
   for (const f of Array.from(files)) form.append('file', f, f.name);
-  await fetch('/api/upload', { method: 'POST', body: form });
+  const res = await fetch('/api/upload', { method: 'POST', body: form });
+  if (!res.ok) {
+    return { ok: false, added: [], errors: [{ filename: '', error: `server responded ${res.status}` }] };
+  }
+  return (await res.json()) as UploadResult;
 }
 
 export interface GoogleStatus {

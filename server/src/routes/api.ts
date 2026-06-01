@@ -91,20 +91,38 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
   app.post('/api/upload', async (req, reply) => {
     if (!req.isMultipart()) return reply.code(400).send({ error: 'expected multipart/form-data' });
     const added: MediaItem[] = [];
+    const errors: { filename: string; error: string }[] = [];
     for await (const part of req.parts()) {
       if (part.type !== 'file') continue;
-      const buf = await streamToBuffer(part.file);
-      const ext = (part.filename?.split('.').pop() ?? '').toLowerCase();
-      const { item } = VIDEO_EXT.has(ext)
-        ? await ingestVideo(buf, ext, 'upload')
-        : await ingestImage(buf, 'upload');
-      await addItem(item);
-      enqueueTranscode(item);
-      added.push(item);
+      const filename = part.filename || 'upload';
+      try {
+        const buf = await streamToBuffer(part.file);
+        if ((part.file as { truncated?: boolean }).truncated) {
+          errors.push({ filename, error: 'file exceeds the size limit' });
+          continue;
+        }
+        if (buf.length === 0) {
+          errors.push({ filename, error: 'empty file' });
+          continue;
+        }
+        const ext = (filename.split('.').pop() ?? '').toLowerCase();
+        // Detect video by MIME type OR extension, so any video format is handled (and a
+        // video never falls through to the image pipeline, which would crash on it).
+        const isVideo = (part.mimetype?.startsWith('video/') ?? false) || VIDEO_EXT.has(ext);
+        const { item } = isVideo
+          ? await ingestVideo(buf, ext || 'mp4', 'upload')
+          : await ingestImage(buf, 'upload');
+        await addItem(item);
+        enqueueTranscode(item);
+        added.push(item);
+      } catch (err) {
+        app.log.error({ err, filename }, 'upload ingest failed');
+        errors.push({ filename, error: (err as Error).message });
+      }
     }
     refresh();
     hub.emitEvent({ type: 'library', items: listItems() });
-    return { ok: true, added };
+    return { ok: errors.length === 0, added, errors };
   });
 
   // --- Google Photos (new) ---
