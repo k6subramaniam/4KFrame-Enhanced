@@ -1,0 +1,69 @@
+/**
+ * API contract shared between server, display and admin.
+ *
+ * Original routes preserved for compatibility:
+ *   /api/progress, /api/next, /api/previous, /api/current, /api/data, /api/thumbs,
+ *   /photos/:filename, /api/cast/:id, /api/delete/:id, /api/photo/:id, /api/preview/:id
+ * New routes:
+ *   /api/upload, /api/google/*, /api/video/:id, WebSocket /ws
+ */
+
+import type { ApiDataPayload, FrameConfig } from './config.js';
+import type { MediaKind } from './filename.js';
+
+/** A single media item in the library. */
+export interface MediaItem {
+  id: string;
+  kind: MediaKind;
+  width: number;
+  height: number;
+  /** Filename of the main asset (image or video). */
+  file: string;
+  /** Preview asset filename (image). */
+  preview: string;
+  /** Thumbnail asset filename. */
+  thumb: string;
+  /** Poster image filename for videos. */
+  poster?: string;
+  /** Video duration in seconds, when applicable. */
+  durationSec?: number;
+  /** Epoch ms the item was added. */
+  createdAt: number;
+  /** Source of the item. */
+  source: 'upload' | 'google-photos';
+  /** Optional caption (EXIF/description derived). */
+  caption?: string;
+}
+
+/** Response of `/api/current` — the active item(s) plus the loose config payload. */
+export interface CurrentResponse {
+  current: string[];
+  data: ApiDataPayload;
+}
+
+/** Response of `/api/thumbs`. */
+export interface ThumbsResponse {
+  items: MediaItem[];
+}
+
+// --- WebSocket protocol (`/ws`) ---
+
+/** Commands a controller (admin / cast sender) sends to the server. */
+export type ControlMessage =
+  | { type: 'progress' }
+  | { type: 'next' }
+  | { type: 'previous' }
+  | { type: 'cast'; id: string }
+  | { type: 'config'; patch: Partial<FrameConfig> | ApiDataPayload };
+
+/** Events the server pushes to displays and controllers. */
+export type FrameEvent =
+  | { type: 'show'; items: MediaItem[]; interactive: boolean }
+  | { type: 'config'; config: FrameConfig }
+  | { type: 'library'; items: MediaItem[] }
+  | { type: 'log'; level: 'info' | 'warn' | 'error'; message: string };
+
+export type WsMessage = ControlMessage | FrameEvent;
+
+export const DEFAULT_HTTP_PORT = 9095;
+export const DEFAULT_HTTPS_PORT = 9096;

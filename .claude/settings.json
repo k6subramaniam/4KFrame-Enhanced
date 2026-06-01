@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npm install --silent && npm run build:shared --silent || true"
+          }
+        ]
+      }
+    ]
+  }
+}

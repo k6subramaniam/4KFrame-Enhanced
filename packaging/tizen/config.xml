@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Minimal Samsung Tizen web-app manifest. Replace the content src with the deployed
+  display URL (or bundle display/dist into this package) and sign with your Tizen
+  certificate before installing on a Samsung TV.
+-->
+<widget xmlns="http://www.w3.org/ns/widgets"
+        xmlns:tizen="http://tizen.org/ns/widgets"
+        id="http://4kframe/enhanced"
+        version="0.1.0"
+        viewmodes="maximized">
+  <name>4KFrame</name>
+  <content src="https://your-frame.example/" />
+  <feature name="http://tizen.org/feature/screen.size.all" />
+  <tizen:application id="4kframe.enhanced" package="4kframeenh" required_version="6.0" />
+  <tizen:profile name="tv" />
+  <tizen:setting screen-orientation="landscape" background-support="enable" />
+  <access origin="*" subdomains="true" />
+</widget>
