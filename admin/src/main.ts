@@ -29,7 +29,10 @@ function renderGrid(): void {
   for (const item of items) {
     const tile = document.createElement('div');
     tile.className = `tile ${mode}`;
-    tile.innerHTML = `<img loading="lazy" src="${thumbUrl(item)}" alt="" />` +
+    // Videos only have an image thumb once a poster exists; otherwise show a placeholder.
+    const hasImageThumb = item.kind === 'photo' || !!item.poster;
+    tile.innerHTML =
+      (hasImageThumb ? `<img loading="lazy" src="${thumbUrl(item)}" alt="" />` : '<div class="ph">🎞️</div>') +
       (item.kind === 'video' ? '<span class="badge">▶ video</span>' : '') +
       (item.transcoding ? '<span class="badge badge-proc">⏳ processing</span>' : '');
     tile.addEventListener('click', () => onTileClick(item));
@@ -86,11 +89,31 @@ function wireCast(): void {
   initCastSender(sync);
 }
 
+async function handleUpload(files: FileList | File[]): Promise<void> {
+  const drop = document.getElementById('drop') as HTMLElement;
+  drop.classList.add('busy');
+  try {
+    const result = await upload(files);
+    await refresh();
+    if (result.errors?.length) {
+      alert(
+        'Some files could not be added:\n' +
+          result.errors.map((e) => `• ${e.filename || 'file'}: ${e.error}`).join('\n'),
+      );
+    }
+  } catch (err) {
+    alert(`Upload failed: ${(err as Error).message}`);
+  } finally {
+    drop.classList.remove('busy');
+  }
+}
+
 function wireUpload(): void {
   const drop = document.getElementById('drop') as HTMLElement;
   const file = document.getElementById('file') as HTMLInputElement;
   file.addEventListener('change', async () => {
-    if (file.files?.length) { await upload(file.files); await refresh(); }
+    if (file.files?.length) await handleUpload(file.files);
+    file.value = ''; // allow re-selecting the same file
   });
   ['dragover', 'dragenter'].forEach((e) =>
     drop.addEventListener(e, (ev) => { ev.preventDefault(); drop.classList.add('over'); }),
@@ -101,7 +124,7 @@ function wireUpload(): void {
   drop.addEventListener('drop', async (ev) => {
     ev.preventDefault();
     const files = (ev as DragEvent).dataTransfer?.files;
-    if (files?.length) { await upload(files); await refresh(); }
+    if (files?.length) await handleUpload(files);
   });
 }
 
