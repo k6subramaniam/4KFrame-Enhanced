@@ -33,14 +33,54 @@ export interface UploadResult {
   errors?: { filename: string; error: string }[];
 }
 
-export async function upload(files: FileList | File[]): Promise<UploadResult> {
-  const form = new FormData();
-  for (const f of Array.from(files)) form.append('file', f, f.name);
-  const res = await fetch('/api/upload', { method: 'POST', body: form });
-  if (!res.ok) {
-    return { ok: false, added: [], errors: [{ filename: '', error: `server responded ${res.status}` }] };
+// Upload in small chunks so large files pass proxies/CDNs that cap request body size
+// (e.g. GitHub Codespaces returns 413 for big single requests).
+const CHUNK_SIZE = 4 * 1024 * 1024; // 4 MB
+
+/** A random, path-safe id that doesn't require a secure context (works over plain http). */
+function uploadId(): string {
+  return (
+    Date.now().toString(36) +
+    Math.random().toString(36).slice(2, 12) +
+    Math.random().toString(36).slice(2, 12)
+  );
+}
+
+async function uploadFile(file: File, onProgress?: (fraction: number) => void): Promise<{ item?: MediaItem; error?: string }> {
+  const id = uploadId();
+  const total = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
+  for (let i = 0; i < total; i++) {
+    const chunk = file.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+    const res = await fetch(`/api/upload/chunk?id=${id}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream' },
+      body: chunk,
+    });
+    if (!res.ok) return { error: `upload failed at ${Math.round(((i + 1) / total) * 100)}% (${res.status})` };
+    onProgress?.((i + 1) / total);
   }
-  return (await res.json()) as UploadResult;
+  const res = await fetch(
+    `/api/upload/finish?id=${id}&name=${encodeURIComponent(file.name)}&type=${encodeURIComponent(file.type)}`,
+    { method: 'POST' },
+  );
+  if (!res.ok) return { error: `finalize failed (${res.status})` };
+  const json = (await res.json()) as { ok: boolean; item?: MediaItem; error?: string };
+  return json.item ? { item: json.item } : { error: json.error ?? 'upload failed' };
+}
+
+export async function upload(
+  files: FileList | File[],
+  onProgress?: (fraction: number) => void,
+): Promise<UploadResult> {
+  const list = Array.from(files);
+  const added: MediaItem[] = [];
+  const errors: { filename: string; error: string }[] = [];
+  for (let f = 0; f < list.length; f++) {
+    const result = await uploadFile(list[f], (p) => onProgress?.((f + p) / list.length));
+    if (result.item) added.push(result.item);
+    else errors.push({ filename: list[f].name, error: result.error ?? 'upload failed' });
+  }
+  return { ok: errors.length === 0, added, errors };
 }
 
 export interface GoogleStatus {

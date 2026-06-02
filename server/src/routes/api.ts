@@ -14,7 +14,7 @@ import {
   type CurrentResponse,
   type MediaItem,
 } from '@4kframe/shared';
-import { MEDIA_DIR } from '../env.js';
+import { MEDIA_DIR, DATA_DIR } from '../env.js';
 import {
   getConfig,
   setConfig,
@@ -32,6 +32,14 @@ import * as gphotos from '../integrations/googlePhotos.js';
 import { computeStorage } from '../storage.js';
 
 const VIDEO_EXT = new Set(['mp4', 'webm', 'mov', 'm4v', 'mkv']);
+
+/** Scratch dir for in-progress chunked uploads. */
+const UPLOADS_DIR = path.join(DATA_DIR, '.uploads');
+
+/** Validate a client-supplied upload id (prevents path traversal). */
+function safeUploadId(id: unknown): string | null {
+  return typeof id === 'string' && /^[A-Za-z0-9_-]{8,128}$/.test(id) ? id : null;
+}
 
 export async function registerApi(app: FastifyInstance): Promise<void> {
   // --- Playback control (original) ---
@@ -87,7 +95,10 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
     return reply.type('image/svg+xml').send(svg);
   });
 
-  // --- Upload (new): photos and videos ---
+  // Raw-buffer parser for chunked upload bodies (small chunks, well under bodyLimit).
+  app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer' }, (_req, body, done) => done(null, body));
+
+  // --- Upload (new): photos and videos (single multipart request) ---
   app.post('/api/upload', async (req, reply) => {
     if (!req.isMultipart()) return reply.code(400).send({ error: 'expected multipart/form-data' });
     const added: MediaItem[] = [];
@@ -101,20 +112,7 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
           errors.push({ filename, error: 'file exceeds the size limit' });
           continue;
         }
-        if (buf.length === 0) {
-          errors.push({ filename, error: 'empty file' });
-          continue;
-        }
-        const ext = (filename.split('.').pop() ?? '').toLowerCase();
-        // Detect video by MIME type OR extension, so any video format is handled (and a
-        // video never falls through to the image pipeline, which would crash on it).
-        const isVideo = (part.mimetype?.startsWith('video/') ?? false) || VIDEO_EXT.has(ext);
-        const { item } = isVideo
-          ? await ingestVideo(buf, ext || 'mp4', 'upload')
-          : await ingestImage(buf, 'upload');
-        await addItem(item);
-        enqueueTranscode(item);
-        added.push(item);
+        added.push(await ingestUpload(buf, filename, part.mimetype));
       } catch (err) {
         app.log.error({ err, filename }, 'upload ingest failed');
         errors.push({ filename, error: (err as Error).message });
@@ -123,6 +121,38 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
     refresh();
     hub.emitEvent({ type: 'library', items: listItems() });
     return { ok: errors.length === 0, added, errors };
+  });
+
+  // --- Chunked upload: stream a large file in small pieces (works behind proxies/CDNs
+  // that cap request body size, e.g. GitHub Codespaces). Append each chunk, then finish. ---
+  app.post('/api/upload/chunk', async (req, reply) => {
+    const id = safeUploadId((req.query as { id?: string }).id);
+    if (!id) return reply.code(400).send({ error: 'invalid upload id' });
+    const body = req.body;
+    if (!Buffer.isBuffer(body) || body.length === 0) return reply.code(400).send({ error: 'empty chunk' });
+    await fs.mkdir(UPLOADS_DIR, { recursive: true });
+    await fs.appendFile(path.join(UPLOADS_DIR, id), body);
+    return { ok: true };
+  });
+
+  app.post('/api/upload/finish', async (req, reply) => {
+    const q = req.query as { id?: string; name?: string; type?: string };
+    const id = safeUploadId(q.id);
+    if (!id) return reply.code(400).send({ error: 'invalid upload id' });
+    const tmp = path.join(UPLOADS_DIR, id);
+    try {
+      const buf = await fs.readFile(tmp).catch(() => null);
+      if (!buf || buf.length === 0) return reply.code(400).send({ ok: false, error: 'no chunks received' });
+      const item = await ingestUpload(buf, q.name || 'upload', q.type);
+      refresh();
+      hub.emitEvent({ type: 'library', items: listItems() });
+      return { ok: true, item };
+    } catch (err) {
+      app.log.error({ err, name: q.name }, 'chunked upload finish failed');
+      return reply.code(200).send({ ok: false, error: (err as Error).message });
+    } finally {
+      await fs.rm(tmp).catch(() => undefined);
+    }
   });
 
   // --- Google Photos (new) ---
@@ -180,6 +210,21 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
 }
 
 // --- helpers ---
+
+/** Ingest one uploaded file (image or video), store it, and queue any transcode. */
+async function ingestUpload(buf: Buffer, filename: string, mimetype?: string): Promise<MediaItem> {
+  if (buf.length === 0) throw new Error('empty file');
+  const ext = (filename.split('.').pop() ?? '').toLowerCase();
+  // Detect video by MIME type OR extension, so any video format is handled (and a video
+  // never falls through to the image pipeline, which would crash on it).
+  const isVideo = (mimetype?.startsWith('video/') ?? false) || VIDEO_EXT.has(ext);
+  const { item } = isVideo
+    ? await ingestVideo(buf, ext || 'mp4', 'upload')
+    : await ingestImage(buf, 'upload');
+  await addItem(item);
+  enqueueTranscode(item);
+  return item;
+}
 
 async function withStorage() {
   const { used, free } = await computeStorage();

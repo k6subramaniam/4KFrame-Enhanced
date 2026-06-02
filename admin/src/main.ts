@@ -92,8 +92,9 @@ function wireCast(): void {
 async function handleUpload(files: FileList | File[]): Promise<void> {
   const drop = document.getElementById('drop') as HTMLElement;
   drop.classList.add('busy');
+  drop.dataset.status = 'Uploading…';
   try {
-    const result = await upload(files);
+    const result = await upload(files, (p) => { drop.dataset.status = `Uploading ${Math.round(p * 100)}%`; });
     await refresh();
     if (result.errors?.length) {
       alert(
