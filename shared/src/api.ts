@@ -11,6 +11,21 @@
 import type { ApiDataPayload, FrameConfig } from './config.js';
 import type { MediaKind } from './filename.js';
 
+export interface FaceBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface FaceMetadata {
+  box: FaceBox;
+  /** Optional local face embedding vector. Never required and only stored when generated locally. */
+  embedding?: number[];
+  /** Optional app-owned label assigned by an administrator. */
+  label?: string;
+}
+
 /** A single media item in the library. */
 export interface MediaItem {
   id: string;
@@ -33,6 +48,10 @@ export interface MediaItem {
   source: 'upload' | 'google-photos';
   /** Optional caption (EXIF/description derived). */
   caption?: string;
+  /** Face metadata detected on the image, or on the poster for videos.
+   *  When Smart Face Match is enabled, includes embeddings and labels.
+   *  Otherwise, contains only box coordinates. */
+  faces?: FaceMetadata[];
   /** True while a background H.264 transcode is in progress (video only). */
   transcoding?: boolean;
   /** Whether the item is included in automatic slideshow rotation (default true). */

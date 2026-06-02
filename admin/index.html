@@ -23,9 +23,14 @@
       .tile .ph { width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:2rem; background:#11151c; }
       .tile .badge { position:absolute; top:.4rem; left:.4rem; background:rgba(0,0,0,.65); border-radius:.4rem; padding:.1rem .4rem; font-size:.7rem; }
       .tile .badge-proc { top:auto; bottom:.4rem; left:.4rem; background:rgba(76,141,255,.85); }
+      .tile .badge-face { top:2rem; background:rgba(44,182,125,.85); }
       .tile .badge.dur { top:auto; bottom:.4rem; right:.4rem; left:auto; font-variant-numeric:tabular-nums; }
       .tile .incl { position:absolute; top:.35rem; right:.35rem; width:1.5rem; height:1.5rem; padding:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.6); border:1px solid var(--line); border-radius:.4rem; color:#fff; cursor:pointer; font-size:.8rem; }
       .tile.excluded img, .tile.excluded .ph { opacity:.3; filter:grayscale(1); }
+      #control-sheet-header { display:none; }
+      #controls-toggle { display:none; }
+      #controls-backdrop { display:none; }
+      #playback { margin-bottom:1rem; }
       #playback button { font-size:1.15rem; line-height:1; padding:.35rem .7rem; }
       .tile.delete:hover { outline:3px solid #ff5a5a; }
       .row { display:flex; flex-wrap:wrap; gap:.5rem; align-items:center; }
@@ -51,6 +56,7 @@
       #drop.over { border-color:var(--accent); color:var(--fg); }
       #drop.busy { border-color:var(--accent); opacity:.7; pointer-events:none; }
       #drop.busy::after { content:attr(data-status); position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(11,13,18,.85); border-radius:.8rem; color:var(--fg); }
+      .people-controls select { font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--line); border-radius:.6rem; padding:.45rem .7rem; }
       .hidden { display:none !important; }
       a { color:var(--accent); }
       #login { position:fixed; inset:0; background:var(--bg); display:flex; align-items:center; justify-content:center; z-index:50; }
@@ -58,6 +64,47 @@
       #login h2 { margin:0; font-size:1.1rem; }
       #login input { font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--line); border-radius:.6rem; padding:.6rem .8rem; }
       #login #login-err { color:#ff6b6b; min-height:1em; }
+      @media (max-width: 700px) {
+        body.controls-open { overflow:hidden; }
+        header { gap:.5rem; padding:.75rem; z-index:20; }
+        header h1 { font-size:1rem; }
+        .modes { gap:.35rem; }
+        .modes button { padding:.5rem .65rem; }
+        button { min-height:44px; }
+        main { padding:.75rem .75rem 5.25rem; }
+        #drop { margin-bottom:.65rem; padding:1rem; }
+        #hint { margin:.5rem 0 .75rem; }
+        #controls-toggle {
+          display:block; position:fixed; right:1rem; bottom:1rem; z-index:35;
+          min-width:7.25rem; box-shadow:0 .75rem 2rem rgba(0,0,0,.45);
+          background:var(--accent); border-color:var(--accent); color:#fff; font-weight:700;
+        }
+        #controls-backdrop {
+          display:block; position:fixed; inset:0; z-index:30; background:rgba(0,0,0,.55);
+          opacity:0; pointer-events:none; transition:opacity .2s ease;
+        }
+        body.controls-open #controls-backdrop { opacity:1; pointer-events:auto; }
+        #control-sheet {
+          position:fixed; left:0; right:0; bottom:0; z-index:40; max-height:min(82vh, 42rem);
+          display:flex; flex-direction:column; padding:.75rem; padding-bottom:calc(.75rem + env(safe-area-inset-bottom));
+          background:var(--bg); border-top:1px solid var(--line); border-radius:1rem 1rem 0 0;
+          box-shadow:0 -1rem 3rem rgba(0,0,0,.5); overflow:hidden;
+          transform:translateY(calc(100% + 1rem)); transition:transform .24s ease;
+        }
+        #control-sheet.open { transform:translateY(0); }
+        #control-sheet-header { display:flex; align-items:center; justify-content:space-between; gap:.75rem; padding:.1rem .15rem .65rem; }
+        #control-sheet-header h2 { margin:0; font-size:1rem; }
+        #controls-close { min-width:44px; padding:.45rem .75rem; }
+        #playback {
+          order:1; position:sticky; top:0; z-index:1; margin:0 0 .75rem; padding:.65rem;
+          background:var(--panel); border:1px solid var(--line); border-radius:.8rem;
+        }
+        #playback button { min-width:44px; min-height:44px; padding:.45rem .7rem; }
+        #playback .muted { flex-basis:100%; margin-left:0 !important; }
+        #settings { order:2; min-height:0; overflow:auto; -webkit-overflow-scrolling:touch; padding-bottom:.25rem; }
+        #settings .panel:last-child { margin-bottom:0; }
+        .grid { grid-template-columns:repeat(auto-fill,minmax(112px,1fr)); gap:.5rem; }
+      }
     </style>
   </head>
   <body>
@@ -84,7 +131,40 @@
       <div id="drop">Drag &amp; drop photos or videos here, or
         <label style="color:var(--accent);cursor:pointer">browse<input id="file" type="file" accept="image/*,video/*" multiple hidden /></label>
       </div>
+      <button id="controls-toggle" type="button" aria-controls="control-sheet" aria-expanded="false">Controls</button>
+      <div id="controls-backdrop" aria-hidden="true"></div>
+      <section id="control-sheet" aria-label="Frame controls">
+        <div id="control-sheet-header">
+          <h2>Controls</h2>
+          <button id="controls-close" type="button" aria-label="Close controls">✕</button>
+        </div>
+        <div id="settings"></div>
+        <div id="playback" class="row">
+          <button id="pb-prev" title="Previous">⏮</button>
+          <button id="pb-play" title="Play / Pause">⏸</button>
+          <button id="pb-next" title="Next">⏭</button>
+          <button id="pb-loop" title="Loop the current item">🔁</button>
+          <span class="muted" style="margin-left:.25rem">Skip / pause / loop the frame</span>
+        </div>
+      </section>
       <div id="settings"></div>
+      <section class="panel" id="people-panel">
+        <h2>Smart Face Match</h2>
+        <div class="row people-controls">
+          <label class="field">People filter
+            <select id="people-filter">
+              <option value="all">All media</option>
+              <option value="has-faces">Has faces</option>
+              <option value="similar-faces">Similar faces</option>
+              <option value="labeled">Assigned labels</option>
+            </select>
+          </label>
+          <label class="field">Label
+            <select id="label-filter" disabled><option value="">Any label</option></select>
+          </label>
+          <span class="muted" id="people-summary">Face matching is opt-in on the server.</span>
+        </div>
+      </section>
       <div id="playback" class="row">
         <button id="pb-prev" title="Previous">⏮</button>
         <button id="pb-play" title="Play / Pause">⏸</button>
