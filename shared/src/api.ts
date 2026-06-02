@@ -11,6 +11,17 @@
 import type { ApiDataPayload, FrameConfig } from './config.js';
 import type { MediaKind } from './filename.js';
 
+export interface FaceBox {
+  /** Left edge of the detected face. Values may be normalised (0..1) or pixels. */
+  x: number;
+  /** Top edge of the detected face. Values may be normalised (0..1) or pixels. */
+  y: number;
+  /** Width of the detected face. Values may be normalised (0..1) or pixels. */
+  width: number;
+  /** Height of the detected face. Values may be normalised (0..1) or pixels. */
+  height: number;
+}
+
 /** A single media item in the library. */
 export interface MediaItem {
   id: string;
@@ -33,6 +44,8 @@ export interface MediaItem {
   source: 'upload' | 'google-photos';
   /** Optional caption (EXIF/description derived). */
   caption?: string;
+  /** Face boxes detected on the image, or on the poster for videos. */
+  faces?: FaceBox[];
   /** True while a background H.264 transcode is in progress (video only). */
   transcoding?: boolean;
   /** Whether the item is included in automatic slideshow rotation (default true). */

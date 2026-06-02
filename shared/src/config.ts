@@ -115,6 +115,8 @@ export interface FrameConfig {
   panY: number;
   /** Ken Burns ambient motion on each photo. */
   motion: MotionMode;
+  /** Bias cover crops toward detected faces when no manual pan/zoom override is active. */
+  smartFraming: boolean;
   frameWidth: number;
   frameHeight: number;
   showInfo: boolean;
@@ -152,6 +154,7 @@ export function defaultConfig(): FrameConfig {
     panX: 0,
     panY: 0,
     motion: 'off',
+    smartFraming: false,
     frameWidth: 3840,
     frameHeight: 2160,
     showInfo: true,
@@ -187,6 +190,7 @@ export function toApiData(c: FrameConfig): ApiDataPayload {
     panX: String(c.panX),
     panY: String(c.panY),
     motion: c.motion,
+    smartFraming: String(c.smartFraming),
     frameWidth: String(c.frameWidth),
     frameHeight: String(c.frameHeight),
     showInfo: String(c.showInfo),
@@ -240,6 +244,7 @@ export function fromApiData(current: FrameConfig, patch: ApiDataPayload): FrameC
     panX: clamp(num(patch.panX, current.panX), -1, 1),
     panY: clamp(num(patch.panY, current.panY), -1, 1),
     motion: parseMotion(patch.motion, current.motion),
+    smartFraming: truthy(patch.smartFraming, current.smartFraming),
     frameFill: parseFillMode(patch, current.fillMode) === 'cover',
     frameWidth: num(patch.frameWidth, current.frameWidth),
     frameHeight: num(patch.frameHeight, current.frameHeight),
