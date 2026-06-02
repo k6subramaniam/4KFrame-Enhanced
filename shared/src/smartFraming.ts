@@ -1,4 +1,4 @@
-import type { FaceBox, MediaItem } from './api.js';
+import type { FaceBox, FaceMetadata, MediaItem } from './api.js';
 
 export interface SmartFramingInput {
   item: Pick<MediaItem, 'width' | 'height' | 'faces'>;
@@ -49,10 +49,14 @@ function normalizeFaceBox(face: FaceBox, itemWidth: number, itemHeight: number):
   return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
+function normalizeFaceMetadata(face: FaceMetadata, itemWidth: number, itemHeight: number): NormalizedFaceBox | null {
+  return normalizeFaceBox(face.box, itemWidth, itemHeight);
+}
+
 /** Return the normalized center of the union of all usable face boxes on an item. */
 export function faceUnionCenter(item: Pick<MediaItem, 'width' | 'height' | 'faces'>): { x: number; y: number } | null {
   const boxes = (item.faces ?? [])
-    .map((face) => normalizeFaceBox(face, item.width, item.height))
+    .map((face) => normalizeFaceMetadata(face, item.width, item.height))
     .filter((face): face is NormalizedFaceBox => Boolean(face));
   if (boxes.length === 0) return null;
 
