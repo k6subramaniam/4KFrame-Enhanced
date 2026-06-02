@@ -11,6 +11,21 @@
 import type { ApiDataPayload, FrameConfig } from './config.js';
 import type { MediaKind } from './filename.js';
 
+export interface FaceBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface FaceMetadata {
+  box: FaceBox;
+  /** Optional local face embedding vector. Never required and only stored when generated locally. */
+  embedding?: number[];
+  /** Optional app-owned label assigned by an administrator. */
+  label?: string;
+}
+
 /** A single media item in the library. */
 export interface MediaItem {
   id: string;
@@ -37,6 +52,8 @@ export interface MediaItem {
   transcoding?: boolean;
   /** Whether the item is included in automatic slideshow rotation (default true). */
   enabled?: boolean;
+  /** Optional app-owned local face metadata, populated only when Smart Face Match is enabled. */
+  faces?: FaceMetadata[];
 }
 
 /** Response of `/api/current` — the active item(s) plus the loose config payload. */

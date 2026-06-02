@@ -15,12 +15,18 @@ import { renderSettings } from './settings.js';
 import { initCastSender, isCastReady, castControl, toggleCastSession } from './cast-sender.js';
 
 type Mode = 'cast' | 'view' | 'delete';
+type PeopleFilter = 'all' | 'has-faces' | 'similar-faces' | 'labeled';
 let mode: Mode = 'cast';
+let peopleFilter: PeopleFilter = 'all';
+let labelFilter = '';
 let items: MediaItem[] = [];
 
 const grid = document.getElementById('grid') as HTMLElement;
 const hint = document.getElementById('hint') as HTMLElement;
 const settingsRoot = document.getElementById('settings') as HTMLElement;
+const peopleFilterSelect = document.getElementById('people-filter') as HTMLSelectElement | null;
+const labelFilterSelect = document.getElementById('label-filter') as HTMLSelectElement | null;
+const peopleSummary = document.getElementById('people-summary') as HTMLElement | null;
 
 const HINTS: Record<Mode, string> = {
   cast: 'Cast mode: click a photo to show it on the frame.',
@@ -35,7 +41,9 @@ function fmtDuration(sec: number): string {
 
 function renderGrid(): void {
   grid.innerHTML = '';
-  for (const item of items) {
+  const visibleItems = filterPeople(items);
+  renderPeopleSummary(visibleItems);
+  for (const item of visibleItems) {
     const tile = document.createElement('div');
     const excluded = item.enabled === false;
     tile.className = `tile ${mode}${excluded ? ' excluded' : ''}`;
@@ -47,6 +55,7 @@ function renderGrid(): void {
       (hasImageThumb ? `<img loading="lazy" src="${thumbUrl(item)}" alt="" />` : '<div class="ph">🎞️</div>') +
       (item.kind === 'video' ? '<span class="badge">▶ video</span>' : '') +
       (item.transcoding ? '<span class="badge badge-proc">⏳ processing</span>' : '') +
+      (item.faces?.length ? `<span class="badge badge-face">☺ ${item.faces.length}</span>` : '') +
       dur +
       `<button class="incl" title="${excluded ? 'Excluded — tap to include in slideshow' : 'Included — tap to exclude from slideshow'}">${excluded ? '🚫' : '✓'}</button>`;
     tile.addEventListener('click', () => onTileClick(item));
@@ -57,6 +66,65 @@ function renderGrid(): void {
     });
     grid.appendChild(tile);
   }
+}
+
+function filterPeople(source: MediaItem[]): MediaItem[] {
+  if (peopleFilter === 'has-faces') return source.filter((item) => (item.faces?.length ?? 0) > 0);
+  if (peopleFilter === 'labeled') {
+    return source.filter((item) => item.faces?.some((face) => labelFilter ? face.label === labelFilter : Boolean(face.label)));
+  }
+  if (peopleFilter === 'similar-faces') return source.filter((item) => hasSimilarFace(item, source));
+  return source;
+}
+
+function hasSimilarFace(item: MediaItem, source: MediaItem[]): boolean {
+  const embeddings = item.faces?.map((face) => face.embedding).filter((embedding): embedding is number[] => Boolean(embedding?.length)) ?? [];
+  if (!embeddings.length) return false;
+  return source.some((other) => other.id !== item.id && other.faces?.some((face) => (face.embedding?.length ? embeddings.some((embedding) => cosine(embedding, face.embedding ?? []) >= 0.9) : false)));
+}
+
+function cosine(a: number[], b: number[]): number {
+  const len = Math.min(a.length, b.length);
+  let dot = 0;
+  let aMag = 0;
+  let bMag = 0;
+  for (let i = 0; i < len; i += 1) {
+    dot += a[i] * b[i];
+    aMag += a[i] * a[i];
+    bMag += b[i] * b[i];
+  }
+  return aMag && bMag ? dot / (Math.sqrt(aMag) * Math.sqrt(bMag)) : 0;
+}
+
+function renderPeopleSummary(visibleItems: MediaItem[]): void {
+  if (!peopleSummary) return;
+  const faceCount = items.reduce((total, item) => total + (item.faces?.length ?? 0), 0);
+  const labelCount = new Set(items.flatMap((item) => item.faces?.map((face) => face.label).filter((label): label is string => Boolean(label)) ?? [])).size;
+  peopleSummary.textContent = `${visibleItems.length}/${items.length} shown · ${faceCount} faces · ${labelCount} labels`;
+}
+
+function syncPeopleLabels(): void {
+  if (!labelFilterSelect) return;
+  const labels = [...new Set(items.flatMap((item) => item.faces?.map((face) => face.label).filter((label): label is string => Boolean(label)) ?? []))].sort();
+  labelFilterSelect.innerHTML = '<option value="">Any label</option>' + labels.map((label) => `<option value="${escapeHtml(label)}">${escapeHtml(label)}</option>`).join('');
+  labelFilterSelect.value = labelFilter;
+  labelFilterSelect.disabled = peopleFilter !== 'labeled' || labels.length === 0;
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char] ?? char));
+}
+
+function wirePeopleFilters(): void {
+  peopleFilterSelect?.addEventListener('change', () => {
+    peopleFilter = (peopleFilterSelect.value || 'all') as PeopleFilter;
+    syncPeopleLabels();
+    renderGrid();
+  });
+  labelFilterSelect?.addEventListener('change', () => {
+    labelFilter = labelFilterSelect.value;
+    renderGrid();
+  });
 }
 
 function wirePlayback(): void {
@@ -99,6 +167,7 @@ async function onTileClick(item: MediaItem): Promise<void> {
 
 async function refresh(): Promise<void> {
   items = await fetchItems();
+  syncPeopleLabels();
   renderGrid();
   const data = await fetchData();
   await renderSettings(settingsRoot, data);
@@ -180,6 +249,7 @@ async function start(): Promise<void> {
     wireModes();
     wireUpload();
     wirePlayback();
+    wirePeopleFilters();
     setMode('cast');
   }
   await refresh();
