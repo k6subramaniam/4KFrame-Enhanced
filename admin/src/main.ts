@@ -21,6 +21,11 @@ let items: MediaItem[] = [];
 const grid = document.getElementById('grid') as HTMLElement;
 const hint = document.getElementById('hint') as HTMLElement;
 const settingsRoot = document.getElementById('settings') as HTMLElement;
+const controlsToggle = document.getElementById('controls-toggle') as HTMLButtonElement | null;
+const controlsClose = document.getElementById('controls-close') as HTMLButtonElement | null;
+const controlsSheet = document.getElementById('control-sheet') as HTMLElement | null;
+const controlsBackdrop = document.getElementById('controls-backdrop') as HTMLElement | null;
+let controlsOpen = false;
 
 const HINTS: Record<Mode, string> = {
   cast: 'Cast mode: click a photo to show it on the frame.',
@@ -102,6 +107,7 @@ async function refresh(): Promise<void> {
   renderGrid();
   const data = await fetchData();
   await renderSettings(settingsRoot, data);
+  setControlsOpen(controlsOpen);
   await syncPlayback();
 }
 
@@ -112,6 +118,33 @@ function setMode(next: Mode): void {
     b.classList.toggle('active', b.dataset.mode === next),
   );
   renderGrid();
+}
+
+function setControlsOpen(open: boolean): void {
+  controlsOpen = open;
+  controlsSheet?.classList.toggle('open', open);
+  document.body.classList.toggle('controls-open', open);
+  controlsToggle?.setAttribute('aria-expanded', String(open));
+}
+
+function wireControlSheet(): void {
+  controlsToggle?.addEventListener('click', () => {
+    setControlsOpen(!controlsOpen);
+    if (!controlsOpen) return;
+    controlsClose?.focus({ preventScroll: true });
+  });
+  controlsClose?.addEventListener('click', () => {
+    setControlsOpen(false);
+    controlsToggle?.focus({ preventScroll: true });
+  });
+  controlsBackdrop?.addEventListener('click', () => setControlsOpen(false));
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape' && controlsOpen) {
+      setControlsOpen(false);
+      controlsToggle?.focus({ preventScroll: true });
+    }
+  });
+  setControlsOpen(controlsOpen);
 }
 
 function wireModes(): void {
@@ -180,6 +213,7 @@ async function start(): Promise<void> {
     wireModes();
     wireUpload();
     wirePlayback();
+    wireControlSheet();
     setMode('cast');
   }
   await refresh();
