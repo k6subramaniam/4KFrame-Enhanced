@@ -118,3 +118,30 @@ docker compose down            # add -v to also delete the data volume (wipes me
 - **Native phone→Chromecast** additionally needs the display served from a **publicly
   reachable HTTPS URL** with a trusted cert plus a registered Cast Application ID
   (`VITE_CAST_APP_ID`) — see `packaging/`. Self-signed/LAN-only won't be trusted by Chromecast.
+
+## 8. Cloud hosting (Railway / Fly.io)
+
+For remote access (not just your LAN), host the **same Docker image** on a platform that runs
+a persistent container with a volume. **Vercel does not work** (serverless — no persistent disk,
+no long-lived WebSocket server, no ffmpeg).
+
+> 🔒 **Set `FRAME_ADMIN_PASSWORD` first** — a public URL is open to anyone otherwise.
+> These platforms terminate TLS at their edge and forward HTTP to the container, so set
+> `FRAME_DISABLE_HTTPS=1` (the public URL is still `https://`, and `wss://` works).
+
+**Fly.io** — a [`fly.toml`](fly.toml) is included:
+```bash
+fly launch --no-deploy --copy-config --name <unique-name>
+fly volume create frame_data --size 10 --region <region>
+fly secrets set FRAME_ADMIN_PASSWORD=your-strong-password
+fly deploy
+```
+
+**Railway** — a [`railway.json`](railway.json) pins the Dockerfile build. In the dashboard:
+deploy from this repo → add a **Volume mounted at `/data`** → set the service's **target port to
+`9095`** → add variables `FRAME_DISABLE_HTTPS=1` and `FRAME_ADMIN_PASSWORD=…` (plus
+`GOOGLE_REDIRECT_URI=https://<your>.up.railway.app/api/google/callback` if using Google Photos).
+
+**Cost/caveats:** keep one machine always running (a frame must stay up); media lives on the
+paid volume; streaming 4K to the TV uses egress. For a home frame, LAN/Pi is cheaper and lower
+latency — cloud mainly buys you remote access.
