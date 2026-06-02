@@ -11,9 +11,11 @@ import type { ControlMessage, FrameEvent } from '@4kframe/shared';
 import { hub } from './hub.js';
 import { getConfig, setConfig } from './store.js';
 import { cast, next, previous, progress, getCurrent, refresh, setPaused } from './slideshow.js';
+import * as auth from './auth.js';
 
 export async function registerWs(app: FastifyInstance): Promise<void> {
-  app.get('/ws', { websocket: true }, (socket) => {
+  app.get('/ws', { websocket: true }, (socket, req) => {
+    const authed = auth.isAuthed(req.headers.cookie);
     const send = (event: FrameEvent) => {
       if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(event));
     };
@@ -33,6 +35,8 @@ export async function registerWs(app: FastifyInstance): Promise<void> {
       } catch {
         return;
       }
+      if (auth.authRequired() && !authed) return;
+
       switch (msg.type) {
         case 'progress': progress(); break;
         case 'next': next(); break;
