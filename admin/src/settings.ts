@@ -136,24 +136,19 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload): P
       <div class="muted">Pan only has an effect when zoomed in (or content overflows the frame).</div>
       <h3 class="panel-subheading">Motion (Ken Burns)</h3>
       ${seg('motion', MOTION_MODES.map((m) => ({ label: motionLabels[m] ?? m, value: m, active: m === motion })))}
-      <div class="muted" style="margin-top:.4rem">Slowly zooms/pans each photo while it's shown.</div>`,
+      <div class="muted" style="margin-top:.4rem">Slowly zooms/pans each photo while it's shown.</div>
+      <h3 class="panel-subheading">Smart face framing</h3>
+      ${seg('smartFraming', [
+        { label: 'On', value: 'true', active: smartFraming },
+        { label: 'Off', value: 'false', active: !smartFraming },
+      ])}
+      <div class="muted" style="margin-top:.4rem">When available, face metadata keeps people near the center of cropped photos and video posters. Manual zoom or pan overrides it.</div>`,
       isPanelOpen('zoom-pan', panelState),
     ),
     panel(
       'qr-code',
       'QR Code',
       `${seg('showQr', [
-      <div class="muted" style="margin-top:.4rem">Slowly zooms/pans each photo while it's shown.</div>
-      <h2 style="margin-top:1rem">Smart face framing</h2>
-      ${seg('smartFraming', [
-        { label: 'On', value: 'true', active: smartFraming },
-        { label: 'Off', value: 'false', active: !smartFraming },
-      ])}
-      <div class="muted" style="margin-top:.4rem">When available, face metadata keeps people near the center of cropped photos and video posters. Manual zoom or pan overrides it.</div>
-    </div>
-    <div class="panel">
-      <h2>QR Code</h2>
-      ${seg('showQr', [
         { label: 'On', value: 'true', active: qr },
         { label: 'Off', value: 'false', active: !qr },
       ])}`,

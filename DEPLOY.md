@@ -161,10 +161,19 @@ fly deploy
 
 The `frame_data` volume backs `/data`, so create it in the same region as the Fly machine (`primary_region`, `iad` by default).
 
-**Railway** — a [`railway.json`](railway.json) pins the Dockerfile build. In the dashboard:
-deploy from this repo → add a **Volume mounted at `/data`** → set the service's **target port to
-`9095`** → add variables `FRAME_DISABLE_HTTPS=1` and `FRAME_ADMIN_PASSWORD=…` (plus
+**Railway** — a [`railway.json`](railway.json) pins the Dockerfile build. Use **one** Railway
+service for this repo (for example `4KFrame-Enhanced` / `FrameCast`). Do **not** deploy separate
+`admin`, `display`, or `server` services: the root Docker image builds those workspaces and the
+server serves both web UIs. In the dashboard: deploy from this repo → ensure the service uses the
+repo root with Dockerfile builder (`Dockerfile`) → add a **Volume mounted at `/data`** → set the
+service's **target port to `9095`** → add variables `FRAME_DISABLE_HTTPS=1` and
+`FRAME_ADMIN_PASSWORD=…` (plus
 `GOOGLE_REDIRECT_URI=https://<your>.up.railway.app/api/google/callback` if using Google Photos).
+
+If Railway shows multiple failed services (`admin`, `display`, `server`, etc.), open each failed
+service's **Deployments → latest failed build → View logs** to confirm the exact error, then remove
+the extra services from **Project Settings → Danger → Manage Services**. Keep only the single
+root/Dockerfile service and the `/data` volume.
 
 **Cost/caveats:** keep one machine always running (a frame must stay up); media lives on the
 paid volume; streaming 4K to the TV uses egress. For a home frame, LAN/Pi is cheaper and lower
