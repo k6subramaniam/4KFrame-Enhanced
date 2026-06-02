@@ -19,5 +19,6 @@ ENV NODE_ENV=production
 ENV FRAME_DATA_DIR=/data
 COPY --from=build /app .
 EXPOSE 9095 9096
-VOLUME ["/data"]
+# Do not declare a Docker VOLUME here: Railway rejects Dockerfile VOLUME instructions.
+# Persist /data by mounting a platform volume (Railway/Fly/Docker Compose) instead.
 CMD ["node", "server/dist/index.js"]

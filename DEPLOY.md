@@ -161,10 +161,39 @@ fly deploy
 
 The `frame_data` volume backs `/data`, so create it in the same region as the Fly machine (`primary_region`, `iad` by default).
 
-**Railway** — a [`railway.json`](railway.json) pins the Dockerfile build. In the dashboard:
-deploy from this repo → add a **Volume mounted at `/data`** → set the service's **target port to
-`9095`** → add variables `FRAME_DISABLE_HTTPS=1` and `FRAME_ADMIN_PASSWORD=…` (plus
-`GOOGLE_REDIRECT_URI=https://<your>.up.railway.app/api/google/callback` if using Google Photos).
+**Railway** — a [`railway.json`](railway.json) pins the Dockerfile build. Use **one** Railway
+service for this repo (for example `4KFrame-Enhanced` / `FrameCast`). Do **not** deploy separate
+`admin`, `display`, or `server` services: the root Docker image builds those workspaces and the
+server serves both web UIs. In the dashboard, configure the remaining service like this:
+
+- **Builder:** Dockerfile
+- **Dockerfile Path:** `/Dockerfile`
+- **Custom Start Command:** leave unset (the Dockerfile `CMD` starts the server)
+- **Public Networking target port:** `9095`
+- **Volume:** mounted at `/data`
+- **Variables:** add only the values you need:
+
+  | Variable | Railway value | Required? | Notes |
+  | --- | --- | --- | --- |
+  | `FRAME_DISABLE_HTTPS` | `1` | Yes | Railway terminates public HTTPS and forwards HTTP to the container. |
+  | `FRAME_ADMIN_PASSWORD` | a strong password | Yes for public Railway apps | Protects `/admin/` and management/control APIs. |
+  | `FRAME_ENABLE_FACE_MATCH` | `1` | Optional | Enables the Smart Face Match pipeline; the built-in detector is a no-op until a local detector is registered. |
+  | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth values | Optional | Only needed for Google Photos import. |
+  | `GOOGLE_REDIRECT_URI` | `https://<your>.up.railway.app/api/google/callback` | Optional | Required only when Google Photos import is enabled. |
+
+  You can ignore Railway's other suggested variables (`FRAME_TLS_KEY`, `FRAME_TLS_CERT`,
+  `FRAME_HTTP_PORT`, `FRAME_HTTPS_PORT`, `FRAME_HOST`, `FRAME_DATA_DIR`) unless you have a
+  specific custom setup. The Docker image already defaults to `/data` and port `9095`. Railway rejects
+  Dockerfile `VOLUME` instructions, so persistence must come from the Railway volume mount
+  (Railway also injects `RAILWAY_VOLUME_MOUNT_PATH`).
+
+After changing the target port or variables, redeploy the service and check
+`https://<your>.up.railway.app/api/health` before opening `/admin/`.
+
+If Railway shows multiple failed services (`admin`, `display`, `server`, etc.), open each failed
+service's **Deployments → latest failed build → View logs** to confirm the exact error, then remove
+the extra services from **Project Settings → Danger → Manage Services**. Keep only the single
+root/Dockerfile service and the `/data` volume.
 
 **Cost/caveats:** keep one machine always running (a frame must stay up); media lives on the
 paid volume; streaming 4K to the TV uses egress. For a home frame, LAN/Pi is cheaper and lower
