@@ -170,32 +170,29 @@ server serves both web UIs. In the dashboard, configure the remaining service li
 - **Dockerfile Path:** `/Dockerfile`
 - **Custom Start Command:** leave unset (the Dockerfile `CMD` starts the server)
 - **Public Networking target port:** `9095`
+- **Healthcheck path:** `/api/health` (path only, not the full `https://...` URL)
 - **Volume:** mounted at `/data`
 - **Variables:** add only the values you need:
 
   | Variable | Railway value | Required? | Notes |
   | --- | --- | --- | --- |
   | `FRAME_DISABLE_HTTPS` | `1` | Yes | Railway terminates public HTTPS and forwards HTTP to the container. |
-  | `FRAME_ADMIN_PASSWORD` | a strong password | Yes for public Railway apps | Protects `/admin/` and management/control APIs. |
+  | `FRAME_ADMIN_PASSWORD` | a strong password | Yes for public Railway apps | Use the literal password only; do not append `${{...}}` or reference itself. |
   | `FRAME_ENABLE_FACE_MATCH` | `1` | Optional | Enables the Smart Face Match pipeline; the built-in detector is a no-op until a local detector is registered. |
-  | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth values | Optional | Only needed for Google Photos import. |
-  | `GOOGLE_REDIRECT_URI` | `https://<your>.up.railway.app/api/google/callback` | Optional | Required only when Google Photos import is enabled. |
+  | `GOOGLE_CLIENT_ID` | Google OAuth client ID | Optional | Only needed for Google Photos import. Leave blank/remove until you have the real ID. |
+  | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret | Optional | Only needed for Google Photos import. Leave blank/remove until you have the real secret. |
+  | `GOOGLE_REDIRECT_URI` | `https://<your>.up.railway.app/api/google/callback` | Optional | Required only when Google Photos import is enabled; include `https://` and `/api/google/callback`. |
 
   You can ignore Railway's other suggested variables (`FRAME_TLS_KEY`, `FRAME_TLS_CERT`,
   `FRAME_HTTP_PORT`, `FRAME_HTTPS_PORT`, `FRAME_HOST`, `FRAME_DATA_DIR`) unless you have a
   specific custom setup. The Docker image already defaults to `/data` and port `9095`. Railway rejects
   Dockerfile `VOLUME` instructions, so persistence must come from the Railway volume mount
   (Railway also injects `RAILWAY_VOLUME_MOUNT_PATH`).
-  specific custom setup. The Docker image already defaults to `/data` and port `9095`, and the
-  Railway volume injects its own `RAILWAY_VOLUME_MOUNT_PATH`.
 
-After changing the target port or variables, redeploy the service and check
-`https://<your>.up.railway.app/api/health` before opening `/admin/`.
-
-If Railway shows multiple failed services (`admin`, `display`, `server`, etc.), open each failed
-service's **Deployments → latest failed build → View logs** to confirm the exact error, then remove
-the extra services from **Project Settings → Danger → Manage Services**. Keep only the single
-root/Dockerfile service and the `/data` volume.
+After changing the target port, healthcheck path, or variables, redeploy the service and check
+`https://<your>.up.railway.app/api/health` before opening `/admin/`. If the deploy detail page
+shows `Network › Healthcheck`, verify Railway's healthcheck field is `/api/health`; a full URL
+there will fail.
 
 If Railway shows multiple failed services (`admin`, `display`, `server`, etc.), open each failed
 service's **Deployments → latest failed build → View logs** to confirm the exact error, then remove
