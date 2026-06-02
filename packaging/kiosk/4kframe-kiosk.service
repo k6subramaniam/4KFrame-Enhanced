@@ -1,0 +1,18 @@
+[Unit]
+Description=4KFrame kiosk display (Chromium full-screen)
+After=graphical.target
+Wants=graphical.target
+
+[Service]
+# Set FRAME_URL to your server if this device isn't also the server, e.g.
+#   sudo systemctl edit 4kframe-kiosk
+#   [Service]
+#   Environment=FRAME_URL=http://192.168.1.50:9095/
+Environment=DISPLAY=:0
+Environment=FRAME_URL=http://localhost:9095/
+ExecStart=/usr/local/bin/4kframe-kiosk.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=graphical.target

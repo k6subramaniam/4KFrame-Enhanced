@@ -52,6 +52,10 @@ docker compose up --build -d   # serves admin + display + API on :9095 (and :909
 - Display: `http://<frame-host>:9095/` (or `https://<frame-host>:9096/`)
 - Admin:   `http://<frame-host>:9095/admin/`
 
+See **[DEPLOY.md](DEPLOY.md)** for the full walkthrough — choosing a host, Google Photos on a
+LAN without a domain, showing the frame on a TV (smart-TV browser or a Raspberry Pi kiosk),
+backups, and updates.
+
 ### HTTPS
 HTTPS is served on **:9096**. On first boot the server **self-signs** a certificate (via
 `openssl`) into the data volume, with `localhost` and the LAN IP in its SAN — browsers will
