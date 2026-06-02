@@ -194,6 +194,11 @@ service's **Deployments → latest failed build → View logs** to confirm the e
 the extra services from **Project Settings → Danger → Manage Services**. Keep only the single
 root/Dockerfile service and the `/data` volume.
 
+If Railway shows multiple failed services (`admin`, `display`, `server`, etc.), open each failed
+service's **Deployments → latest failed build → View logs** to confirm the exact error, then remove
+the extra services from **Project Settings → Danger → Manage Services**. Keep only the single
+root/Dockerfile service and the `/data` volume.
+
 **Cost/caveats:** keep one machine always running (a frame must stay up); media lives on the
 paid volume; streaming 4K to the TV uses egress. For a home frame, LAN/Pi is cheaper and lower
 latency — cloud mainly buys you remote access.
