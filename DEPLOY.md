@@ -183,6 +183,9 @@ server serves both web UIs. In the dashboard, configure the remaining service li
 
   You can ignore Railway's other suggested variables (`FRAME_TLS_KEY`, `FRAME_TLS_CERT`,
   `FRAME_HTTP_PORT`, `FRAME_HTTPS_PORT`, `FRAME_HOST`, `FRAME_DATA_DIR`) unless you have a
+  specific custom setup. The Docker image already defaults to `/data` and port `9095`. Railway rejects
+  Dockerfile `VOLUME` instructions, so persistence must come from the Railway volume mount
+  (Railway also injects `RAILWAY_VOLUME_MOUNT_PATH`).
   specific custom setup. The Docker image already defaults to `/data` and port `9095`, and the
   Railway volume injects its own `RAILWAY_VOLUME_MOUNT_PATH`.
 
