@@ -34,6 +34,7 @@ import {
 import { hub } from '../hub.js';
 import * as gphotos from '../integrations/googlePhotos.js';
 import { computeStorage } from '../storage.js';
+import * as auth from '../auth.js';
 
 const VIDEO_EXT = new Set(['mp4', 'webm', 'mov', 'm4v', 'mkv']);
 
@@ -45,7 +46,39 @@ function safeUploadId(id: unknown): string | null {
   return typeof id === 'string' && /^[A-Za-z0-9_-]{8,128}$/.test(id) ? id : null;
 }
 
+/** /api/* paths reachable without a login (display/TV needs these; plus the login flow). */
+const OPEN_API = new Set([
+  '/api/health', '/api/current', '/api/qr', '/api/login', '/api/logout', '/api/me',
+]);
+
 export async function registerApi(app: FastifyInstance): Promise<void> {
+  // Gate management/control API behind the admin password (when one is set). Static assets,
+  // /ws and /photos are not under /api/ and stay open so TVs need no login.
+  app.addHook('onRequest', async (req, reply) => {
+    if (!auth.authRequired()) return;
+    const path = req.url.split('?')[0];
+    if (!path.startsWith('/api/') || OPEN_API.has(path)) return;
+    if (!auth.isAuthed(req.headers.cookie)) {
+      return reply.code(401).send({ error: 'unauthorized' });
+    }
+  });
+
+  // --- Auth ---
+  app.post('/api/login', async (req, reply) => {
+    const { password } = (req.body ?? {}) as { password?: string };
+    if (!auth.checkPassword(password)) return reply.code(401).send({ ok: false, error: 'wrong password' });
+    reply.header('set-cookie', auth.setCookie(auth.issueToken(), req.protocol === 'https'));
+    return { ok: true };
+  });
+  app.post('/api/logout', async (_req, reply) => {
+    reply.header('set-cookie', auth.clearCookie());
+    return { ok: true };
+  });
+  app.get('/api/me', async (req) => ({
+    required: auth.authRequired(),
+    authed: auth.isAuthed(req.headers.cookie),
+  }));
+
   // --- Playback control (original) ---
   app.get('/api/progress', async () => { progress(); return { ok: true }; });
   app.get('/api/next', async () => { next(); return { ok: true }; });

@@ -27,6 +27,23 @@ export async function deleteItem(id: string): Promise<void> {
   await fetch(`/api/delete/${id}`);
 }
 
+export interface AuthState { required: boolean; authed: boolean; }
+export async function me(): Promise<AuthState> {
+  const res = await fetch('/api/me');
+  return (await res.json()) as AuthState;
+}
+export async function login(password: string): Promise<boolean> {
+  const res = await fetch('/api/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ password }),
+  });
+  return res.ok;
+}
+export async function logout(): Promise<void> {
+  await fetch('/api/logout', { method: 'POST' });
+}
+
 export async function skipNext(): Promise<void> { await fetch('/api/next'); }
 export async function skipPrev(): Promise<void> { await fetch('/api/previous'); }
 

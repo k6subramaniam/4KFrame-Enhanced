@@ -64,6 +64,12 @@ show a one-time "not trusted" warning. To use your own (trusted) certificate, se
 HTTPS is required for PWA install and to serve the display as a publicly reachable Cast
 receiver.
 
+### Admin password
+Set **`FRAME_ADMIN_PASSWORD`** to lock the admin: the admin UI and all management/control
+APIs then require that password (one login per browser, 30-day cookie), while the **display
+and TVs need no login**. Strongly recommended for any **public/cloud** deployment — without it
+the admin and your library are open to anyone with the URL. On a private LAN it's optional.
+
 ### Runtime dependencies
 - **ffmpeg** (in the Docker image) — video posters & transcoding. Videos that aren't already
   a TV-friendly H.264/AAC MP4 are **automatically transcoded in the background** (to H.264 /

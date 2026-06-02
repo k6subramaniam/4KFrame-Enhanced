@@ -9,6 +9,7 @@ import type { MediaItem } from '@4kframe/shared';
 import {
   fetchItems, fetchData, castItem, deleteItem, upload, thumbUrl,
   skipNext, skipPrev, getPlayback, setPaused, setHold, toggleEnabled,
+  me, login, logout,
 } from './api.js';
 import { renderSettings } from './settings.js';
 import { initCastSender, isCastReady, castControl, toggleCastSession } from './cast-sender.js';
@@ -171,9 +172,54 @@ function wireUpload(): void {
   });
 }
 
-wireCast();
-wireModes();
-wireUpload();
-wirePlayback();
-setMode('cast');
-refresh().catch((err) => console.error(err));
+let started = false;
+async function start(): Promise<void> {
+  if (!started) {
+    started = true;
+    wireCast();
+    wireModes();
+    wireUpload();
+    wirePlayback();
+    setMode('cast');
+  }
+  await refresh();
+}
+
+function showLogin(): void {
+  const overlay = document.getElementById('login') as HTMLElement;
+  const form = document.getElementById('login-form') as HTMLFormElement;
+  const pw = document.getElementById('login-pw') as HTMLInputElement;
+  const err = document.getElementById('login-err') as HTMLElement;
+  overlay.classList.remove('hidden');
+  pw.focus();
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    err.textContent = '';
+    if (await login(pw.value)) {
+      overlay.classList.add('hidden');
+      wireLogout(true);
+      await start();
+    } else {
+      err.textContent = 'Wrong password';
+      pw.select();
+    }
+  };
+}
+
+function wireLogout(show: boolean): void {
+  const btn = document.getElementById('logout') as HTMLButtonElement;
+  btn.classList.toggle('hidden', !show);
+  btn.onclick = async () => { await logout(); location.reload(); };
+}
+
+async function init(): Promise<void> {
+  const auth = await me().catch(() => ({ required: false, authed: true }));
+  if (auth.required && !auth.authed) {
+    showLogin();
+    return;
+  }
+  wireLogout(auth.required && auth.authed);
+  await start();
+}
+
+init().catch((err) => console.error(err));
