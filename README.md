@@ -149,7 +149,12 @@ of different shapes can run at once, each framed correctly. In **Admin → Scali
 `/api/progress` · `/api/next` · `/api/previous` · `/api/current` · `/api/data` ·
 `/api/thumbs` · `/api/cast/:id` · `/api/delete/:id` · `/api/photo/:id` ·
 `/api/preview/:id` · `/photos/:filename`
-New: `/api/upload`, `/api/video/:id`, `/api/google/*`, `/api/qr`, `/api/logs`, WS `/ws`.
+New: `/api/upload` (and chunked `/api/upload/chunk` + `/api/upload/finish`), `/api/video/:id`,
+`/api/google/*`, `/api/qr`, `/api/logs`, WS `/ws`.
+
+> Large files are uploaded in 4 MB chunks and reassembled server-side, so big videos upload
+> even through proxies/CDNs that cap request body size (e.g. GitHub Codespaces' `413`). The
+> admin shows live upload progress.
 
 Media keeps the original `‹identity›.‹width›.‹height›.jpg` filename convention.
 
