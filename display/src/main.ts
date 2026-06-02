@@ -30,6 +30,7 @@ let lastItems: MediaItem[] | null = null;
 let lastVideoItem: MediaItem | null = null;
 let showingVideo = false;
 let paused = false;
+let holding = false;
 
 /** Forward a control message to the backend (used to bridge Cast custom messages). */
 function sendControl(msg: ControlMessage): void {
@@ -132,7 +133,7 @@ async function renderVideo(item: MediaItem): Promise<void> {
   lastVideoItem = item;
   layoutVideo(item);
   video.muted = config.videoMuted;
-  video.loop = config.videoLoop;
+  video.loop = config.videoLoop || holding;
   video.onerror = () => handleVideoError(item);
   video.src = `/photos/${item.file}`;
   video.classList.add('visible');
@@ -195,6 +196,12 @@ async function rerender(): Promise<void> {
   }
 }
 
+function statusText(): string {
+  if (paused) return '⏸ Paused';
+  if (holding) return '🔁 Loop';
+  return '';
+}
+
 function handleEvent(event: FrameEvent): void {
   switch (event.type) {
     case 'config':
@@ -218,7 +225,12 @@ function handleEvent(event: FrameEvent): void {
       } else {
         motionAnim?.play();
       }
-      setStatus(paused ? '⏸ Paused' : '');
+      setStatus(statusText());
+      break;
+    case 'hold':
+      holding = event.holding;
+      if (showingVideo) video.loop = config.videoLoop || holding;
+      setStatus(statusText());
       break;
     case 'log':
       if (event.level === 'error') console.error(event.message);

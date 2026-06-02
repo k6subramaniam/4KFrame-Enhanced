@@ -27,6 +27,31 @@ export async function deleteItem(id: string): Promise<void> {
   await fetch(`/api/delete/${id}`);
 }
 
+export async function skipNext(): Promise<void> { await fetch('/api/next'); }
+export async function skipPrev(): Promise<void> { await fetch('/api/previous'); }
+
+export interface Playback {
+  paused: boolean;
+  holding: boolean;
+}
+export async function getPlayback(): Promise<Playback> {
+  const res = await fetch('/api/playback');
+  return (await res.json()) as Playback;
+}
+export async function setPaused(paused: boolean): Promise<void> {
+  await fetch(paused ? '/api/pause' : '/api/resume');
+}
+export async function setHold(holding: boolean): Promise<void> {
+  await fetch(holding ? '/api/hold' : '/api/unhold');
+}
+
+/** Include/exclude an item from rotation; returns the new enabled state. */
+export async function toggleEnabled(id: string): Promise<boolean> {
+  const res = await fetch(`/api/toggle/${id}`);
+  const json = (await res.json()) as { enabled: boolean };
+  return json.enabled;
+}
+
 export interface UploadResult {
   ok: boolean;
   added: MediaItem[];

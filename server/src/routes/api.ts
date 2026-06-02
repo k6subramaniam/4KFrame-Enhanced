@@ -21,12 +21,16 @@ import {
   listItems,
   getItem,
   addItem,
+  updateItem,
   removeItem,
 } from '../store.js';
 import { ingestImage } from '../media/images.js';
 import { ingestVideo } from '../media/video.js';
 import { enqueueTranscode } from '../media/transcode.js';
-import { cast, next, previous, progress, getCurrent, refresh } from '../slideshow.js';
+import {
+  cast, next, previous, progress, getCurrent, refresh,
+  setPaused, setHold, isPaused, isHolding,
+} from '../slideshow.js';
 import { hub } from '../hub.js';
 import * as gphotos from '../integrations/googlePhotos.js';
 import { computeStorage } from '../storage.js';
@@ -46,6 +50,24 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
   app.get('/api/progress', async () => { progress(); return { ok: true }; });
   app.get('/api/next', async () => { next(); return { ok: true }; });
   app.get('/api/previous', async () => { previous(); return { ok: true }; });
+
+  // --- Playback state (pause auto-advance / hold-loop the current item) ---
+  app.get('/api/playback', async () => ({ paused: isPaused(), holding: isHolding() }));
+  app.get('/api/pause', async () => { setPaused(true); return { ok: true }; });
+  app.get('/api/resume', async () => { setPaused(false); return { ok: true }; });
+  app.get('/api/hold', async () => { setHold(true); return { ok: true }; });
+  app.get('/api/unhold', async () => { setHold(false); return { ok: true }; });
+
+  // --- Include/exclude an item from automatic rotation ---
+  app.get('/api/toggle/:id', async (req, reply) => {
+    const item = getItem((req.params as { id: string }).id);
+    if (!item) return reply.code(404).send({ error: 'not found' });
+    const enabled = item.enabled === false; // flip
+    await updateItem(item.id, { enabled });
+    refresh();
+    hub.emitEvent({ type: 'library', items: listItems() });
+    return { ok: true, enabled };
+  });
 
   app.get('/api/current', async (): Promise<CurrentResponse> => {
     const cfg = await withStorage();

@@ -13,7 +13,8 @@ import {
 } from './api.js';
 
 const PERIOD_LABELS: Record<number, string> = {
-  0: 'Paused', 10: '10s', 15: '15s', 20: '20s', 40: '40s', 60: '60s', 300: '5 min',
+  0: 'Paused', 5: '5s', 10: '10s', 15: '15s', 20: '20s', 40: '40s', 60: '60s',
+  300: '5 min', 600: '10 min', 1200: '20 min',
 };
 
 function seg(name: string, options: { label: string; value: string; active: boolean }[]): string {

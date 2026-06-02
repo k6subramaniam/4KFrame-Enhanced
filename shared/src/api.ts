@@ -35,6 +35,8 @@ export interface MediaItem {
   caption?: string;
   /** True while a background H.264 transcode is in progress (video only). */
   transcoding?: boolean;
+  /** Whether the item is included in automatic slideshow rotation (default true). */
+  enabled?: boolean;
 }
 
 /** Response of `/api/current` — the active item(s) plus the loose config payload. */
@@ -66,6 +68,7 @@ export type FrameEvent =
   | { type: 'config'; config: FrameConfig }
   | { type: 'library'; items: MediaItem[] }
   | { type: 'paused'; paused: boolean }
+  | { type: 'hold'; holding: boolean }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; message: string };
 
 export type WsMessage = ControlMessage | FrameEvent;
