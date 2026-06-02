@@ -48,6 +48,8 @@ export interface MediaItem {
   source: 'upload' | 'google-photos';
   /** Optional caption (EXIF/description derived). */
   caption?: string;
+  /** Face boxes detected on the image, or on the poster for videos. */
+  faces?: FaceBox[];
   /** True while a background H.264 transcode is in progress (video only). */
   transcoding?: boolean;
   /** Whether the item is included in automatic slideshow rotation (default true). */
