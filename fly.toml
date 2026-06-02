@@ -1,0 +1,45 @@
+# Fly.io deployment for 4KFrame Enhanced.
+#
+# First time:
+#   fly launch --no-deploy --copy-config --name <your-unique-name>   # or edit `app` below
+#   fly volume create frame_data --size 10 --region <region>          # persistent media library
+#   fly secrets set FRAME_ADMIN_PASSWORD=your-strong-password         # lock the admin
+#   # (optional Google Photos) fly secrets set GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... \
+#   #   GOOGLE_REDIRECT_URI=https://<your-app>.fly.dev/api/google/callback
+#   fly deploy
+#
+# Fly terminates TLS at the edge and forwards HTTP to the container, so the app runs
+# HTTP-only on 9095 (FRAME_DISABLE_HTTPS=1); the public URL is still https:// (and wss://).
+
+app = "4kframe-enhanced"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  FRAME_DATA_DIR = "/data"
+  FRAME_DISABLE_HTTPS = "1"
+
+[http_service]
+  internal_port = 9095
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/api/health"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "20s"
+
+[[mounts]]
+  source = "frame_data"
+  destination = "/data"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 2
+  memory_mb = 2048
