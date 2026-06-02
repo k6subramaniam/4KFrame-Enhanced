@@ -16,8 +16,27 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { buildFilename, newIdentity, type MediaItem } from '@4kframe/shared';
 import { MEDIA_DIR } from '../env.js';
+import { detectFacesInGeneratedVideoPosterImage } from './faceMatch.js';
+
+export type CommandRunner = (cmd: string, args: string[], input?: Buffer) => Promise<{ code: number; stdout: Buffer; stderr: string }>;
+
+let commandRunner: CommandRunner = defaultRun;
+
+export function setCommandRunnerForTests(next: CommandRunner): void {
+  commandRunner = next;
+  ffmpegChecked = undefined;
+}
+
+export function resetCommandRunnerForTests(): void {
+  commandRunner = defaultRun;
+  ffmpegChecked = undefined;
+}
 
 export function run(cmd: string, args: string[], input?: Buffer): Promise<{ code: number; stdout: Buffer; stderr: string }> {
+  return commandRunner(cmd, args, input);
+}
+
+function defaultRun(cmd: string, args: string[], input?: Buffer): Promise<{ code: number; stdout: Buffer; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { stdio: ['pipe', 'pipe', 'pipe'] });
     const out: Buffer[] = [];
@@ -139,6 +158,10 @@ export async function ingestVideo(
     transcoding = needsTranscode(cleanExt, p);
   }
 
+  const faces = posterName
+    ? await detectFacesInGeneratedVideoPosterImage(await fs.readFile(path.join(MEDIA_DIR, posterName)))
+    : undefined;
+
   // Rename the video file to embed real dimensions, for parity with the convention.
   const finalName = buildFilename(identity, width, height, cleanExt);
   if (finalName !== tmpName) {
@@ -159,6 +182,7 @@ export async function ingestVideo(
     source,
     caption,
     ...(transcoding ? { transcoding: true } : {}),
+    ...(faces ? { faces } : {}),
   };
   return { item };
 }

@@ -72,6 +72,26 @@ browser **on the host itself** (or over an SSH tunnel: `ssh -L 9095:localhost:90
 then open `http://localhost:9095/admin/`). Tokens are stored server-side, so **Import** then
 works from any device on your LAN. `docker compose restart` after editing `.env`.
 
+
+## Smart Face Match privacy (optional)
+
+Smart Face Match is **off by default**. To opt in, set the server-side flag and restart:
+
+```bash
+FRAME_ENABLE_FACE_MATCH=1
+```
+
+When enabled, detection runs in the server's local media pipeline. Photos are analyzed after
+server-side image normalization, and videos are analyzed only from the generated poster frame
+rather than by scanning the whole video file. The app persists only app-owned metadata on each
+media item (face bounding boxes, optional local embeddings, and optional labels assigned in the
+admin UI).
+
+Do **not** configure a detector that sends face images, embeddings, or other biometric data to
+third-party APIs unless you have explicitly decided to do so and have handled the privacy,
+consent, and compliance obligations for your deployment. The built-in default detector is a
+privacy-preserving no-op until a local detector is registered.
+
 ## 5. Show it on a TV
 
 **Option A — any smart TV with a browser (simplest).** Open `http://<host-ip>:9095/` in the

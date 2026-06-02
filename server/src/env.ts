@@ -23,6 +23,11 @@ export const HTTP_PORT = Number(process.env.FRAME_HTTP_PORT) || DEFAULT_HTTP_POR
 export const HTTPS_PORT = Number(process.env.FRAME_HTTPS_PORT) || DEFAULT_HTTPS_PORT;
 export const HOST = process.env.FRAME_HOST || '0.0.0.0';
 
+/** Smart Face Match is opt-in and disabled by default. */
+export function faceMatchEnabled(): boolean {
+  return process.env.FRAME_ENABLE_FACE_MATCH === '1';
+}
+
 /** HTTPS is served on {@link HTTPS_PORT} unless explicitly disabled. */
 export const HTTPS_ENABLED = process.env.FRAME_DISABLE_HTTPS !== '1';
 /** TLS material. Point these at your own cert/key, or leave unset to auto self-sign. */
