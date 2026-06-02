@@ -126,11 +126,15 @@ export async function ingestVideo(
 
   if (available) {
     const p = await probe(tmpPath);
-    if (p) {
-      width = p.width;
-      height = p.height;
-      durationSec = p.durationSec;
+    if (!p) {
+      // ffmpeg is present but can't read this as video — reject it (e.g. corrupt or not a
+      // real video) rather than store a file that plays as a black screen.
+      await fs.rm(tmpPath).catch(() => undefined);
+      throw new Error('not a recognisable video file');
     }
+    width = p.width;
+    height = p.height;
+    durationSec = p.durationSec;
     posterName = await extractPoster(tmpPath, identity, width, height);
     transcoding = needsTranscode(cleanExt, p);
   }

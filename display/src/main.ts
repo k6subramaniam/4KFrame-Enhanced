@@ -133,10 +133,22 @@ async function renderVideo(item: MediaItem): Promise<void> {
   layoutVideo(item);
   video.muted = config.videoMuted;
   video.loop = config.videoLoop;
+  video.onerror = () => handleVideoError(item);
   video.src = `/photos/${item.file}`;
   video.classList.add('visible');
   try { await video.play(); } catch { /* autoplay may require muted; already muted */ }
   setCaption([item], config);
+}
+
+/** A video that can't be decoded (bad/unsupported file) shouldn't freeze the frame on black. */
+function handleVideoError(item: MediaItem): void {
+  if (lastVideoItem?.id !== item.id) return; // stale handler from a previous item
+  console.error(`Cannot play video ${item.file} — skipping.`);
+  setStatus('Skipping unplayable video…');
+  // Delay so several bad files in a row skip calmly rather than in a tight loop.
+  window.setTimeout(() => {
+    if (lastVideoItem?.id === item.id && !paused) sendControl({ type: 'next' });
+  }, 2500);
 }
 
 /** Position the <video> into the aspect content rect and set its backdrop. */
@@ -160,6 +172,7 @@ function layoutVideo(item: MediaItem): void {
 function hideVideo(): void {
   showingVideo = false;
   lastVideoItem = null;
+  video.onerror = null;
   video.classList.remove('visible');
   videoBg.classList.remove('visible');
   video.pause();
