@@ -33,6 +33,7 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload): P
   const panX = Number(data.panX ?? 0);
   const panY = Number(data.panY ?? 0);
   const motion = data.motion ?? 'off';
+  const smartFraming = (data.smartFraming ?? 'false') === 'true';
   const qr = (data.showQr ?? 'true') === 'true';
   const aspectLabels: Record<string, string> = { auto: 'Auto', '16:9': '16:9', '9:16': '9:16 ↕', '4:3': '4:3', '3:4': '3:4 ↕', '1:1': '1:1', '21:9': '21:9' };
   const motionLabels: Record<string, string> = { off: 'Off', zoom: 'Zoom', pan: 'Pan', zoompan: 'Zoom + Pan' };
@@ -82,6 +83,12 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload): P
       <h2 style="margin-top:1rem">Motion (Ken Burns)</h2>
       ${seg('motion', MOTION_MODES.map((m) => ({ label: motionLabels[m] ?? m, value: m, active: m === motion })))}
       <div class="muted" style="margin-top:.4rem">Slowly zooms/pans each photo while it's shown.</div>
+      <h2 style="margin-top:1rem">Smart face framing</h2>
+      ${seg('smartFraming', [
+        { label: 'On', value: 'true', active: smartFraming },
+        { label: 'Off', value: 'false', active: !smartFraming },
+      ])}
+      <div class="muted" style="margin-top:.4rem">When available, face metadata keeps people near the center of cropped photos and video posters. Manual zoom or pan overrides it.</div>
     </div>
     <div class="panel">
       <h2>QR Code</h2>

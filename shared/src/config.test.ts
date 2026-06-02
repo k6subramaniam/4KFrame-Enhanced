@@ -57,11 +57,14 @@ test('zoom/pan are clamped and motion is validated', () => {
 
   assert.equal(fromApiData(base, { motion: 'zoompan' }).motion, 'zoompan');
   assert.equal(fromApiData(base, { motion: 'nope' }).motion, base.motion); // unknown ignored
+  assert.equal(fromApiData(base, { smartFraming: 'true' }).smartFraming, true);
+  assert.equal(fromApiData({ ...base, smartFraming: true }, { smartFraming: 'false' }).smartFraming, false);
 
   // Round-trip through the loose payload.
-  const d = toApiData({ ...base, zoom: 2, panX: 0.5, panY: -0.25, motion: 'pan' });
+  const d = toApiData({ ...base, zoom: 2, panX: 0.5, panY: -0.25, motion: 'pan', smartFraming: true });
   assert.equal(d.zoom, '2');
   assert.equal(d.motion, 'pan');
+  assert.equal(d.smartFraming, 'true');
   assert.equal(fromApiData(base, d).zoom, 2);
   assert.equal(fromApiData(base, d).panX, 0.5);
 });

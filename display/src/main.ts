@@ -10,7 +10,7 @@
  * portrait frames at the same time — each connected display composes for its own screen.
  */
 
-import { defaultConfig, type ControlMessage, type FrameConfig, type FrameEvent, type MediaItem } from '@4kframe/shared';
+import { defaultConfig, faceCenterToPan, type ControlMessage, type FrameConfig, type FillMode, type FrameEvent, type MediaItem } from '@4kframe/shared';
 import { GLRenderer } from './gl.js';
 import { compose, contentRect } from './compositor.js';
 import { applyOverlays, setCaption, setStatus } from './overlays.js';
@@ -64,6 +64,7 @@ function composeCurrent(items: MediaItem[]): Promise<HTMLCanvasElement> {
     zoom: config.zoom,
     panX: config.panX,
     panY: config.panY,
+    smartFraming: config.smartFraming,
   });
 }
 
@@ -153,6 +154,30 @@ function handleVideoError(item: MediaItem): void {
 }
 
 /** Position the <video> into the aspect content rect and set its backdrop. */
+function fittedMediaSize(item: MediaItem, frameW: number, frameH: number, fillMode: FillMode): { w: number; h: number } {
+  if (fillMode === 'stretch') return { w: frameW, h: frameH };
+  const fit = fillMode === 'cover' ? 'cover' : 'contain';
+  const base = fit === 'cover'
+    ? Math.max(frameW / item.width, frameH / item.height)
+    : Math.min(frameW / item.width, frameH / item.height);
+  return { w: item.width * base, h: item.height * base };
+}
+
+function smartVideoObjectPosition(item: MediaItem, r: { w: number; h: number }): string {
+  const hasManualOverride = Math.abs(config.panX) > 0.001 || Math.abs(config.panY) > 0.001 || config.zoom > 1.001;
+  if (!config.smartFraming || hasManualOverride || !item.faces?.length) return '50% 50%';
+
+  const fitted = fittedMediaSize(item, r.w, r.h, config.fillMode);
+  const pan = faceCenterToPan({
+    item,
+    frameWidth: r.w,
+    frameHeight: r.h,
+    fittedWidth: fitted.w,
+    fittedHeight: fitted.h,
+  });
+  return `${(pan.panX + 1) * 50}% ${(pan.panY + 1) * 50}%`;
+}
+
 function layoutVideo(item: MediaItem): void {
   const r = contentRect(window.innerWidth, window.innerHeight, config.frameAspect);
   video.style.left = `${r.x}px`;
@@ -160,6 +185,7 @@ function layoutVideo(item: MediaItem): void {
   video.style.width = `${r.w}px`;
   video.style.height = `${r.h}px`;
   video.style.objectFit = config.fillMode === 'cover' ? 'cover' : config.fillMode === 'stretch' ? 'fill' : 'contain';
+  video.style.objectPosition = smartVideoObjectPosition(item, r);
 
   // Opaque backdrop hides the stale photo behind any bars; blurred poster in blur mode.
   videoBg.classList.add('visible');
