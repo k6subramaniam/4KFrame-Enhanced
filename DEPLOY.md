@@ -186,9 +186,16 @@ server serves both web UIs. In the dashboard, configure the remaining service li
   specific custom setup. The Docker image already defaults to `/data` and port `9095`. Railway rejects
   Dockerfile `VOLUME` instructions, so persistence must come from the Railway volume mount
   (Railway also injects `RAILWAY_VOLUME_MOUNT_PATH`).
+  specific custom setup. The Docker image already defaults to `/data` and port `9095`, and the
+  Railway volume injects its own `RAILWAY_VOLUME_MOUNT_PATH`.
 
 After changing the target port or variables, redeploy the service and check
 `https://<your>.up.railway.app/api/health` before opening `/admin/`.
+
+If Railway shows multiple failed services (`admin`, `display`, `server`, etc.), open each failed
+service's **Deployments → latest failed build → View logs** to confirm the exact error, then remove
+the extra services from **Project Settings → Danger → Manage Services**. Keep only the single
+root/Dockerfile service and the `/data` volume.
 
 If Railway shows multiple failed services (`admin`, `display`, `server`, etc.), open each failed
 service's **Deployments → latest failed build → View logs** to confirm the exact error, then remove
