@@ -56,21 +56,41 @@ Uploads here go **straight to the server (up to 1 GB)** — no proxy size limit.
 
 ## 4. Google Photos (optional)
 
-Import uses Google's **Photo Picker API** and needs an **OAuth client** (not an API key — and
-the *Photos* Picker API, not the *Google* Picker API). See the README "Google Photos" section
-for the console steps, then in `.env`:
+You can skip this entire section unless you want to import selected photos/videos from Google
+Photos. Import uses Google's **Photo Picker API** and needs an OAuth **Web application** client
+(not an API key — and not the similarly named Google Picker / Drive widget).
 
-```
-GOOGLE_CLIENT_ID=...apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=...
-GOOGLE_REDIRECT_URI=http://localhost:9095/api/google/callback
-```
+**Google Cloud setup:**
 
-**Tip — connect without a domain or HTTPS:** Google allows `http://localhost` redirect URIs.
-Register `http://localhost:9095/api/google/callback`, then run the **Connect** flow in a
-browser **on the host itself** (or over an SSH tunnel: `ssh -L 9095:localhost:9095 user@host`,
-then open `http://localhost:9095/admin/`). Tokens are stored server-side, so **Import** then
-works from any device on your LAN. `docker compose restart` after editing `.env`.
+1. In Google Cloud Console, select this project (or create one) and enable **Photos Picker API**.
+2. In **Google Auth Platform → Audience / OAuth consent screen**, configure the app, add your
+   Google account as a **Test user** while the app is in Testing, and request the scope
+   `https://www.googleapis.com/auth/photospicker.mediaitems.readonly`.
+3. In **Google Auth Platform → Clients → Create client**, choose **Web application**.
+4. Add the exact **Authorized redirect URI** for where this frame is hosted:
+
+   | Deployment | Authorized redirect URI / `GOOGLE_REDIRECT_URI` |
+   |---|---|
+   | Railway | `https://4kframe-enhanced-production.up.railway.app/api/google/callback` |
+   | Docker on a LAN host | `http://<frame-host>:9095/api/google/callback` |
+   | Local dev | `http://localhost:9095/api/google/callback` |
+
+5. Copy the generated **Client ID** and **Client secret** into your deployment variables:
+
+   ```
+   GOOGLE_CLIENT_ID=...apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=...
+   GOOGLE_REDIRECT_URI=https://4kframe-enhanced-production.up.railway.app/api/google/callback
+   ```
+
+For Railway, set those three values under the service's **Variables** tab, redeploy, then open
+`/admin/` and use **Connect Google Photos → Import from Google Photos**. Tokens are stored
+server-side on the frame, so after the first connect the import flow works from your phone.
+
+**Tip — connect without a domain or HTTPS for LAN testing:** Google allows `http://localhost`
+redirect URIs. Register `http://localhost:9095/api/google/callback`, then run the **Connect** flow
+in a browser **on the host itself** (or over an SSH tunnel: `ssh -L 9095:localhost:9095 user@host`,
+then open `http://localhost:9095/admin/`). `docker compose restart` after editing `.env`.
 
 
 ## Smart Face Match privacy (optional)
@@ -161,10 +181,43 @@ fly deploy
 
 The `frame_data` volume backs `/data`, so create it in the same region as the Fly machine (`primary_region`, `iad` by default).
 
-**Railway** — a [`railway.json`](railway.json) pins the Dockerfile build. In the dashboard:
-deploy from this repo → add a **Volume mounted at `/data`** → set the service's **target port to
-`9095`** → add variables `FRAME_DISABLE_HTTPS=1` and `FRAME_ADMIN_PASSWORD=…` (plus
-`GOOGLE_REDIRECT_URI=https://<your>.up.railway.app/api/google/callback` if using Google Photos).
+**Railway** — a [`railway.json`](railway.json) pins the Dockerfile build. Use **one** Railway
+service for this repo (for example `4KFrame-Enhanced` / `FrameCast`). Do **not** deploy separate
+`admin`, `display`, or `server` services: the root Docker image builds those workspaces and the
+server serves both web UIs. In the dashboard, configure the remaining service like this:
+
+- **Builder:** Dockerfile
+- **Dockerfile Path:** `/Dockerfile`
+- **Custom Start Command:** leave unset (the Dockerfile `CMD` starts the server)
+- **Public Networking target port:** `9095`
+- **Healthcheck path:** `/api/health` (path only, not the full `https://...` URL)
+- **Volume:** mounted at `/data`
+- **Variables:** add only the values you need:
+
+  | Variable | Railway value | Required? | Notes |
+  | --- | --- | --- | --- |
+  | `FRAME_DISABLE_HTTPS` | `1` | Yes | Railway terminates public HTTPS and forwards HTTP to the container. |
+  | `FRAME_ADMIN_PASSWORD` | a strong password | Yes for public Railway apps | Use the literal password only; do not append `${{...}}` or reference itself. |
+  | `FRAME_ENABLE_FACE_MATCH` | `1` | Optional | Enables the Smart Face Match pipeline; the built-in detector is a no-op until a local detector is registered. |
+  | `GOOGLE_CLIENT_ID` | Google OAuth client ID | Optional | Only needed for Google Photos import. Leave blank/remove until you have the real ID. |
+  | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret | Optional | Only needed for Google Photos import. Leave blank/remove until you have the real secret. |
+  | `GOOGLE_REDIRECT_URI` | `https://<your>.up.railway.app/api/google/callback` | Optional | Required only when Google Photos import is enabled; include `https://` and `/api/google/callback`. |
+
+  You can ignore Railway's other suggested variables (`FRAME_TLS_KEY`, `FRAME_TLS_CERT`,
+  `FRAME_HTTP_PORT`, `FRAME_HTTPS_PORT`, `FRAME_HOST`, `FRAME_DATA_DIR`) unless you have a
+  specific custom setup. The Docker image already defaults to `/data` and port `9095`. Railway rejects
+  Dockerfile `VOLUME` instructions, so persistence must come from the Railway volume mount
+  (Railway also injects `RAILWAY_VOLUME_MOUNT_PATH`).
+
+After changing the target port, healthcheck path, or variables, redeploy the service and check
+`https://<your>.up.railway.app/api/health` before opening `/admin/`. If the deploy detail page
+shows `Network › Healthcheck`, verify Railway's healthcheck field is `/api/health`; a full URL
+there will fail.
+
+If Railway shows multiple failed services (`admin`, `display`, `server`, etc.), open each failed
+service's **Deployments → latest failed build → View logs** to confirm the exact error, then remove
+the extra services from **Project Settings → Danger → Manage Services**. Keep only the single
+root/Dockerfile service and the `/data` volume.
 
 **Cost/caveats:** keep one machine always running (a frame must stay up); media lives on the
 paid volume; streaming 4K to the TV uses egress. For a home frame, LAN/Pi is cheaper and lower

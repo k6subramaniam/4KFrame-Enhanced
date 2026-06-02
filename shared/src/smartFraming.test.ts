@@ -19,7 +19,7 @@ function item(partial: Partial<MediaItem>): MediaItem {
 }
 
 test('wide photo face center maps to bounded horizontal pan only', () => {
-  const media = item({ faces: [{ x: 0.72, y: 0.35, width: 0.08, height: 0.16 }] });
+  const media = item({ faces: [{ box: { x: 0.72, y: 0.35, width: 0.08, height: 0.16 } }] });
   const pan = faceCenterToPan({
     item: media,
     frameWidth: 1000,
@@ -37,7 +37,7 @@ test('portrait photo face center maps to bounded vertical pan only', () => {
   const media = item({
     width: 2000,
     height: 4000,
-    faces: [{ x: 0.42, y: 0.05, width: 0.16, height: 0.12 }],
+    faces: [{ box: { x: 0.42, y: 0.05, width: 0.16, height: 0.12 } }],
   });
   const pan = faceCenterToPan({
     item: media,
@@ -55,8 +55,8 @@ test('portrait photo face center maps to bounded vertical pan only', () => {
 test('group photo uses the union center and clamps extreme overflow', () => {
   const media = item({
     faces: [
-      { x: 0.02, y: 0.38, width: 0.08, height: 0.14 },
-      { x: 0.92, y: 0.40, width: 0.07, height: 0.13 },
+      { box: { x: 0.02, y: 0.38, width: 0.08, height: 0.14 } },
+      { box: { x: 0.92, y: 0.40, width: 0.07, height: 0.13 } },
     ],
   });
 
@@ -76,7 +76,7 @@ test('group photo uses the union center and clamps extreme overflow', () => {
 });
 
 test('pixel-space face boxes are normalized and no faces are a no-op', () => {
-  const media = item({ faces: [{ x: 3200, y: 700, width: 300, height: 300 }] });
+  const media = item({ faces: [{ box: { x: 3200, y: 700, width: 300, height: 300 } }] });
   const center = faceUnionCenter(media);
   assert.ok(center);
   assert.ok(center.x > 0.79 && center.x < 0.88);

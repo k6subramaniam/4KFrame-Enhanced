@@ -97,7 +97,7 @@ In [Google Cloud Console](https://console.cloud.google.com/):
 1. **APIs & Services → Library →** enable **"Photos Picker API"**.
 2. **OAuth consent screen →** add the scope `…/auth/photospicker.mediaitems.readonly`, and add
    your Google account under **Test users** (while the app is in *Testing*).
-3. **Credentials → Create credentials → OAuth client ID → Web application.** Add an
+3. **Google Auth Platform → Clients → Create client → Web application** (or **Credentials → Create credentials → OAuth client ID → Web application** in the older UI). Add an
    **Authorized redirect URI** matching your deployment (see below). Copy the **Client ID** and
    **Client secret**.
 
@@ -115,6 +115,7 @@ OAuth redirect URI:
 
 | Deployment | `GOOGLE_REDIRECT_URI` |
 |---|---|
+| Railway | `https://4kframe-enhanced-production.up.railway.app/api/google/callback` |
 | Docker on a LAN host | `http://<frame-host>:9095/api/google/callback` |
 | GitHub Codespace | `https://<codespace>-9095.app.github.dev/api/google/callback` |
 | Local dev | `http://localhost:9095/api/google/callback` |
