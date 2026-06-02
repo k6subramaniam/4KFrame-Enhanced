@@ -56,21 +56,41 @@ Uploads here go **straight to the server (up to 1 GB)** — no proxy size limit.
 
 ## 4. Google Photos (optional)
 
-Import uses Google's **Photo Picker API** and needs an **OAuth client** (not an API key — and
-the *Photos* Picker API, not the *Google* Picker API). See the README "Google Photos" section
-for the console steps, then in `.env`:
+You can skip this entire section unless you want to import selected photos/videos from Google
+Photos. Import uses Google's **Photo Picker API** and needs an OAuth **Web application** client
+(not an API key — and not the similarly named Google Picker / Drive widget).
 
-```
-GOOGLE_CLIENT_ID=...apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=...
-GOOGLE_REDIRECT_URI=http://localhost:9095/api/google/callback
-```
+**Google Cloud setup:**
 
-**Tip — connect without a domain or HTTPS:** Google allows `http://localhost` redirect URIs.
-Register `http://localhost:9095/api/google/callback`, then run the **Connect** flow in a
-browser **on the host itself** (or over an SSH tunnel: `ssh -L 9095:localhost:9095 user@host`,
-then open `http://localhost:9095/admin/`). Tokens are stored server-side, so **Import** then
-works from any device on your LAN. `docker compose restart` after editing `.env`.
+1. In Google Cloud Console, select this project (or create one) and enable **Photos Picker API**.
+2. In **Google Auth Platform → Audience / OAuth consent screen**, configure the app, add your
+   Google account as a **Test user** while the app is in Testing, and request the scope
+   `https://www.googleapis.com/auth/photospicker.mediaitems.readonly`.
+3. In **Google Auth Platform → Clients → Create client**, choose **Web application**.
+4. Add the exact **Authorized redirect URI** for where this frame is hosted:
+
+   | Deployment | Authorized redirect URI / `GOOGLE_REDIRECT_URI` |
+   |---|---|
+   | Railway | `https://4kframe-enhanced-production.up.railway.app/api/google/callback` |
+   | Docker on a LAN host | `http://<frame-host>:9095/api/google/callback` |
+   | Local dev | `http://localhost:9095/api/google/callback` |
+
+5. Copy the generated **Client ID** and **Client secret** into your deployment variables:
+
+   ```
+   GOOGLE_CLIENT_ID=...apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=...
+   GOOGLE_REDIRECT_URI=https://4kframe-enhanced-production.up.railway.app/api/google/callback
+   ```
+
+For Railway, set those three values under the service's **Variables** tab, redeploy, then open
+`/admin/` and use **Connect Google Photos → Import from Google Photos**. Tokens are stored
+server-side on the frame, so after the first connect the import flow works from your phone.
+
+**Tip — connect without a domain or HTTPS for LAN testing:** Google allows `http://localhost`
+redirect URIs. Register `http://localhost:9095/api/google/callback`, then run the **Connect** flow
+in a browser **on the host itself** (or over an SSH tunnel: `ssh -L 9095:localhost:9095 user@host`,
+then open `http://localhost:9095/admin/`). `docker compose restart` after editing `.env`.
 
 
 ## Smart Face Match privacy (optional)
