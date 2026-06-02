@@ -144,6 +144,14 @@ of different shapes can run at once, each framed correctly. In **Admin → Scali
 - **Zoom & Pan:** a manual zoom level (1–3×) and pan position, settable from Admin sliders or the remote.
 - **Motion (Ken Burns):** Off / Zoom / Pan / Zoom+Pan — a slow ambient zoom-and-pan across each photo.
 
+### Library & playback
+- **Photo Period** presets: Paused, 5s, 10s, 15s, 20s, 40s, 60s, 5 min, 10 min, 20 min.
+- **Playback bar** in the admin: **⏮ previous / ⏯ play-pause / ⏭ next**, and **🔁 loop** to hold the
+  current item (looping a video). The TV remote mirrors these.
+- **Include / exclude** any item from the rotation with the **✓ / 🚫** toggle on its tile — excluded
+  items are dimmed and skipped by the slideshow, but can still be cast explicitly.
+- **Video tiles** show their **duration** (m:ss).
+
 ## API (original-compatible)
 
 `/api/progress` · `/api/next` · `/api/previous` · `/api/current` · `/api/data` ·

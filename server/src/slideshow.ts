@@ -6,31 +6,42 @@
  *  - photos advance after `photoPeriod` seconds (0 = paused),
  *  - when `frameFill` is enabled and the current photo is portrait, a second
  *    portrait photo may be paired to fill a landscape frame,
- *  - casting promotes an item and shows it immediately (interactive transition).
+ *  - casting shows a specific item immediately (interactive transition).
+ *
+ * Items excluded from rotation (`enabled === false`) are skipped by automatic
+ * progression but can still be cast explicitly. "Hold" pins the current item
+ * (looping a video); "pause" stops progression and pauses video.
  *
  * Videos play for their natural duration (or `photoPeriod`, whichever is longer)
  * before advancing.
  */
 
 import type { MediaItem } from '@4kframe/shared';
-import { getConfig, listItems, promoteItem } from './store.js';
+import { getConfig, listItems, getItem } from './store.js';
 import { hub } from './hub.js';
 
 let pointer = 0;
 let current: MediaItem[] = [];
 let timer: NodeJS.Timeout | undefined;
 let paused = false;
+let holding = false;
 
 function isPortrait(i: MediaItem): boolean {
   return i.height > i.width && i.width > 0;
 }
 
-/** Choose the item(s) to display starting at `index` in the play order. */
+/** Items eligible for automatic rotation (excluded items are filtered out). */
+function rotation(): MediaItem[] {
+  return listItems().filter((i) => i.enabled !== false);
+}
+
+/** Choose the item(s) to display at `index` within the rotation. */
 function selectAt(index: number): MediaItem[] {
-  const items = listItems();
+  const items = rotation();
   if (items.length === 0) return [];
   const cfg = getConfig();
-  const primary = items[index % items.length];
+  const at = ((index % items.length) + items.length) % items.length;
+  const primary = items[at];
   if (!primary) return [];
 
   // Fill a landscape frame with two portrait photos when possible.
@@ -38,7 +49,7 @@ function selectAt(index: number): MediaItem[] {
     const frameLandscape = cfg.frameWidth >= cfg.frameHeight;
     if (frameLandscape) {
       const partner = items
-        .filter((i, idx) => idx !== index % items.length && i.kind === 'photo' && isPortrait(i))
+        .filter((i, idx) => idx !== at && i.kind === 'photo' && isPortrait(i))
         .at(0);
       if (partner) return [primary, partner];
     }
@@ -57,13 +68,13 @@ function durationMs(items: MediaItem[]): number {
 
 function schedule(): void {
   if (timer) clearTimeout(timer);
-  if (paused) return; // hold on the current item until resumed
+  if (paused || holding) return; // hold on the current item
   const ms = durationMs(current);
   if (ms <= 0) return; // paused via photoPeriod = 0
   timer = setTimeout(() => advance(1, false), ms);
 }
 
-/** Pause/resume automatic progression (e.g. from the TV remote). Manual next/previous still work. */
+/** Pause/resume automatic progression (manual next/previous still work). */
 export function setPaused(value: boolean): void {
   if (paused === value) return;
   paused = value;
@@ -75,14 +86,34 @@ export function setPaused(value: boolean): void {
   hub.emitEvent({ type: 'paused', paused });
 }
 
+/** Hold/loop the current item: stay on it and loop video. */
+export function setHold(value: boolean): void {
+  if (holding === value) return;
+  holding = value;
+  if (holding) {
+    if (timer) clearTimeout(timer);
+  } else {
+    schedule();
+  }
+  hub.emitEvent({ type: 'hold', holding });
+}
+
+export function isPaused(): boolean {
+  return paused;
+}
+
+export function isHolding(): boolean {
+  return holding;
+}
+
 function show(interactive: boolean): void {
   hub.emitEvent({ type: 'show', items: current, interactive });
   schedule();
 }
 
-/** Advance by `delta` steps (e.g. +1 next, -1 previous). */
+/** Advance by `delta` steps within the rotation (e.g. +1 next, -1 previous). */
 export function advance(delta: number, interactive: boolean): void {
-  const items = listItems();
+  const items = rotation();
   if (items.length === 0) {
     current = [];
     return;
@@ -98,21 +129,24 @@ export function progress(): void {
 }
 
 export function next(): void {
+  // Manual navigation also releases a hold so the frame moves on.
+  if (holding) setHold(false);
   advance(1, true);
 }
 
 export function previous(): void {
+  if (holding) setHold(false);
   advance(-1, true);
 }
 
-/** Cast a specific item: promote it and display immediately. */
+/** Cast a specific item: display it immediately, even if excluded from rotation. */
 export async function cast(id: string): Promise<boolean> {
-  const items = listItems();
-  const idx = items.findIndex((i) => i.id === id);
-  if (idx === -1) return false;
-  await promoteItem(id);
-  pointer = 0; // promoted item is now first
-  current = selectAt(0);
+  const item = getItem(id);
+  if (!item) return false;
+  current = [item];
+  const rot = rotation();
+  const idx = rot.findIndex((r) => r.id === id);
+  if (idx >= 0) pointer = idx; // continue rotation from here when not held
   show(true);
   return true;
 }
@@ -123,16 +157,14 @@ export function getCurrent(): MediaItem[] {
 
 /** Initialise the engine and start automatic progression. */
 export function startSlideshow(): void {
-  const items = listItems();
   pointer = 0;
-  current = items.length ? selectAt(0) : [];
+  current = rotation().length ? selectAt(0) : [];
   if (current.length) show(false);
 }
 
 /** Re-evaluate timing after a config or library change. */
 export function refresh(): void {
-  const items = listItems();
-  if (current.length === 0 && items.length) {
+  if (current.length === 0 && rotation().length) {
     startSlideshow();
   } else {
     schedule();

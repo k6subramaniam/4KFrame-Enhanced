@@ -6,7 +6,10 @@
  */
 
 import type { MediaItem } from '@4kframe/shared';
-import { fetchItems, fetchData, castItem, deleteItem, upload, thumbUrl } from './api.js';
+import {
+  fetchItems, fetchData, castItem, deleteItem, upload, thumbUrl,
+  skipNext, skipPrev, getPlayback, setPaused, setHold, toggleEnabled,
+} from './api.js';
 import { renderSettings } from './settings.js';
 import { initCastSender, isCastReady, castControl, toggleCastSession } from './cast-sender.js';
 
@@ -24,20 +27,58 @@ const HINTS: Record<Mode, string> = {
   delete: 'Delete mode: click to permanently remove from the frame.',
 };
 
+function fmtDuration(sec: number): string {
+  const s = Math.round(sec);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
 function renderGrid(): void {
   grid.innerHTML = '';
   for (const item of items) {
     const tile = document.createElement('div');
-    tile.className = `tile ${mode}`;
+    const excluded = item.enabled === false;
+    tile.className = `tile ${mode}${excluded ? ' excluded' : ''}`;
     // Videos only have an image thumb once a poster exists; otherwise show a placeholder.
     const hasImageThumb = item.kind === 'photo' || !!item.poster;
+    const dur = item.kind === 'video' && item.durationSec
+      ? `<span class="badge dur">${fmtDuration(item.durationSec)}</span>` : '';
     tile.innerHTML =
       (hasImageThumb ? `<img loading="lazy" src="${thumbUrl(item)}" alt="" />` : '<div class="ph">🎞️</div>') +
       (item.kind === 'video' ? '<span class="badge">▶ video</span>' : '') +
-      (item.transcoding ? '<span class="badge badge-proc">⏳ processing</span>' : '');
+      (item.transcoding ? '<span class="badge badge-proc">⏳ processing</span>' : '') +
+      dur +
+      `<button class="incl" title="${excluded ? 'Excluded — tap to include in slideshow' : 'Included — tap to exclude from slideshow'}">${excluded ? '🚫' : '✓'}</button>`;
     tile.addEventListener('click', () => onTileClick(item));
+    tile.querySelector('.incl')?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await toggleEnabled(item.id);
+      await refresh();
+    });
     grid.appendChild(tile);
   }
+}
+
+function wirePlayback(): void {
+  const byId = (id: string) => document.getElementById(id) as HTMLButtonElement | null;
+  byId('pb-prev')?.addEventListener('click', () => { skipPrev().catch(() => {}); });
+  byId('pb-next')?.addEventListener('click', () => { skipNext().catch(() => {}); });
+  byId('pb-play')?.addEventListener('click', async () => {
+    const p = await getPlayback().catch(() => null);
+    await setPaused(!(p?.paused)).catch(() => {});
+    await syncPlayback();
+  });
+  byId('pb-loop')?.addEventListener('click', async () => {
+    const p = await getPlayback().catch(() => null);
+    await setHold(!(p?.holding)).catch(() => {});
+    await syncPlayback();
+  });
+}
+
+async function syncPlayback(): Promise<void> {
+  const p = await getPlayback().catch(() => ({ paused: false, holding: false }));
+  const play = document.getElementById('pb-play');
+  if (play) { play.textContent = p.paused ? '▶' : '⏸'; play.classList.toggle('active', p.paused); }
+  document.getElementById('pb-loop')?.classList.toggle('active', p.holding);
 }
 
 async function onTileClick(item: MediaItem): Promise<void> {
@@ -60,6 +101,7 @@ async function refresh(): Promise<void> {
   renderGrid();
   const data = await fetchData();
   await renderSettings(settingsRoot, data);
+  await syncPlayback();
 }
 
 function setMode(next: Mode): void {
@@ -132,5 +174,6 @@ function wireUpload(): void {
 wireCast();
 wireModes();
 wireUpload();
+wirePlayback();
 setMode('cast');
 refresh().catch((err) => console.error(err));

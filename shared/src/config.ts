@@ -22,7 +22,7 @@ export const EFFECT_PRESETS = {
 export type EffectPreset = keyof typeof EFFECT_PRESETS;
 
 /** Photo-period presets (seconds). `paused` is represented by 0. */
-export const PHOTO_PERIOD_PRESETS = [0, 10, 15, 20, 40, 60, 300] as const;
+export const PHOTO_PERIOD_PRESETS = [0, 5, 10, 15, 20, 40, 60, 300, 600, 1200] as const;
 
 /** Built-in GLSL transitions (gl-transitions names, kept as `*.glsl` for parity). */
 export const TRANSITIONS = [
