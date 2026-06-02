@@ -134,10 +134,12 @@ no long-lived WebSocket server, no ffmpeg).
 **Fly.io** — a [`fly.toml`](fly.toml) is included:
 ```bash
 fly launch --no-deploy --copy-config --name <unique-name>
-fly volume create frame_data --size 10 --region <region>
+fly volume create frame_data --size 10 --region iad
 fly secrets set FRAME_ADMIN_PASSWORD=your-strong-password
 fly deploy
 ```
+
+The `frame_data` volume backs `/data`, so create it in the same region as the Fly machine (`primary_region`, `iad` by default).
 
 **Railway** — a [`railway.json`](railway.json) pins the Dockerfile build. In the dashboard:
 deploy from this repo → add a **Volume mounted at `/data`** → set the service's **target port to
