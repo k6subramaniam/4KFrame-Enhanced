@@ -40,6 +40,11 @@
       #drop.busy::after { content:attr(data-status); position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(11,13,18,.85); border-radius:.8rem; color:var(--fg); }
       .hidden { display:none !important; }
       a { color:var(--accent); }
+      #login { position:fixed; inset:0; background:var(--bg); display:flex; align-items:center; justify-content:center; z-index:50; }
+      #login form { background:var(--panel); border:1px solid var(--line); border-radius:.8rem; padding:1.5rem; display:flex; flex-direction:column; gap:.8rem; width:min(90vw,320px); }
+      #login h2 { margin:0; font-size:1.1rem; }
+      #login input { font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--line); border-radius:.6rem; padding:.6rem .8rem; }
+      #login #login-err { color:#ff6b6b; min-height:1em; }
     </style>
   </head>
   <body>
@@ -51,7 +56,16 @@
         <button data-mode="delete">Delete</button>
       </div>
       <button id="cast-device" class="hidden" title="Cast the frame to a TV" style="margin-left:.5rem">▶ Cast device</button>
+      <button id="logout" class="hidden" title="Lock the admin" style="margin-left:.5rem">🔒</button>
     </header>
+    <div id="login" class="hidden">
+      <form id="login-form">
+        <h2>4KFrame · Admin</h2>
+        <input id="login-pw" type="password" placeholder="Password" autocomplete="current-password" />
+        <button type="submit">Unlock</button>
+        <div class="muted" id="login-err"></div>
+      </form>
+    </div>
     <script async src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
     <main>
       <div id="drop">Drag &amp; drop photos or videos here, or
