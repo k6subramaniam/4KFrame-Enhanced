@@ -17,6 +17,7 @@
  */
 
 import { aspectRatio, faceCenterToPan, type FillMode, type FrameAspect, type MediaItem } from '@4kframe/shared';
+import { mediaUrl } from './mediaAuth.js';
 
 export interface ComposeOptions {
   /** Screen size in device pixels. */
@@ -43,7 +44,7 @@ export interface Rect {
 const cache = new Map<string, HTMLImageElement>();
 
 export function imageUrl(item: MediaItem): string {
-  return `/photos/${item.poster ?? item.file}`;
+  return mediaUrl(item.poster ?? item.file);
 }
 
 export function loadImage(url: string): Promise<HTMLImageElement> {

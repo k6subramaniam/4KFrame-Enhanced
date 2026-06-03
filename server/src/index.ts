@@ -46,12 +46,15 @@ export async function buildApp(https?: TlsMaterial): Promise<FastifyInstance> {
 
   // Raw media assets (photos, previews, thumbnails, posters, videos). When the
   // admin password is configured, protect these before the static plugin can
-  // serve private library files directly.
+  // serve private library files directly. Native Cast receivers may prove the
+  // signed handoff token either via the frame_auth cookie set by display JS or
+  // as a query fallback when the receiver cannot persist cookies.
   app.addHook('onRequest', async (req, reply) => {
     if (!auth.authRequired()) return;
-    const requestPath = req.url.split('?')[0];
-    if (!requestPath.startsWith('/photos/')) return;
-    if (!auth.isAuthed(req.headers.cookie)) {
+    const requestUrl = new URL(req.url, 'http://4kframe.local');
+    if (!requestUrl.pathname.startsWith('/photos/')) return;
+    const receiverToken = requestUrl.searchParams.get('frame_auth') ?? undefined;
+    if (!auth.isAuthed(req.headers.cookie) && !auth.verifyToken(receiverToken)) {
       return reply.code(401).send({ error: 'unauthorized' });
     }
   });
