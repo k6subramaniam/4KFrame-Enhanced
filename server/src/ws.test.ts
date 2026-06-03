@@ -142,23 +142,43 @@ test('public /ws config updates are limited to safe fields and validated', async
 
   ws.send(JSON.stringify({
     type: 'publicConfig',
-    patch: { zoom: 99, panX: -4, panY: '0.5', fillMode: 'contain', transition: 'wipeDown.glsl' },
+    patch: {
+      photoPeriod: 9999,
+      transitionPeriod: '2.5',
+      zoom: 99,
+      panX: -4,
+      panY: '0.5',
+      fillMode: 'contain',
+      frameAspect: '16:9',
+      transition: 'wipeDown.glsl',
+      motion: 'pan',
+      smartFraming: 'true',
+      showQr: false,
+    },
   }));
 
   let collected = await waitForCollected(messages, 3);
   assert.equal(collected[2]?.type, 'config');
+  assert.equal(store.getConfig().photoPeriod, 1200);
+  assert.equal(store.getConfig().transitionPeriod, 2.5);
   assert.equal(store.getConfig().zoom, 3);
   assert.equal(store.getConfig().panX, -1);
   assert.equal(store.getConfig().panY, 0.5);
   assert.equal(store.getConfig().fillMode, 'contain');
   assert.equal(store.getConfig().frameFill, false);
+  assert.equal(store.getConfig().frameAspect, '16:9');
   assert.equal(store.getConfig().transition, 'wipeDown.glsl');
+  assert.equal(store.getConfig().motion, 'pan');
+  assert.equal(store.getConfig().smartFraming, true);
+  assert.equal(store.getConfig().showQr, false);
 
   const beforeConfig = store.getConfig();
   const beforeCount = messages.length;
   ws.send(JSON.stringify({ type: 'publicConfig', patch: { showInfo: false } }));
   ws.send(JSON.stringify({ type: 'publicConfig', patch: { zoom: Number.NaN } }));
   ws.send(JSON.stringify({ type: 'publicConfig', patch: { transition: 'evil.glsl' } }));
+  ws.send(JSON.stringify({ type: 'publicConfig', patch: { motion: 'spin' } }));
+  ws.send(JSON.stringify({ type: 'publicConfig', patch: { smartFraming: 'maybe' } }));
 
   collected = await waitForCollected(messages, beforeCount + 1);
   assert.equal(collected.length, beforeCount);
