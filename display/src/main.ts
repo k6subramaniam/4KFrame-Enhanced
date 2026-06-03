@@ -38,8 +38,6 @@ let lastVideoItem: MediaItem | null = null;
 let showingVideo = false;
 let paused = false;
 let holding = false;
-let receivedConfigEvent = false;
-let receivedPausedEvent = false;
 
 /** Forward a control message to the backend (used to bridge Cast custom messages). */
 function sendControl(msg: ControlMessage): void {
@@ -240,7 +238,6 @@ function statusText(): string {
 function handleEvent(event: FrameEvent): void {
   switch (event.type) {
     case 'config':
-      receivedConfigEvent = true;
       config = event.config;
       applyOverlays(config);
       updateControlStates();
@@ -253,7 +250,6 @@ function handleEvent(event: FrameEvent): void {
       // No-op for the display; the server drives what is shown.
       break;
     case 'paused':
-      receivedPausedEvent = true;
       paused = event.paused;
       if (showingVideo) {
         if (paused) video.pause();
@@ -270,7 +266,6 @@ function handleEvent(event: FrameEvent): void {
       holding = event.holding;
       if (showingVideo) video.loop = config.videoLoop || holding;
       setStatus(statusText());
-      updateControlStates();
       break;
     case 'log':
       if (event.level === 'error') console.error(event.message);
@@ -294,6 +289,11 @@ function clampN(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
 
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 3;
+const ZOOM_STEP = 0.2;
+const PAN_STEP = 0.1;
+
 function goNext(): void {
   sendControl({ type: 'next' });
 }
@@ -304,6 +304,19 @@ function goPrevious(): void {
 
 function togglePause(): void {
   sendControl({ type: paused ? 'resume' : 'pause' });
+}
+
+function setPan(panX: number, panY: number): void {
+  adjustConfig({ panX: clampN(panX, -1, 1), panY: clampN(panY, -1, 1) });
+}
+
+function setZoom(zoom: number): void {
+  const nextZoom = clampN(zoom, MIN_ZOOM, MAX_ZOOM);
+  adjustConfig(nextZoom <= MIN_ZOOM + 0.001 ? { zoom: MIN_ZOOM, panX: 0, panY: 0 } : { zoom: nextZoom });
+}
+
+function resetZoomPan(): void {
+  adjustConfig({ zoom: MIN_ZOOM, panX: 0, panY: 0 });
 }
 
 function adjustConfig(patch: Partial<FrameConfig>): void {
@@ -540,23 +553,16 @@ function updateControlStates(): void {
 function connect(): void {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
-  receivedConfigEvent = false;
-  receivedPausedEvent = false;
   socket = ws;
-  updateControlStates();
   ws.onopen = () => {
     setStatus('');
-    updateControlStates();
   };
   ws.onmessage = (ev) => {
     try { handleEvent(JSON.parse(ev.data) as FrameEvent); } catch { /* ignore */ }
   };
   ws.onclose = () => {
     if (socket === ws) socket = null;
-    receivedConfigEvent = false;
-    receivedPausedEvent = false;
     setStatus('Reconnecting…');
-    updateControlStates();
     setTimeout(connect, 2000);
   };
   ws.onerror = () => ws.close();
