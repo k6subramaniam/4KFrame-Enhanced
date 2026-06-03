@@ -38,6 +38,8 @@ let lastVideoItem: MediaItem | null = null;
 let showingVideo = false;
 let paused = false;
 let holding = false;
+let receivedConfigEvent = false;
+let receivedPausedEvent = false;
 
 /** Forward a control message to the backend (used to bridge Cast custom messages). */
 function sendControl(msg: ControlMessage): void {
@@ -289,11 +291,6 @@ function clampN(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
 
-const MIN_ZOOM = 1;
-const MAX_ZOOM = 3;
-const ZOOM_STEP = 0.2;
-const PAN_STEP = 0.1;
-
 function goNext(): void {
   sendControl({ type: 'next' });
 }
@@ -304,19 +301,6 @@ function goPrevious(): void {
 
 function togglePause(): void {
   sendControl({ type: paused ? 'resume' : 'pause' });
-}
-
-function setPan(panX: number, panY: number): void {
-  adjustConfig({ panX: clampN(panX, -1, 1), panY: clampN(panY, -1, 1) });
-}
-
-function setZoom(zoom: number): void {
-  const nextZoom = clampN(zoom, MIN_ZOOM, MAX_ZOOM);
-  adjustConfig(nextZoom <= MIN_ZOOM + 0.001 ? { zoom: MIN_ZOOM, panX: 0, panY: 0 } : { zoom: nextZoom });
-}
-
-function resetZoomPan(): void {
-  adjustConfig({ zoom: MIN_ZOOM, panX: 0, panY: 0 });
 }
 
 function adjustConfig(patch: Partial<FrameConfig>): void {
