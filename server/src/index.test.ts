@@ -1,19 +1,19 @@
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { after, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { FastifyInstance } from 'fastify';
 
 process.env.FRAME_ADMIN_PASSWORD = 'test-index-password';
 process.env.FRAME_DATA_DIR = await mkdtemp(path.join(tmpdir(), '4kframe-index-test-'));
 process.env.FRAME_DISABLE_HTTPS = '1';
-delete process.env.FRAME_ADMIN_PASSWORD;
 
-const [{ buildApp }, { initStore }, { MEDIA_DIR }] = await Promise.all([
+const [{ buildApp }, { initStore }, { MEDIA_DIR }, auth] = await Promise.all([
   import('./index.js'),
   import('./store.js'),
   import('./env.js'),
+  import('./auth.js'),
 ]);
 
 async function buildTestApp() {
@@ -34,9 +34,18 @@ async function loginCookie(app: Awaited<ReturnType<typeof buildTestApp>>): Promi
   return Array.isArray(setCookie) ? setCookie[0] : setCookie;
 }
 
-test('GET /admin redirects to the canonical admin SPA path with trailing slash', async (t) => {
+async function withApp(password: string | undefined, run: (app: FastifyInstance) => Promise<void>): Promise<void> {
+  const previousPassword = process.env.FRAME_ADMIN_PASSWORD;
+  if (password === undefined) {
+    delete process.env.FRAME_ADMIN_PASSWORD;
+  } else {
+    process.env.FRAME_ADMIN_PASSWORD = password;
+  }
+
   const app = await buildTestApp();
-  t.after(async () => {
+  try {
+    await run(app);
+  } finally {
     await app.close();
     if (previousPassword === undefined) {
       delete process.env.FRAME_ADMIN_PASSWORD;
@@ -55,22 +64,23 @@ test('GET /admin redirects to the canonical admin SPA path with trailing slash',
   });
 });
 
-test('unauthenticated GET / redirects to admin login when FRAME_ADMIN_PASSWORD is set', async () => {
+test('unauthenticated GET / can load the display receiver shell when FRAME_ADMIN_PASSWORD is set', async () => {
   await withApp('display-password', async (app) => {
     const response = await app.inject({ method: 'GET', url: '/' });
 
-    assert.equal(response.statusCode, 302);
-    assert.equal(response.headers.location, '/admin/');
+    assert.equal(response.statusCode, 200);
+    assert.match(response.body, /<title>4KFrame<\/title>/);
   });
 });
 
 test('authenticated GET / succeeds with a valid frame_auth cookie when FRAME_ADMIN_PASSWORD is set', async () => {
   await withApp('display-password', async (app) => {
-    const cookie = auth.setCookie(auth.issueToken(), false).split(';')[0];
+    const token = auth.issueToken();
+    const cookie = auth.setCookie(token, false).split(';')[0];
     const response = await app.inject({ method: 'GET', url: '/', headers: { cookie } });
 
     assert.equal(response.statusCode, 200);
-    assert.match(response.body, /Display app/);
+    assert.match(response.body, /<title>4KFrame<\/title>/);
   });
 });
 
@@ -79,7 +89,7 @@ test('GET / remains public when FRAME_ADMIN_PASSWORD is unset', async () => {
     const response = await app.inject({ method: 'GET', url: '/' });
 
     assert.equal(response.statusCode, 200);
-    assert.match(response.body, /Display app/);
+    assert.match(response.body, /<title>4KFrame<\/title>/);
   });
 });
 
@@ -89,7 +99,7 @@ test('unauthenticated requests to protected display state endpoints are blocked 
     await app.close();
   });
 
-  for (const url of ['/api/current', '/api/qr']) {
+  for (const url of ['/api/current', '/api/qr', '/api/cast-auth']) {
     const response = await app.inject({ method: 'GET', url });
     assert.equal(response.statusCode, 401, `${url} should require authentication`);
     assert.deepEqual(response.json(), { error: 'unauthorized' });
@@ -108,6 +118,24 @@ test('unauthenticated requests to raw media under /photos are blocked when auth 
 
   assert.equal(response.statusCode, 401);
   assert.deepEqual(response.json(), { error: 'unauthorized' });
+});
+
+test('Cast receiver handoff tokens can read protected media without an admin cookie', async (t) => {
+  const app = await buildTestApp();
+  t.after(async () => {
+    await app.close();
+  });
+
+  await writeFile(path.join(MEDIA_DIR, 'cast-token-photo.jpg'), 'cast token photo bytes');
+  const token = auth.issueToken();
+
+  const photo = await app.inject({
+    method: 'GET',
+    url: `/photos/cast-token-photo.jpg?frame_auth=${encodeURIComponent(token)}`,
+  });
+
+  assert.equal(photo.statusCode, 200);
+  assert.equal(photo.body, 'cast token photo bytes');
 });
 
 test('authenticated requests can read protected display state and raw media', async (t) => {
