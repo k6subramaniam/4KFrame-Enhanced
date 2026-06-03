@@ -288,7 +288,7 @@ function clampN(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
 function adjustConfig(patch: Partial<FrameConfig>): void {
-  sendControl({ type: 'config', patch });
+  sendControl({ type: 'publicConfig', patch });
 }
 
 function renderPublicSettings(): void {
