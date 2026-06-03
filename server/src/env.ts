@@ -14,8 +14,12 @@ export const MEDIA_DIR = path.join(DATA_DIR, 'photos');
 export const DB_FILE = path.join(DATA_DIR, 'frame.json');
 
 /** Where the built display & admin SPAs are served from, if present. */
-export const DISPLAY_DIST = path.resolve(__dirname, '../../display/dist');
-export const ADMIN_DIST = path.resolve(__dirname, '../../admin/dist');
+export const DISPLAY_DIST = process.env.FRAME_DISPLAY_DIST
+  ? path.resolve(process.env.FRAME_DISPLAY_DIST)
+  : path.resolve(__dirname, '../../display/dist');
+export const ADMIN_DIST = process.env.FRAME_ADMIN_DIST
+  ? path.resolve(process.env.FRAME_ADMIN_DIST)
+  : path.resolve(__dirname, '../../admin/dist');
 
 // Note: empty-string env values (which `.env` / compose interpolation can produce) are
 // treated as "unset" via `||`, so they fall back to defaults rather than breaking.
