@@ -183,6 +183,7 @@ test('authenticated /ws public config updates are limited to safe fields and val
       frameAspect: '16:9',
       transition: 'wipeDown.glsl',
       motion: 'pan',
+      playbackMediaMode: 'videos',
       smartFraming: 'true',
       showQr: false,
     },
@@ -200,6 +201,7 @@ test('authenticated /ws public config updates are limited to safe fields and val
   assert.equal(store.getConfig().frameAspect, '16:9');
   assert.equal(store.getConfig().transition, 'wipeDown.glsl');
   assert.equal(store.getConfig().motion, 'pan');
+  assert.equal(store.getConfig().playbackMediaMode, 'videos');
   assert.equal(store.getConfig().smartFraming, true);
   assert.equal(store.getConfig().showQr, false);
 
@@ -209,6 +211,7 @@ test('authenticated /ws public config updates are limited to safe fields and val
   ws.send(JSON.stringify({ type: 'publicConfig', patch: { zoom: Number.NaN } }));
   ws.send(JSON.stringify({ type: 'publicConfig', patch: { transition: 'evil.glsl' } }));
   ws.send(JSON.stringify({ type: 'publicConfig', patch: { motion: 'spin' } }));
+  ws.send(JSON.stringify({ type: 'publicConfig', patch: { playbackMediaMode: 'audio' } }));
   ws.send(JSON.stringify({ type: 'publicConfig', patch: { smartFraming: 'maybe' } }));
 
   collected = await waitForCollected(messages, beforeCount + 1);

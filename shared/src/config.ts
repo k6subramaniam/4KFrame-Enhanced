@@ -54,6 +54,10 @@ export type FillMode = (typeof FILL_MODES)[number];
 export const MOTION_MODES = ['off', 'zoom', 'pan', 'zoompan'] as const;
 export type MotionMode = (typeof MOTION_MODES)[number];
 
+/** Which media kinds are eligible for automatic playback rotation. */
+export const PLAYBACK_MEDIA_MODES = ['both', 'photos', 'videos'] as const;
+export type PlaybackMediaMode = (typeof PLAYBACK_MEDIA_MODES)[number];
+
 /**
  * Target frame aspect. `auto` matches each display's real screen (so the same library casts
  * correctly to 16:9 TVs, ultrawide, 4:3, square, and portrait frames simultaneously). Any
@@ -115,6 +119,8 @@ export interface FrameConfig {
   panY: number;
   /** Ken Burns ambient motion on each photo. */
   motion: MotionMode;
+  /** Which media kinds are eligible for automatic playback rotation. */
+  playbackMediaMode: PlaybackMediaMode;
   /** Bias cover crops toward detected faces when no manual pan/zoom override is active. */
   smartFraming: boolean;
   frameWidth: number;
@@ -154,6 +160,7 @@ export function defaultConfig(): FrameConfig {
     panX: 0,
     panY: 0,
     motion: 'off',
+    playbackMediaMode: 'both',
     smartFraming: false,
     frameWidth: 3840,
     frameHeight: 2160,
@@ -190,6 +197,7 @@ export function toApiData(c: FrameConfig): ApiDataPayload {
     panX: String(c.panX),
     panY: String(c.panY),
     motion: c.motion,
+    playbackMediaMode: c.playbackMediaMode,
     smartFraming: String(c.smartFraming),
     frameWidth: String(c.frameWidth),
     frameHeight: String(c.frameHeight),
@@ -223,6 +231,10 @@ function parseMotion(v: string | undefined, fallback: MotionMode): MotionMode {
   return v && (MOTION_MODES as readonly string[]).includes(v) ? (v as MotionMode) : fallback;
 }
 
+function parsePlaybackMediaMode(v: string | undefined, fallback: PlaybackMediaMode): PlaybackMediaMode {
+  return v && (PLAYBACK_MEDIA_MODES as readonly string[]).includes(v) ? (v as PlaybackMediaMode) : fallback;
+}
+
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
 const num = (v: string | undefined, fallback: number) => {
   const n = v === undefined ? NaN : Number(v);
@@ -244,6 +256,7 @@ export function fromApiData(current: FrameConfig, patch: ApiDataPayload): FrameC
     panX: clamp(num(patch.panX, current.panX), -1, 1),
     panY: clamp(num(patch.panY, current.panY), -1, 1),
     motion: parseMotion(patch.motion, current.motion),
+    playbackMediaMode: parsePlaybackMediaMode(patch.playbackMediaMode, current.playbackMediaMode),
     smartFraming: truthy(patch.smartFraming, current.smartFraming),
     frameFill: parseFillMode(patch, current.fillMode) === 'cover',
     frameWidth: num(patch.frameWidth, current.frameWidth),

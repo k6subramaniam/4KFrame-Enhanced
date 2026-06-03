@@ -3,6 +3,7 @@ import {
   FRAME_ASPECTS,
   MOTION_MODES,
   PHOTO_PERIOD_PRESETS,
+  PLAYBACK_MEDIA_MODES,
   TRANSITIONS,
   type ApiDataPayload,
   type FrameConfig,
@@ -57,6 +58,12 @@ const MOTION_LABELS: Record<string, string> = {
   zoom: 'Zoom',
   pan: 'Pan',
   zoompan: 'Zoom + Pan',
+};
+
+const PLAYBACK_MEDIA_LABELS: Record<string, string> = {
+  both: 'Both',
+  photos: 'Photos',
+  videos: 'Videos',
 };
 
 export function segmentButtons(
@@ -117,6 +124,19 @@ function effectValue(config: SettingsConfigSource): string {
 }
 
 export const SHARED_SETTINGS_PANELS: SettingsPanelMetadata[] = [
+  {
+    id: 'playback-media',
+    title: 'Playback Media',
+    render: (config) => {
+      const playbackMediaMode = text(config, 'playbackMediaMode', 'both');
+      return `${segmentButtons('playbackMediaMode', PLAYBACK_MEDIA_MODES.map((m) => ({
+        label: PLAYBACK_MEDIA_LABELS[m] ?? m,
+        value: m,
+        active: m === playbackMediaMode,
+      })))}
+      <div class="muted" style="margin-top:.4rem">Choose whether automatic playback rotates photos, videos, or both.</div>`;
+    },
+  },
   {
     id: 'photo-period',
     title: 'Photo Period',
