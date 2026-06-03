@@ -1,9 +1,9 @@
 /**
  * Optional admin authentication.
  *
- * When FRAME_ADMIN_PASSWORD is set, mutating/management API routes require a valid signed
- * cookie obtained by POSTing the password to /api/login. The display, its WebSocket, media
- * under /photos and a few read-only endpoints stay open so TVs need no login.
+ * When FRAME_ADMIN_PASSWORD is set, management routes and the public display require a valid
+ * signed cookie obtained by POSTing the password to /api/login. Media under /photos, the
+ * WebSocket, login flow and a few read-only endpoints stay open enough to bootstrap clients.
  *
  * Stateless: the cookie is `<expiry>.<HMAC(expiry)>` signed with a key derived from the
  * password, so changing the password invalidates existing sessions. No extra dependencies.
@@ -11,17 +11,20 @@
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
-const PASSWORD = process.env.FRAME_ADMIN_PASSWORD || '';
 const COOKIE = 'frame_auth';
 const MAX_AGE_S = 60 * 60 * 24 * 30; // 30 days
 
 /** Auth is enforced only when a password is configured. */
+function password(): string {
+  return process.env.FRAME_ADMIN_PASSWORD || '';
+}
+
 export function authRequired(): boolean {
-  return PASSWORD.length > 0;
+  return password().length > 0;
 }
 
 function signingKey(): string {
-  return createHmac('sha256', '4kframe-admin-auth').update(PASSWORD).digest('hex');
+  return createHmac('sha256', '4kframe-admin-auth').update(password()).digest('hex');
 }
 
 function sign(data: string): string {
@@ -50,7 +53,7 @@ export function verifyToken(token: string | undefined): boolean {
 }
 
 export function checkPassword(pw: unknown): boolean {
-  return authRequired() && typeof pw === 'string' && equal(pw, PASSWORD);
+  return authRequired() && typeof pw === 'string' && equal(pw, password());
 }
 
 export function cookieFromHeader(header: string | undefined): string | undefined {
