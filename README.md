@@ -67,7 +67,10 @@ receiver.
 ### Admin password
 Set **`FRAME_ADMIN_PASSWORD`** to lock the admin: the admin UI and all management/control
 APIs and the **display WebSocket (`/ws`)** then require that password (one login per
-browser, 30-day cookie). Kiosk and TV-browser display clients must be opened after
+browser, 30-day cookie). The display shell and static assets remain publicly loadable so
+native Chromecast receivers can start the registered receiver URL before receiving their
+handoff token; slideshow state, media under `/photos`, and controls stay unavailable until
+`/ws` authenticates. Kiosk and TV-browser display clients must be opened after
 authenticating in that browser/session so the cookie is available to `/ws`; native
 Chromecast receivers authenticate through the admin Cast sender, which forwards a signed
 WebSocket auth token before remote controls are accepted. Unauthenticated `/ws` clients stay

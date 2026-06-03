@@ -61,26 +61,10 @@ export async function buildApp(https?: TlsMaterial): Promise<FastifyInstance> {
   // without the trailing slash need a redirect before static assets are evaluated.
   app.get('/admin', async (_req, reply) => reply.redirect('/admin/', 308));
 
-  // Protect the public display SPA with the same admin cookie when auth is enabled.
-  // The admin/login UI, APIs, media files and websocket stay reachable; everything else
-  // under the root static site (including SPA fallback URLs and assets) redirects to login.
-  app.addHook('onRequest', async (req, reply) => {
-    if (!auth.authRequired() || auth.isAuthed(req.headers.cookie)) return;
-    if (req.method !== 'GET' && req.method !== 'HEAD') return;
-
-    const path = req.url.split('?')[0];
-    if (
-      path === '/admin'
-      || path.startsWith('/admin/')
-      || path.startsWith('/api/')
-      || path.startsWith('/photos/')
-      || path === '/ws'
-    ) {
-      return;
-    }
-
-    return reply.redirect('/admin/');
-  });
+  // The display SPA (the Chromecast receiver URL in packaging/cast/receiver.json) must
+  // be allowed to load even before a Cast sender can hand off its signed WebSocket token.
+  // Sensitive state, controls and media remain guarded by the /api, /ws and /photos auth
+  // gates below, while the admin SPA stays reachable so it can render its login screen.
 
   // Built SPAs, when available (after `npm run build`).
   if (existsSync(DISPLAY_DIST)) {
