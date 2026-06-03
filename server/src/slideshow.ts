@@ -27,6 +27,11 @@ let timer: NodeJS.Timeout | undefined;
 let paused = false;
 let holding = false;
 
+function clearTimer(): void {
+  if (timer) clearTimeout(timer);
+  timer = undefined;
+}
+
 function mediaAspect(item: MediaItem): number | null {
   return item.width > 0 && item.height > 0 ? item.width / item.height : null;
 }
@@ -43,9 +48,16 @@ function targetAspect(): number | null {
   return cfg.frameWidth > 0 && cfg.frameHeight > 0 ? cfg.frameWidth / cfg.frameHeight : null;
 }
 
-/** Items eligible for automatic rotation (excluded items are filtered out). */
+/** Items eligible for automatic rotation (excluded items and unselected media kinds are filtered out). */
 function rotation(): MediaItem[] {
-  return listItems().filter((i) => i.enabled !== false);
+  const mode = getConfig().playbackMediaMode;
+  return listItems()
+    .filter((i) => i.enabled !== false)
+    .filter((i) => {
+      if (mode === 'photos') return i.kind === 'photo';
+      if (mode === 'videos') return i.kind === 'video';
+      return true;
+    });
 }
 
 /** Choose the item(s) to display at `index` within the rotation. */
@@ -86,7 +98,7 @@ function durationMs(items: MediaItem[]): number {
 }
 
 function schedule(): void {
-  if (timer) clearTimeout(timer);
+  clearTimer();
   if (paused || holding) return; // hold on the current item
   const ms = durationMs(current);
   if (ms <= 0) return; // paused via photoPeriod = 0
@@ -98,7 +110,7 @@ export function setPaused(value: boolean): void {
   if (paused === value) return;
   paused = value;
   if (paused) {
-    if (timer) clearTimeout(timer);
+    clearTimer();
   } else {
     schedule();
   }
@@ -110,7 +122,7 @@ export function setHold(value: boolean): void {
   if (holding === value) return;
   holding = value;
   if (holding) {
-    if (timer) clearTimeout(timer);
+    clearTimer();
   } else {
     schedule();
   }
@@ -135,6 +147,7 @@ export function advance(delta: number, interactive: boolean): void {
   const items = rotation();
   if (items.length === 0) {
     current = [];
+    clearTimer();
     return;
   }
   pointer = (pointer + delta + items.length) % items.length;
@@ -176,6 +189,7 @@ export function getCurrent(): MediaItem[] {
 
 /** Initialise the engine and start automatic progression. */
 export function startSlideshow(): void {
+  clearTimer();
   pointer = 0;
   current = rotation().length ? selectAt(0) : [];
   if (current.length) show(false);
@@ -183,7 +197,13 @@ export function startSlideshow(): void {
 
 /** Re-evaluate timing after a config or library change. */
 export function refresh(): void {
-  if (current.length === 0 && rotation().length) {
+  if (rotation().length === 0) {
+    current = [];
+    clearTimer();
+    return;
+  }
+
+  if (current.length === 0) {
     startSlideshow();
   } else {
     schedule();

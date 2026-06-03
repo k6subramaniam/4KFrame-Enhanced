@@ -11,6 +11,7 @@ import {
   FILL_MODES,
   FRAME_ASPECTS,
   MOTION_MODES,
+  PLAYBACK_MEDIA_MODES,
   TRANSITIONS,
   type ControlMessage,
   type FillMode,
@@ -18,6 +19,7 @@ import {
   type FrameConfig,
   type FrameEvent,
   type MotionMode,
+  type PlaybackMediaMode,
   type TransitionName,
 } from '@4kframe/shared';
 import { hub } from './hub.js';
@@ -35,6 +37,7 @@ type PublicConfigPatch = Partial<Pick<FrameConfig,
   | 'frameAspect'
   | 'transition'
   | 'motion'
+  | 'playbackMediaMode'
   | 'smartFraming'
   | 'showQr'
 >>;
@@ -53,6 +56,7 @@ const PUBLIC_CONFIG_KEYS = new Set([
   'frameAspect',
   'transition',
   'motion',
+  'playbackMediaMode',
   'smartFraming',
   'showQr',
 ]);
@@ -126,6 +130,10 @@ function validatePublicConfigPatch(patch: unknown): PublicConfigPatch | null {
       case 'motion':
         if (typeof value !== 'string' || !(MOTION_MODES as readonly string[]).includes(value)) return null;
         sanitized.motion = value as MotionMode;
+        break;
+      case 'playbackMediaMode':
+        if (typeof value !== 'string' || !(PLAYBACK_MEDIA_MODES as readonly string[]).includes(value)) return null;
+        sanitized.playbackMediaMode = value as PlaybackMediaMode;
         break;
       case 'smartFraming': {
         const parsed = parseBoolean(value);

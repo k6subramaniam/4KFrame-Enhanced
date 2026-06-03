@@ -92,6 +92,7 @@ export type ControlMessage =
         | 'frameAspect'
         | 'transition'
         | 'motion'
+        | 'playbackMediaMode'
         | 'smartFraming'
         | 'showQr'
       >> | ApiDataPayload;

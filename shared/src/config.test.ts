@@ -10,11 +10,16 @@ test('aspectRatio maps presets and returns null for auto', () => {
   assert.ok(aspectRatio('21:9')! > 2);
 });
 
+test('defaultConfig uses both photos and videos for playback', () => {
+  assert.equal(defaultConfig().playbackMediaMode, 'both');
+});
+
 test('toApiData serialises fillMode/frameAspect and mirrors legacy frameFill', () => {
   const blur: FrameConfig = { ...defaultConfig(), fillMode: 'blur', frameAspect: '4:3' };
   const d = toApiData(blur);
   assert.equal(d.fillMode, 'blur');
   assert.equal(d.frameAspect, '4:3');
+  assert.equal(d.playbackMediaMode, 'both');
   assert.equal(d.frameFill, 'false'); // anything but cover is not "fill"
 
   const cover: FrameConfig = { ...defaultConfig(), fillMode: 'cover' };
@@ -44,6 +49,17 @@ test('fromApiData prefers explicit fillMode, supports legacy frameFill, validate
   assert.equal(fromApiData(base, { frameAspect: '21:9' }).frameAspect, '21:9');
   assert.equal(fromApiData(base, { fillMode: 'sideways' }).fillMode, base.fillMode);
   assert.equal(fromApiData(base, { fillMode: 'stretch' }).fillMode, 'stretch');
+});
+
+test('fromApiData validates playbackMediaMode and falls back on invalid values', () => {
+  const base = defaultConfig();
+  assert.equal(fromApiData(base, { playbackMediaMode: 'photos' }).playbackMediaMode, 'photos');
+  assert.equal(fromApiData(base, { playbackMediaMode: 'videos' }).playbackMediaMode, 'videos');
+  assert.equal(fromApiData({ ...base, playbackMediaMode: 'photos' }, { playbackMediaMode: 'sideways' }).playbackMediaMode, 'photos');
+
+  const d = toApiData({ ...base, playbackMediaMode: 'videos' });
+  assert.equal(d.playbackMediaMode, 'videos');
+  assert.equal(fromApiData(base, d).playbackMediaMode, 'videos');
 });
 
 test('zoom/pan are clamped and motion is validated', () => {
