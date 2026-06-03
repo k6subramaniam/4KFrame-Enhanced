@@ -7,17 +7,53 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import { FILL_MODES, TRANSITIONS, type ControlMessage, type FillMode, type FrameConfig, type FrameEvent, type TransitionName } from '@4kframe/shared';
+import {
+  FILL_MODES,
+  FRAME_ASPECTS,
+  MOTION_MODES,
+  TRANSITIONS,
+  type ControlMessage,
+  type FillMode,
+  type FrameAspect,
+  type FrameConfig,
+  type FrameEvent,
+  type MotionMode,
+  type TransitionName,
+} from '@4kframe/shared';
 import { hub } from './hub.js';
 import { getConfig, setConfig } from './store.js';
 import { cast, next, previous, progress, getCurrent, refresh, setPaused } from './slideshow.js';
 import * as auth from './auth.js';
 
-type PublicConfigPatch = Partial<Pick<FrameConfig, 'zoom' | 'panX' | 'panY' | 'fillMode' | 'transition'>>;
+type PublicConfigPatch = Partial<Pick<FrameConfig,
+  | 'photoPeriod'
+  | 'transitionPeriod'
+  | 'zoom'
+  | 'panX'
+  | 'panY'
+  | 'fillMode'
+  | 'frameAspect'
+  | 'transition'
+  | 'motion'
+  | 'smartFraming'
+  | 'showQr'
+>>;
 
 const ADMIN_CONTROL_TYPES = new Set<ControlMessage['type']>(['progress', 'cast', 'config']);
 const PUBLIC_DISPLAY_CONTROL_TYPES = new Set<ControlMessage['type']>(['next', 'previous', 'pause', 'resume', 'publicConfig']);
-const PUBLIC_CONFIG_KEYS = new Set(['zoom', 'panX', 'panY', 'fillMode', 'transition']);
+const PUBLIC_CONFIG_KEYS = new Set([
+  'photoPeriod',
+  'transitionPeriod',
+  'zoom',
+  'panX',
+  'panY',
+  'fillMode',
+  'frameAspect',
+  'transition',
+  'motion',
+  'smartFraming',
+  'showQr',
+]);
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -28,6 +64,13 @@ function parseNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function parseBoolean(value: unknown): boolean | null {
+  if (typeof value === 'boolean') return value;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return null;
+}
+
 function validatePublicConfigPatch(patch: unknown): PublicConfigPatch | null {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return null;
 
@@ -36,6 +79,18 @@ function validatePublicConfigPatch(patch: unknown): PublicConfigPatch | null {
     if (!PUBLIC_CONFIG_KEYS.has(key)) return null;
 
     switch (key) {
+      case 'photoPeriod': {
+        const parsed = parseNumber(value);
+        if (parsed === null) return null;
+        sanitized.photoPeriod = clamp(parsed, 0, 1200);
+        break;
+      }
+      case 'transitionPeriod': {
+        const parsed = parseNumber(value);
+        if (parsed === null) return null;
+        sanitized.transitionPeriod = clamp(parsed, 0, 30);
+        break;
+      }
       case 'zoom': {
         const parsed = parseNumber(value);
         if (parsed === null) return null;
@@ -58,10 +113,30 @@ function validatePublicConfigPatch(patch: unknown): PublicConfigPatch | null {
         if (typeof value !== 'string' || !(FILL_MODES as readonly string[]).includes(value)) return null;
         sanitized.fillMode = value as FillMode;
         break;
+      case 'frameAspect':
+        if (typeof value !== 'string' || !(FRAME_ASPECTS as readonly string[]).includes(value)) return null;
+        sanitized.frameAspect = value as FrameAspect;
+        break;
       case 'transition':
         if (typeof value !== 'string' || !(TRANSITIONS as readonly string[]).includes(value)) return null;
         sanitized.transition = value as TransitionName;
         break;
+      case 'motion':
+        if (typeof value !== 'string' || !(MOTION_MODES as readonly string[]).includes(value)) return null;
+        sanitized.motion = value as MotionMode;
+        break;
+      case 'smartFraming': {
+        const parsed = parseBoolean(value);
+        if (parsed === null) return null;
+        sanitized.smartFraming = parsed;
+        break;
+      }
+      case 'showQr': {
+        const parsed = parseBoolean(value);
+        if (parsed === null) return null;
+        sanitized.showQr = parsed;
+        break;
+      }
     }
   }
 

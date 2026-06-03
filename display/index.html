@@ -5,8 +5,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>4KFrame</title>
     <style>
-      html, body { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none; }
-      #app { position: fixed; inset: 0; }
+      :root {
+        color-scheme: dark;
+        --display-bg: #000;
+        --display-text: #f8fafc;
+        --display-muted: #cbd5e1;
+        --display-dim: #94a3b8;
+        --display-panel: rgba(7, 10, 18, 0.82);
+        --display-panel-strong: rgba(15, 23, 42, 0.94);
+        --display-card: rgba(30, 41, 59, 0.72);
+        --display-border: rgba(226, 232, 240, 0.18);
+        --display-ring: rgba(125, 211, 252, 0.9);
+        --display-primary: #38bdf8;
+        --display-primary-strong: #0ea5e9;
+        --display-shadow: 0 24px 80px rgba(0, 0, 0, 0.58);
+        --display-radius: 22px;
+        --display-touch: 44px;
+      }
+
+      html, body { margin: 0; height: 100%; background: var(--display-bg); overflow: hidden; cursor: none; }
+      #app { position: fixed; inset: 0; overflow: hidden; }
       #gl { position: absolute; inset: 0; width: 100%; height: 100%; }
       /* Backdrop behind videos: opaque black base + optional blurred poster (blur mode). */
       #video-bg { position: absolute; inset: 0; background-color: #000;
@@ -94,6 +112,28 @@
         #public-controls:hover #public-control-panel, #public-controls:focus-within #public-control-panel { transform: none; }
       }
       .hidden { display: none !important; }
+
+      @media (max-width: 720px), (pointer: coarse) and (max-width: 900px) {
+        .public-controls {
+          top: auto;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          width: auto;
+          max-height: min(78dvh, 620px);
+          padding: 18px max(16px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+          border-radius: 26px 26px 0 0;
+          border-right: 0;
+          border-bottom: 0;
+          border-left: 0;
+        }
+        .controls-playback { grid-template-columns: repeat(3, minmax(72px, 1fr)); }
+      }
+
+      @media (min-width: 1200px) {
+        .controls-toggle { padding-inline: 24px; }
+        .public-controls { width: 420px; }
+      }
     </style>
   </head>
   <body>
