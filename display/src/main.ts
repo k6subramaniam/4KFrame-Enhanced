@@ -16,7 +16,9 @@ import {
   type FrameConfig,
   type FillMode,
   type FrameEvent,
+  renderSharedSettings,
   type MediaItem,
+  type SettingsPatch,
 } from '@4kframe/shared';
 import { GLRenderer } from './gl.js';
 import { compose, contentRect } from './compositor.js';
@@ -240,8 +242,10 @@ function statusText(): string {
 function handleEvent(event: FrameEvent): void {
   switch (event.type) {
     case 'config':
+      receivedConfigEvent = true;
       config = event.config;
       applyOverlays(config);
+      renderPublicSettings();
       updateControlStates();
       rerender().catch((err) => console.error(err));
       break;
@@ -252,6 +256,7 @@ function handleEvent(event: FrameEvent): void {
       // No-op for the display; the server drives what is shown.
       break;
     case 'paused':
+      receivedPausedEvent = true;
       paused = event.paused;
       if (showingVideo) {
         if (paused) video.pause();
@@ -349,6 +354,7 @@ const BOOLEAN_PUBLIC_CONFIG_KEYS = new Set<PublicConfigKey>(['smartFraming', 'sh
 
 const controlsToggle = getElementByIds<HTMLButtonElement>('public-controls-toggle', 'controls-toggle');
 const publicControlsRoot = document.getElementById('public-controls') as HTMLElement | null;
+const publicSettingsRoot = document.getElementById('public-settings') as HTMLElement | null;
 const publicControls = getElementByIds<HTMLElement>('public-control-panel', 'public-controls');
 const pauseControl = getElementByIds<HTMLButtonElement>('public-play-pause', 'control-pause');
 
@@ -386,6 +392,64 @@ function publicConfigPatch(key: string | undefined, rawValue: string): Partial<F
     return { [publicKey]: rawValue };
   }
   return null;
+}
+
+function sharedSettingsConfigPatch(patch: SettingsPatch): Partial<FrameConfig> | null {
+  const nextPatch: Partial<FrameConfig> = {};
+
+  for (const [key, value] of Object.entries(patch)) {
+    const publicKey = key as PublicConfigKey;
+    if (NUMERIC_PUBLIC_CONFIG_KEYS.has(publicKey)) {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) return null;
+      Object.assign(nextPatch, { [publicKey]: parsed });
+    } else if (BOOLEAN_PUBLIC_CONFIG_KEYS.has(publicKey)) {
+      if (typeof value === 'boolean') {
+        Object.assign(nextPatch, { [publicKey]: value });
+      } else if (value === 'true' || value === 'false') {
+        Object.assign(nextPatch, { [publicKey]: value === 'true' });
+      } else {
+        return null;
+      }
+    } else if (['fillMode', 'frameAspect', 'transition', 'motion'].includes(publicKey)) {
+      Object.assign(nextPatch, { [publicKey]: String(value) });
+    }
+  }
+
+  return Object.keys(nextPatch).length ? nextPatch : null;
+}
+
+function renderPublicSettings(): void {
+  if (!publicSettingsRoot) return;
+
+  const openPanels = new Map<string, boolean>();
+  publicSettingsRoot.querySelectorAll<HTMLElement>('.panel[data-panel-id]').forEach((panel) => {
+    const id = panel.dataset.panelId;
+    if (id) openPanels.set(id, panel.dataset.collapsed !== 'true');
+  });
+
+  renderSharedSettings(publicSettingsRoot, {
+    getConfig: () => config,
+    updateConfig: (patch: SettingsPatch) => {
+      const normalizedPatch = sharedSettingsConfigPatch(patch);
+      if (normalizedPatch) adjustConfig(normalizedPatch);
+    },
+  }, {
+    isPanelOpen: (id: string) => openPanels.get(id) ?? true,
+  });
+
+  publicSettingsRoot.querySelectorAll<HTMLButtonElement>('.panel-toggle').forEach((toggle) => {
+    toggle.addEventListener('click', () => {
+      const panel = toggle.closest<HTMLElement>('.panel');
+      const body = document.getElementById(toggle.getAttribute('aria-controls') ?? '');
+      if (!panel || !body) return;
+      const open = toggle.getAttribute('aria-expanded') !== 'true';
+      panel.dataset.collapsed = open ? 'false' : 'true';
+      toggle.setAttribute('aria-expanded', String(open));
+      body.toggleAttribute('aria-hidden', !open);
+      body.toggleAttribute('inert', !open);
+    });
+  });
 }
 
 function syncPublicControls(): void {
@@ -558,7 +622,9 @@ window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => rerender().catch((err) => console.error(err)), 150);
 });
+renderPublicSettings();
 wirePublicControls();
+updateControlStates();
 wireRemote();
 initCastReceiver(sendControl);
 connect();
