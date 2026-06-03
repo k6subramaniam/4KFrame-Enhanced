@@ -1,9 +1,9 @@
 /**
  * Optional admin authentication.
  *
- * When FRAME_ADMIN_PASSWORD is set, management routes and the public display require a valid
- * signed cookie obtained by POSTing the password to /api/login. Media under /photos, the
- * WebSocket, login flow and a few read-only endpoints stay open enough to bootstrap clients.
+ * When FRAME_ADMIN_PASSWORD is set, protected API routes and raw media require a valid
+ * signed cookie obtained by POSTing the password to /api/login. The display shell and
+ * its WebSocket can still open, but private media/state endpoints require login.
  *
  * Stateless: the cookie is `<expiry>.<HMAC(expiry)>` signed with a key derived from the
  * password, so changing the password invalidates existing sessions. No extra dependencies.
