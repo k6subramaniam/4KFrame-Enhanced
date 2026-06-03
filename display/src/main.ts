@@ -26,6 +26,7 @@ import { GLRenderer } from './gl.js';
 import { compose, contentRect } from './compositor.js';
 import { applyOverlays, setCaption, setStatus } from './overlays.js';
 import { initCastReceiver } from './cast.js';
+import { mediaUrl, rememberMediaAuthToken } from './mediaAuth.js';
 
 const canvas = document.getElementById('gl') as HTMLCanvasElement;
 const video = document.getElementById('video') as HTMLVideoElement;
@@ -51,6 +52,7 @@ function sendControlNow(msg: ControlMessage): void {
 
 /** Forward a control message to the backend (used to bridge Cast custom messages). */
 function sendControl(msg: ControlMessage): void {
+  if (msg.type === 'auth') rememberMediaAuthToken(msg.token);
   if (socket && socket.readyState === WebSocket.OPEN) {
     sendControlNow(msg);
     return;
@@ -155,7 +157,7 @@ async function renderVideo(item: MediaItem): Promise<void> {
   video.muted = config.videoMuted;
   video.loop = config.videoLoop || holding;
   video.onerror = () => handleVideoError(item);
-  video.src = `/photos/${item.file}`;
+  video.src = mediaUrl(item.file);
   video.classList.add('visible');
   try { await video.play(); } catch { /* autoplay may require muted; already muted */ }
   setCaption([item], config);
@@ -209,7 +211,7 @@ function layoutVideo(item: MediaItem): void {
   // Opaque backdrop hides the stale photo behind any bars; blurred poster in blur mode.
   videoBg.classList.add('visible');
   if (config.fillMode === 'blur' && item.poster) {
-    videoBg.style.backgroundImage = `url(/photos/${item.poster})`;
+    videoBg.style.backgroundImage = `url(${mediaUrl(item.poster)})`;
   } else {
     videoBg.style.backgroundImage = 'none';
   }

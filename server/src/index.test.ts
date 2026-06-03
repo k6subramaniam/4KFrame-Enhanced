@@ -119,6 +119,24 @@ test('unauthenticated requests to raw media under /photos are blocked when auth 
   assert.deepEqual(response.json(), { error: 'unauthorized' });
 });
 
+test('Cast receiver handoff tokens can read protected media without an admin cookie', async (t) => {
+  const app = await buildTestApp();
+  t.after(async () => {
+    await app.close();
+  });
+
+  await writeFile(path.join(MEDIA_DIR, 'cast-token-photo.jpg'), 'cast token photo bytes');
+  const token = auth.issueToken();
+
+  const photo = await app.inject({
+    method: 'GET',
+    url: `/photos/cast-token-photo.jpg?frame_auth=${encodeURIComponent(token)}`,
+  });
+
+  assert.equal(photo.statusCode, 200);
+  assert.equal(photo.body, 'cast token photo bytes');
+});
+
 test('authenticated requests can read protected display state and raw media', async (t) => {
   const app = await buildTestApp();
   t.after(async () => {
