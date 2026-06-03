@@ -72,10 +72,11 @@ function parseControl(data: unknown): ControlMessage | null {
       const id = (raw as { id?: unknown }).id;
       return typeof id === 'string' ? { type, id } : null;
     }
-    case 'config': {
+    case 'config':
+    case 'publicConfig': {
       const patch = (raw as { patch?: unknown }).patch;
       if (!patch || typeof patch !== 'object') return null;
-      return { type: 'config', patch } as ControlMessage;
+      return { type: 'publicConfig', patch } as ControlMessage;
     }
     default:
       return null;
