@@ -29,6 +29,23 @@ function photo(id: string, width: number, height: number): MediaItem {
   };
 }
 
+
+function videoItem(id: string): MediaItem {
+  return {
+    id,
+    kind: 'video',
+    width: 1920,
+    height: 1080,
+    file: `${id}.mp4`,
+    preview: `${id}-preview.jpg`,
+    thumb: `${id}-thumb.jpg`,
+    poster: `${id}-poster.jpg`,
+    durationSec: 12,
+    createdAt: Date.now(),
+    source: 'upload',
+  };
+}
+
 async function resetStore(items: MediaItem[], config: Partial<ReturnType<typeof shared.defaultConfig>>): Promise<void> {
   for (const item of store.listItems()) await store.removeItem(item.id);
   await store.setConfig({
@@ -81,4 +98,62 @@ test('invalid media dimensions do not trigger cover pairing', async () => {
   );
 
   assert.deepEqual(slideshow.getCurrent().map((item) => item.id), ['invalid']);
+});
+
+
+test('playback media mode includes both photos and videos by default', async () => {
+  await resetStore(
+    [photo('photo-1', 1920, 1080), videoItem('video-1')],
+    { playbackMediaMode: 'both' },
+  );
+
+  assert.deepEqual(slideshow.getCurrent().map((item) => item.id), ['photo-1']);
+  slideshow.next();
+  assert.deepEqual(slideshow.getCurrent().map((item) => item.id), ['video-1']);
+});
+
+test('playback media mode filters automatic controls to photos only', async () => {
+  await resetStore(
+    [videoItem('video-1'), photo('photo-1', 1920, 1080), videoItem('video-2')],
+    { playbackMediaMode: 'photos' },
+  );
+
+  assert.deepEqual(slideshow.getCurrent().map((item) => item.id), ['photo-1']);
+  slideshow.next();
+  assert.deepEqual(slideshow.getCurrent().map((item) => item.id), ['photo-1']);
+});
+
+test('playback media mode filters automatic controls to videos only', async () => {
+  await resetStore(
+    [photo('photo-1', 1920, 1080), videoItem('video-1'), photo('photo-2', 1920, 1080)],
+    { playbackMediaMode: 'videos' },
+  );
+
+  assert.deepEqual(slideshow.getCurrent().map((item) => item.id), ['video-1']);
+  slideshow.previous();
+  assert.deepEqual(slideshow.getCurrent().map((item) => item.id), ['video-1']);
+});
+
+test('playback media mode refresh moves away from a newly filtered current item', async () => {
+  await resetStore(
+    [photo('photo-1', 1920, 1080), videoItem('video-1')],
+    { playbackMediaMode: 'both' },
+  );
+  assert.deepEqual(slideshow.getCurrent().map((item) => item.id), ['photo-1']);
+
+  await store.setConfig({ ...store.getConfig(), playbackMediaMode: 'videos' });
+  slideshow.refresh();
+
+  assert.deepEqual(slideshow.getCurrent().map((item) => item.id), ['video-1']);
+});
+
+test('playback media mode with no matching items clears the current item without crashing', async () => {
+  await resetStore(
+    [photo('photo-1', 1920, 1080)],
+    { playbackMediaMode: 'videos' },
+  );
+
+  assert.deepEqual(slideshow.getCurrent(), []);
+  slideshow.next();
+  assert.deepEqual(slideshow.getCurrent(), []);
 });

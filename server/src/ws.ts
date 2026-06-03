@@ -11,6 +11,7 @@ import {
   FILL_MODES,
   FRAME_ASPECTS,
   MOTION_MODES,
+  PLAYBACK_MEDIA_MODES,
   TRANSITIONS,
   type ControlMessage,
   type FillMode,
@@ -18,6 +19,7 @@ import {
   type FrameConfig,
   type FrameEvent,
   type MotionMode,
+  type PlaybackMediaMode,
   type TransitionName,
 } from '@4kframe/shared';
 import { hub } from './hub.js';
@@ -28,6 +30,7 @@ import * as auth from './auth.js';
 type PublicConfigPatch = Partial<Pick<FrameConfig,
   | 'photoPeriod'
   | 'transitionPeriod'
+  | 'playbackMediaMode'
   | 'zoom'
   | 'panX'
   | 'panY'
@@ -46,6 +49,7 @@ const PUBLIC_DISPLAY_CONTROL_TYPES = new Set<ControlMessage['type']>(['next', 'p
 const PUBLIC_CONFIG_KEYS = new Set([
   'photoPeriod',
   'transitionPeriod',
+  'playbackMediaMode',
   'zoom',
   'panX',
   'panY',
@@ -122,6 +126,10 @@ function validatePublicConfigPatch(patch: unknown): PublicConfigPatch | null {
       case 'transition':
         if (typeof value !== 'string' || !(TRANSITIONS as readonly string[]).includes(value)) return null;
         sanitized.transition = value as TransitionName;
+        break;
+      case 'playbackMediaMode':
+        if (typeof value !== 'string' || !(PLAYBACK_MEDIA_MODES as readonly string[]).includes(value)) return null;
+        sanitized.playbackMediaMode = value as PlaybackMediaMode;
         break;
       case 'motion':
         if (typeof value !== 'string' || !(MOTION_MODES as readonly string[]).includes(value)) return null;

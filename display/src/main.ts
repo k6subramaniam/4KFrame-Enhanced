@@ -339,6 +339,7 @@ function getElementByIds<T extends HTMLElement>(...ids: string[]): T | null {
 type PublicConfigKey =
   | 'photoPeriod'
   | 'transitionPeriod'
+  | 'playbackMediaMode'
   | 'zoom'
   | 'panX'
   | 'panY'
@@ -388,7 +389,7 @@ function publicConfigPatch(key: string | undefined, rawValue: string): Partial<F
     if (rawValue !== 'true' && rawValue !== 'false') return null;
     return { [publicKey]: rawValue === 'true' };
   }
-  if (['fillMode', 'frameAspect', 'transition', 'motion'].includes(publicKey)) {
+  if (['fillMode', 'frameAspect', 'transition', 'motion', 'playbackMediaMode'].includes(publicKey)) {
     return { [publicKey]: rawValue };
   }
   return null;
@@ -411,7 +412,7 @@ function sharedSettingsConfigPatch(patch: SettingsPatch): Partial<FrameConfig> |
       } else {
         return null;
       }
-    } else if (['fillMode', 'frameAspect', 'transition', 'motion'].includes(publicKey)) {
+    } else if (['fillMode', 'frameAspect', 'transition', 'motion', 'playbackMediaMode'].includes(publicKey)) {
       Object.assign(nextPatch, { [publicKey]: String(value) });
     }
   }

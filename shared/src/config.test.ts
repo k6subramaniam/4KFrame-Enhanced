@@ -10,6 +10,14 @@ test('aspectRatio maps presets and returns null for auto', () => {
   assert.ok(aspectRatio('21:9')! > 2);
 });
 
+test('playback media mode defaults, serialises and validates', () => {
+  const base = defaultConfig();
+  assert.equal(base.playbackMediaMode, 'both');
+  assert.equal(toApiData({ ...base, playbackMediaMode: 'photos' }).playbackMediaMode, 'photos');
+  assert.equal(fromApiData(base, { playbackMediaMode: 'videos' }).playbackMediaMode, 'videos');
+  assert.equal(fromApiData({ ...base, playbackMediaMode: 'photos' }, { playbackMediaMode: 'nope' }).playbackMediaMode, 'photos');
+});
+
 test('toApiData serialises fillMode/frameAspect and mirrors legacy frameFill', () => {
   const blur: FrameConfig = { ...defaultConfig(), fillMode: 'blur', frameAspect: '4:3' };
   const d = toApiData(blur);

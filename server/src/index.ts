@@ -53,7 +53,10 @@ export async function buildApp(https?: TlsMaterial): Promise<FastifyInstance> {
     if (!auth.authRequired()) return;
     const requestPath = req.url.split('?')[0];
     if (!requestPath.startsWith('/photos/')) return;
-    if (!auth.isAuthed(req.headers.cookie)) {
+    const token = typeof req.query === 'object' && req.query
+      ? (req.query as { frame_auth?: unknown }).frame_auth
+      : undefined;
+    if (!auth.isAuthed(req.headers.cookie) && !auth.verifyToken(typeof token === 'string' ? token : undefined)) {
       return reply.code(401).send({ error: 'unauthorized' });
     }
   });

@@ -3,6 +3,7 @@ import {
   FRAME_ASPECTS,
   MOTION_MODES,
   PHOTO_PERIOD_PRESETS,
+  PLAYBACK_MEDIA_MODES,
   TRANSITIONS,
   type ApiDataPayload,
   type FrameConfig,
@@ -57,6 +58,12 @@ const MOTION_LABELS: Record<string, string> = {
   zoom: 'Zoom',
   pan: 'Pan',
   zoompan: 'Zoom + Pan',
+};
+
+const PLAYBACK_MEDIA_LABELS: Record<string, string> = {
+  both: 'Both',
+  photos: 'Photos',
+  videos: 'Videos',
 };
 
 export function segmentButtons(
@@ -122,11 +129,19 @@ export const SHARED_SETTINGS_PANELS: SettingsPanelMetadata[] = [
     title: 'Photo Period',
     render: (config) => {
       const period = Math.round(numeric(config, 'photoPeriod', 15));
-      return segmentButtons('photoPeriod', PHOTO_PERIOD_PRESETS.map((p) => ({
+      const playbackMediaMode = text(config, 'playbackMediaMode', 'both');
+      return `${segmentButtons('photoPeriod', PHOTO_PERIOD_PRESETS.map((p) => ({
         label: PERIOD_LABELS[p] ?? `${p}s`,
         value: String(p),
         active: p === period,
-      })));
+      })))}
+      <h3 class="panel-subheading">Playback Filter</h3>
+      ${segmentButtons('playbackMediaMode', PLAYBACK_MEDIA_MODES.map((m) => ({
+        label: PLAYBACK_MEDIA_LABELS[m] ?? m,
+        value: m,
+        active: m === playbackMediaMode,
+      })))}
+      <div class="muted" style="margin-top:.4rem">Choose whether automatic controls play photos, videos, or both. Direct cast/view still opens the selected item.</div>`;
     },
   },
   {

@@ -85,6 +85,7 @@ export type ControlMessage =
       patch: Partial<Pick<FrameConfig,
         | 'photoPeriod'
         | 'transitionPeriod'
+        | 'playbackMediaMode'
         | 'zoom'
         | 'panX'
         | 'panY'

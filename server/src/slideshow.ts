@@ -43,9 +43,21 @@ function targetAspect(): number | null {
   return cfg.frameWidth > 0 && cfg.frameHeight > 0 ? cfg.frameWidth / cfg.frameHeight : null;
 }
 
-/** Items eligible for automatic rotation (excluded items are filtered out). */
+/** Items eligible for automatic rotation (excluded items and filtered media kinds are skipped). */
 function rotation(): MediaItem[] {
-  return listItems().filter((i) => i.enabled !== false);
+  const mode = getConfig().playbackMediaMode;
+  return listItems().filter((i) => {
+    if (i.enabled === false) return false;
+    if (mode === 'photos') return i.kind === 'photo';
+    if (mode === 'videos') return i.kind === 'video';
+    return true;
+  });
+}
+
+function currentIsInRotation(items = rotation()): boolean {
+  if (current.length === 0) return false;
+  const eligibleIds = new Set(items.map((item) => item.id));
+  return current.some((item) => eligibleIds.has(item.id));
 }
 
 /** Choose the item(s) to display at `index` within the rotation. */
@@ -135,6 +147,7 @@ export function advance(delta: number, interactive: boolean): void {
   const items = rotation();
   if (items.length === 0) {
     current = [];
+    show(interactive);
     return;
   }
   pointer = (pointer + delta + items.length) % items.length;
@@ -178,14 +191,28 @@ export function getCurrent(): MediaItem[] {
 export function startSlideshow(): void {
   pointer = 0;
   current = rotation().length ? selectAt(0) : [];
-  if (current.length) show(false);
+  show(false);
 }
 
 /** Re-evaluate timing after a config or library change. */
 export function refresh(): void {
-  if (current.length === 0 && rotation().length) {
-    startSlideshow();
-  } else {
-    schedule();
+  const items = rotation();
+  if (items.length === 0) {
+    if (current.length) {
+      current = [];
+      show(false);
+    } else {
+      schedule();
+    }
+    return;
   }
+
+  if (current.length === 0 || !currentIsInRotation(items)) {
+    pointer = Math.min(pointer, items.length - 1);
+    current = selectAt(pointer);
+    show(false);
+    return;
+  }
+
+  schedule();
 }
