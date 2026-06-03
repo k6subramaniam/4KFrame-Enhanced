@@ -240,7 +240,6 @@ function statusText(): string {
 function handleEvent(event: FrameEvent): void {
   switch (event.type) {
     case 'config':
-      receivedConfigEvent = true;
       config = event.config;
       applyOverlays(config);
       updateControlStates();
@@ -253,7 +252,6 @@ function handleEvent(event: FrameEvent): void {
       // No-op for the display; the server drives what is shown.
       break;
     case 'paused':
-      receivedPausedEvent = true;
       paused = event.paused;
       if (showingVideo) {
         if (paused) video.pause();
@@ -270,7 +268,6 @@ function handleEvent(event: FrameEvent): void {
       holding = event.holding;
       if (showingVideo) video.loop = config.videoLoop || holding;
       setStatus(statusText());
-      updateControlStates();
       break;
     case 'log':
       if (event.level === 'error') console.error(event.message);
@@ -540,23 +537,16 @@ function updateControlStates(): void {
 function connect(): void {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
-  receivedConfigEvent = false;
-  receivedPausedEvent = false;
   socket = ws;
-  updateControlStates();
   ws.onopen = () => {
     setStatus('');
-    updateControlStates();
   };
   ws.onmessage = (ev) => {
     try { handleEvent(JSON.parse(ev.data) as FrameEvent); } catch { /* ignore */ }
   };
   ws.onclose = () => {
     if (socket === ws) socket = null;
-    receivedConfigEvent = false;
-    receivedPausedEvent = false;
     setStatus('Reconnecting…');
-    updateControlStates();
     setTimeout(connect, 2000);
   };
   ws.onerror = () => ws.close();
