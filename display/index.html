@@ -39,6 +39,60 @@
       #public-settings input[type=range] { width: 100%; }
       #public-settings .muted { color: rgba(255,255,255,.7); font-size: .78rem; }
       #public-settings .panel-subheading { margin: .65rem 0 .35rem; font-size: .82rem; }
+      #public-controls { position: absolute; inset: 0; z-index: 20; pointer-events: none;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #fff; }
+      #public-controls, #public-controls * { box-sizing: border-box; }
+      #public-controls button, #public-controls input, #public-controls select { font: inherit; }
+      #public-controls-toggle { position: absolute; top: max(1rem, env(safe-area-inset-top));
+        right: max(1rem, env(safe-area-inset-right)); pointer-events: auto; cursor: auto; border: 1px solid rgba(255,255,255,0.28);
+        border-radius: 999px; padding: 0.65rem 0.95rem; color: #fff; background: rgba(10,10,14,0.46);
+        box-shadow: 0 10px 32px rgba(0,0,0,0.38); backdrop-filter: blur(18px); opacity: 0.42;
+        transition: opacity 180ms ease, background 180ms ease, transform 180ms ease; }
+      #public-controls-toggle:hover, #public-controls-toggle:focus-visible { opacity: 1; background: rgba(20,20,26,0.86); transform: translateY(-1px); }
+      #public-control-panel { position: absolute; right: max(1rem, env(safe-area-inset-right));
+        top: calc(max(1rem, env(safe-area-inset-top)) + 3.75rem); width: min(24rem, calc(100vw - 2rem));
+        max-height: min(78vh, calc(100vh - 7rem)); overflow: auto; pointer-events: none; visibility: hidden; cursor: auto;
+        border: 1px solid rgba(255,255,255,0.14); border-radius: 1.25rem;
+        background: linear-gradient(180deg, rgba(18,18,24,0.88), rgba(5,5,8,0.78));
+        box-shadow: 0 24px 70px rgba(0,0,0,0.52); backdrop-filter: blur(22px);
+        padding: 0.9rem; opacity: 0; transform: translateY(-0.75rem) scale(0.98);
+        transition: opacity 180ms ease, transform 180ms ease; }
+      #public-controls:hover #public-control-panel, #public-controls:focus-within #public-control-panel { opacity: 0.96; transform: none; pointer-events: auto; visibility: visible; }
+      #public-controls:hover #public-controls-toggle, #public-controls:focus-within #public-controls-toggle { opacity: 0.9; }
+      .public-control-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 0 0 0.75rem; }
+      .public-control-title { font-size: 0.95rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+      .public-control-note { font-size: 0.72rem; color: rgba(255,255,255,0.6); }
+      #public-playback { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; margin-bottom: 0.8rem; }
+      .public-icon-button, .public-segment button { min-height: 2.35rem; border: 1px solid rgba(255,255,255,0.16);
+        border-radius: 0.8rem; color: #fff; background: rgba(255,255,255,0.08); cursor: auto; }
+      .public-icon-button { font-size: 1.1rem; }
+      .public-icon-button:hover, .public-icon-button:focus-visible, .public-segment button:hover, .public-segment button:focus-visible {
+        background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.34); }
+      #public-settings { display: grid; grid-template-columns: 1fr; gap: 0.72rem; }
+      .public-control-group { display: grid; gap: 0.42rem; min-width: 0; }
+      .public-control-group > label, .public-control-group > .public-group-label { color: rgba(255,255,255,0.76); font-size: 0.74rem;
+        font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
+      .public-segment { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+      .public-segment button { flex: 1 1 auto; padding: 0 0.62rem; font-size: 0.82rem; }
+      .public-segment button.is-selected { background: rgba(255,255,255,0.24); border-color: rgba(255,255,255,0.5); }
+      .public-control-group select { width: 100%; min-height: 2.35rem; border: 1px solid rgba(255,255,255,0.16); border-radius: 0.8rem;
+        color: #fff; background: rgba(0,0,0,0.46); padding: 0 0.65rem; cursor: auto; }
+      .public-control-range { display: grid; grid-template-columns: 3.2rem 1fr; align-items: center; gap: 0.55rem; color: rgba(255,255,255,0.74);
+        font-size: 0.82rem; }
+      .public-control-range input { width: 100%; accent-color: #fff; cursor: auto; }
+      @media (min-width: 860px) {
+        #public-control-panel { width: min(42rem, calc(100vw - 2rem)); }
+        #public-settings { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .public-control-group.public-wide { grid-column: 1 / -1; }
+      }
+      @media (max-width: 700px) {
+        #public-controls-toggle { top: auto; bottom: max(1rem, env(safe-area-inset-bottom)); right: 50%; transform: translateX(50%); }
+        #public-controls-toggle:hover, #public-controls-toggle:focus-visible { transform: translateX(50%) translateY(-1px); }
+        #public-control-panel { position: absolute; inset: auto 0 0 0; width: auto; max-height: 58vh; border-radius: 1.25rem 1.25rem 0 0;
+          padding: 1rem max(1rem, env(safe-area-inset-right)) max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
+          transform: translateY(1rem); }
+        #public-controls:hover #public-control-panel, #public-controls:focus-within #public-control-panel { transform: none; }
+      }
       .hidden { display: none !important; }
     </style>
   </head>
@@ -52,6 +106,107 @@
       <div id="qr" class="overlay hidden"><img alt="Scan to manage" /></div>
       <div id="status" class="overlay">Connecting…</div>
       <div id="public-settings" aria-label="Public display settings"></div>
+      <section id="public-controls" aria-label="Public slideshow controls">
+        <button id="public-controls-toggle" type="button" aria-controls="public-control-panel" aria-expanded="false">Controls</button>
+        <aside id="public-control-panel" aria-label="Slideshow controls">
+          <div class="public-control-header">
+            <div class="public-control-title">Frame Controls</div>
+            <div class="public-control-note">Dims when idle</div>
+          </div>
+          <div id="public-playback" aria-label="Playback">
+            <button id="public-previous" class="public-icon-button" type="button" data-control="previous" aria-label="Previous photo">‹</button>
+            <button id="public-play-pause" class="public-icon-button" type="button" data-control="play-pause" aria-label="Play or pause">⏯</button>
+            <button id="public-next" class="public-icon-button" type="button" data-control="next" aria-label="Next photo">›</button>
+          </div>
+          <div id="public-settings" aria-label="Slideshow settings">
+            <div class="public-control-group" id="public-photo-period">
+              <label for="public-photo-period-select">Photo period</label>
+              <select id="public-photo-period-select" data-config-key="photoPeriod">
+                <option value="0">Paused</option>
+                <option value="5">5 seconds</option>
+                <option value="10">10 seconds</option>
+                <option value="15" selected>15 seconds</option>
+                <option value="20">20 seconds</option>
+                <option value="40">40 seconds</option>
+                <option value="60">1 minute</option>
+                <option value="300">5 minutes</option>
+                <option value="600">10 minutes</option>
+                <option value="1200">20 minutes</option>
+              </select>
+            </div>
+            <div class="public-control-group" id="public-effect-controls">
+              <div class="public-group-label">Effects</div>
+              <div class="public-segment" role="group" aria-label="Effect speed" data-config-key="transitionPeriod">
+                <button type="button" data-value="0">None</button>
+                <button type="button" data-value="0.5">Fast</button>
+                <button type="button" data-value="2">Normal</button>
+                <button type="button" data-value="5">Slow</button>
+              </div>
+            </div>
+            <div class="public-control-group" id="public-transition-controls">
+              <label for="public-transition-select">Transition</label>
+              <select id="public-transition-select" data-config-key="transition">
+                <option value="fade.glsl" selected>Fade</option>
+                <option value="wipeDown.glsl">Wipe down</option>
+                <option value="wipeUp.glsl">Wipe up</option>
+                <option value="cube.glsl">Cube</option>
+                <option value="cube-left.glsl">Cube left</option>
+                <option value="flyeye.glsl">Flyeye</option>
+              </select>
+            </div>
+            <div class="public-control-group" id="public-scaling-controls">
+              <label for="public-fill-mode-select">Scaling / fill</label>
+              <select id="public-fill-mode-select" data-config-key="fillMode">
+                <option value="cover" selected>Cover</option>
+                <option value="contain">Contain</option>
+                <option value="blur">Blur fill</option>
+                <option value="stretch">Stretch</option>
+              </select>
+            </div>
+            <div class="public-control-group" id="public-aspect-controls">
+              <label for="public-aspect-select">Aspect ratio</label>
+              <select id="public-aspect-select" data-config-key="frameAspect">
+                <option value="auto" selected>Auto</option>
+                <option value="16:9">16:9</option>
+                <option value="9:16">9:16 portrait</option>
+                <option value="4:3">4:3</option>
+                <option value="3:4">3:4 portrait</option>
+                <option value="1:1">1:1 square</option>
+                <option value="21:9">21:9 ultrawide</option>
+              </select>
+            </div>
+            <div class="public-control-group public-wide" id="public-zoom-pan">
+              <div class="public-group-label">Zoom &amp; pan</div>
+              <label class="public-control-range" for="public-zoom"><span>Zoom</span><input id="public-zoom" type="range" min="100" max="300" step="5" value="100" data-config-key="zoom" /></label>
+              <label class="public-control-range" for="public-pan-x"><span>Pan X</span><input id="public-pan-x" type="range" min="-100" max="100" step="5" value="0" data-config-key="panX" /></label>
+              <label class="public-control-range" for="public-pan-y"><span>Pan Y</span><input id="public-pan-y" type="range" min="-100" max="100" step="5" value="0" data-config-key="panY" /></label>
+            </div>
+            <div class="public-control-group" id="public-motion-controls">
+              <label for="public-motion-select">Motion</label>
+              <select id="public-motion-select" data-config-key="motion">
+                <option value="off" selected>Off</option>
+                <option value="zoom">Zoom</option>
+                <option value="pan">Pan</option>
+                <option value="zoompan">Zoom + pan</option>
+              </select>
+            </div>
+            <div class="public-control-group" id="public-smart-framing">
+              <div class="public-group-label">Smart framing</div>
+              <div class="public-segment" role="group" aria-label="Smart framing" data-config-key="smartFraming">
+                <button type="button" data-value="true">On</button>
+                <button type="button" data-value="false" class="is-selected">Off</button>
+              </div>
+            </div>
+            <div class="public-control-group" id="public-qr-toggle">
+              <div class="public-group-label">QR code</div>
+              <div class="public-segment" role="group" aria-label="QR code" data-config-key="showQr">
+                <button type="button" data-value="true" class="is-selected">On</button>
+                <button type="button" data-value="false">Off</button>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </section>
     </div>
     <!-- Load the Cast receiver framework only on Chromecast/Android TV (CrKey) devices, so
          regular TV browsers never block on an external dependency. The receiver bridge in
