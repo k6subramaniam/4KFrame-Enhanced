@@ -43,20 +43,6 @@ let lastVideoItem: MediaItem | null = null;
 let showingVideo = false;
 let paused = false;
 let holding = false;
-let receivedConfigEvent = false;
-let receivedPausedEvent = false;
-
-type DisplayControlAction =
-  | 'previous'
-  | 'toggle-pause'
-  | 'next'
-  | 'zoom-out'
-  | 'zoom-in'
-  | 'pan-left'
-  | 'pan-up'
-  | 'pan-down'
-  | 'pan-right'
-  | 'reset-zoom-pan';
 
 /** Forward a control message to the backend (used to bridge Cast custom messages). */
 function sendControl(msg: ControlMessage): void {
@@ -257,7 +243,6 @@ function statusText(): string {
 function handleEvent(event: FrameEvent): void {
   switch (event.type) {
     case 'config':
-      receivedConfigEvent = true;
       config = event.config;
       applyOverlays(config);
       renderPublicSettings();
@@ -270,7 +255,6 @@ function handleEvent(event: FrameEvent): void {
       // No-op for the display; the server drives what is shown.
       break;
     case 'paused':
-      receivedPausedEvent = true;
       paused = event.paused;
       if (showingVideo) {
         if (paused) video.pause();
@@ -287,7 +271,6 @@ function handleEvent(event: FrameEvent): void {
       holding = event.holding;
       if (showingVideo) video.loop = config.videoLoop || holding;
       setStatus(statusText());
-      updateControlStates();
       break;
     case 'log':
       if (event.level === 'error') console.error(event.message);
@@ -305,6 +288,37 @@ function handleEvent(event: FrameEvent): void {
 function clampN(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
+
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 3;
+const ZOOM_STEP = 0.2;
+const PAN_STEP = 0.1;
+
+function goNext(): void {
+  sendControl({ type: 'next' });
+}
+
+function goPrevious(): void {
+  sendControl({ type: 'previous' });
+}
+
+function togglePause(): void {
+  sendControl({ type: paused ? 'resume' : 'pause' });
+}
+
+function setPan(panX: number, panY: number): void {
+  adjustConfig({ panX: clampN(panX, -1, 1), panY: clampN(panY, -1, 1) });
+}
+
+function setZoom(zoom: number): void {
+  const nextZoom = clampN(zoom, MIN_ZOOM, MAX_ZOOM);
+  adjustConfig(nextZoom <= MIN_ZOOM + 0.001 ? { zoom: MIN_ZOOM, panX: 0, panY: 0 } : { zoom: nextZoom });
+}
+
+function resetZoomPan(): void {
+  adjustConfig({ zoom: MIN_ZOOM, panX: 0, panY: 0 });
+}
+
 function adjustConfig(patch: Partial<FrameConfig>): void {
   sendControl({ type: 'publicConfig', patch });
 }
@@ -497,110 +511,19 @@ function wireRemote(): void {
   });
 }
 
-function controlButtons(): NodeListOf<HTMLButtonElement> {
-  return document.querySelectorAll<HTMLButtonElement>('#display-controls [data-control-action]');
-}
-
-function setControlButtonState(action: DisplayControlAction, disabled: boolean): void {
-  document.querySelectorAll<HTMLButtonElement>(`#display-controls [data-control-action="${action}"]`).forEach((button) => {
-    button.disabled = disabled;
-  });
-}
-
-function updateControlStates(): void {
-  const connected = socket?.readyState === WebSocket.OPEN;
-  const configControlsReady = connected && receivedConfigEvent;
-  const pauseControlReady = connected && receivedPausedEvent;
-  const zoomed = config.zoom > 1.01;
-  const canZoomIn = config.zoom < MAX_ZOOM - 0.001;
-  const canZoomOut = config.zoom > MIN_ZOOM + 0.001;
-  const hasManualPanZoom = canZoomOut || Math.abs(config.panX) > 0.001 || Math.abs(config.panY) > 0.001;
-
-  controlButtons().forEach((button) => {
-    button.disabled = !connected;
-  });
-  setControlButtonState('toggle-pause', !pauseControlReady);
-  setControlButtonState('pan-left', !configControlsReady || !zoomed);
-  setControlButtonState('pan-up', !configControlsReady || !zoomed);
-  setControlButtonState('pan-down', !configControlsReady || !zoomed);
-  setControlButtonState('pan-right', !configControlsReady || !zoomed);
-  setControlButtonState('zoom-in', !configControlsReady || !canZoomIn);
-  setControlButtonState('zoom-out', !configControlsReady || !canZoomOut);
-  setControlButtonState('reset-zoom-pan', !configControlsReady || !hasManualPanZoom);
-
-  document.querySelectorAll<HTMLButtonElement>('#display-controls [data-control-action="toggle-pause"]').forEach((button) => {
-    button.classList.toggle('control-active', paused);
-    button.setAttribute('aria-pressed', String(paused));
-    button.setAttribute('aria-label', paused ? 'Resume slideshow' : 'Pause slideshow');
-    button.textContent = paused ? '▶' : '⏸';
-  });
-}
-
-function runPublicControlAction(action: DisplayControlAction): void {
-  switch (action) {
-    case 'previous':
-      goPrevious();
-      break;
-    case 'toggle-pause':
-      togglePause();
-      break;
-    case 'next':
-      goNext();
-      break;
-    case 'zoom-out':
-      setZoom(config.zoom - ZOOM_STEP);
-      break;
-    case 'zoom-in':
-      setZoom(config.zoom + ZOOM_STEP);
-      break;
-    case 'pan-left':
-      setPan(config.panX - PAN_STEP, config.panY);
-      break;
-    case 'pan-up':
-      setPan(config.panX, config.panY - PAN_STEP);
-      break;
-    case 'pan-down':
-      setPan(config.panX, config.panY + PAN_STEP);
-      break;
-    case 'pan-right':
-      setPan(config.panX + PAN_STEP, config.panY);
-      break;
-    case 'reset-zoom-pan':
-      resetZoomPan();
-      break;
-  }
-}
-
-function wirePublicControls(): void {
-  controlButtons().forEach((button) => {
-    button.addEventListener('click', () => {
-      if (button.disabled) return;
-      runPublicControlAction(button.dataset.controlAction as DisplayControlAction);
-    });
-  });
-  updateControlStates();
-}
-
 function connect(): void {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
-  receivedConfigEvent = false;
-  receivedPausedEvent = false;
   socket = ws;
-  updateControlStates();
   ws.onopen = () => {
     setStatus('');
-    updateControlStates();
   };
   ws.onmessage = (ev) => {
     try { handleEvent(JSON.parse(ev.data) as FrameEvent); } catch { /* ignore */ }
   };
   ws.onclose = () => {
     if (socket === ws) socket = null;
-    receivedConfigEvent = false;
-    receivedPausedEvent = false;
     setStatus('Reconnecting…');
-    updateControlStates();
     setTimeout(connect, 2000);
   };
   ws.onerror = () => ws.close();
@@ -615,6 +538,5 @@ window.addEventListener('resize', () => {
 renderPublicSettings();
 wirePublicControls();
 wireRemote();
-wirePublicControls();
 initCastReceiver(sendControl);
 connect();
