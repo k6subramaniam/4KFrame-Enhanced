@@ -5,7 +5,8 @@
  * progression. Mirrors the original behaviour:
  *  - photos advance after `photoPeriod` seconds (0 = paused),
  *  - when `frameFill` is enabled and the current photo is portrait, a second
- *    portrait photo may be paired to fill a landscape frame,
+ *    portrait photo may be paired to fill a landscape frame only when the
+ *    primary photo matches the target frame/content aspect,
  *  - casting shows a specific item immediately (interactive transition).
  *
  * Items excluded from rotation (`enabled === false`) are skipped by automatic
@@ -16,7 +17,7 @@
  * before advancing.
  */
 
-import type { MediaItem } from '@4kframe/shared';
+import { aspectRatio, type MediaItem } from '@4kframe/shared';
 import { getConfig, listItems, getItem } from './store.js';
 import { hub } from './hub.js';
 
@@ -26,8 +27,20 @@ let timer: NodeJS.Timeout | undefined;
 let paused = false;
 let holding = false;
 
+function mediaAspect(item: MediaItem): number | null {
+  return item.width > 0 && item.height > 0 ? item.width / item.height : null;
+}
+
 function isPortrait(i: MediaItem): boolean {
-  return i.height > i.width && i.width > 0;
+  const ratio = mediaAspect(i);
+  return ratio !== null && ratio < 1;
+}
+
+function targetAspect(): number | null {
+  const cfg = getConfig();
+  const configuredAspect = aspectRatio(cfg.frameAspect);
+  if (configuredAspect !== null) return configuredAspect;
+  return cfg.frameWidth > 0 && cfg.frameHeight > 0 ? cfg.frameWidth / cfg.frameHeight : null;
 }
 
 /** Items eligible for automatic rotation (excluded items are filtered out). */
@@ -46,6 +59,12 @@ function selectAt(index: number): MediaItem[] {
 
   // Fill a landscape frame with two portrait photos when possible.
   if (cfg.frameFill && primary.kind === 'photo' && isPortrait(primary)) {
+    const primaryAspect = mediaAspect(primary);
+    const contentAspect = targetAspect();
+    if (primaryAspect === null || contentAspect === null || Math.abs(primaryAspect - contentAspect) > 0.01) {
+      return [primary];
+    }
+
     const frameLandscape = cfg.frameWidth >= cfg.frameHeight;
     if (frameLandscape) {
       const partner = items
