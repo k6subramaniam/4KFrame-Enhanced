@@ -12,15 +12,13 @@
 import {
   defaultConfig,
   faceCenterToPan,
-  renderSharedSettings,
   type ControlMessage,
   type FrameConfig,
   type FillMode,
   type FrameEvent,
+  renderSharedSettings,
   type MediaItem,
-  type MotionMode,
   type SettingsPatch,
-  type SettingsUiAdapter,
 } from '@4kframe/shared';
 import { GLRenderer } from './gl.js';
 import { compose, contentRect } from './compositor.js';
@@ -31,7 +29,6 @@ const canvas = document.getElementById('gl') as HTMLCanvasElement;
 const video = document.getElementById('video') as HTMLVideoElement;
 const videoBg = document.getElementById('video-bg') as HTMLElement;
 const renderer = new GLRenderer(canvas);
-const publicSettingsRoot = document.getElementById('public-settings') as HTMLElement | null;
 
 let config: FrameConfig = defaultConfig();
 let prevFrame: HTMLCanvasElement | null = null;
@@ -43,6 +40,8 @@ let lastVideoItem: MediaItem | null = null;
 let showingVideo = false;
 let paused = false;
 let holding = false;
+let receivedConfigEvent = false;
+let receivedPausedEvent = false;
 
 /** Forward a control message to the backend (used to bridge Cast custom messages). */
 function sendControl(msg: ControlMessage): void {
@@ -243,9 +242,11 @@ function statusText(): string {
 function handleEvent(event: FrameEvent): void {
   switch (event.type) {
     case 'config':
+      receivedConfigEvent = true;
       config = event.config;
       applyOverlays(config);
       renderPublicSettings();
+      updateControlStates();
       rerender().catch((err) => console.error(err));
       break;
     case 'show':
@@ -255,6 +256,7 @@ function handleEvent(event: FrameEvent): void {
       // No-op for the display; the server drives what is shown.
       break;
     case 'paused':
+      receivedPausedEvent = true;
       paused = event.paused;
       if (showingVideo) {
         if (paused) video.pause();
@@ -265,7 +267,7 @@ function handleEvent(event: FrameEvent): void {
         motionAnim?.play();
       }
       setStatus(statusText());
-      syncPublicControls();
+      updateControlStates();
       break;
     case 'hold':
       holding = event.holding;
@@ -285,14 +287,14 @@ function handleEvent(event: FrameEvent): void {
  * When zoomed in (zoom > 1), the D-pad arrows pan the image instead of navigating; zoom out
  * to 1× to navigate again. `+`/`-` zoom, `0` resets.
  */
-function clampN(v: number, lo: number, hi: number): number {
-  return Math.max(lo, Math.min(hi, v));
-}
-
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 3;
 const ZOOM_STEP = 0.2;
 const PAN_STEP = 0.1;
+
+function clampN(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
+}
 
 function goNext(): void {
   sendControl({ type: 'next' });
@@ -306,35 +308,24 @@ function togglePause(): void {
   sendControl({ type: paused ? 'resume' : 'pause' });
 }
 
-function setPan(panX: number, panY: number): void {
-  adjustConfig({ panX: clampN(panX, -1, 1), panY: clampN(panY, -1, 1) });
-}
-
-function setZoom(zoom: number): void {
-  const nextZoom = clampN(zoom, MIN_ZOOM, MAX_ZOOM);
-  adjustConfig(nextZoom <= MIN_ZOOM + 0.001 ? { zoom: MIN_ZOOM, panX: 0, panY: 0 } : { zoom: nextZoom });
-}
-
-function resetZoomPan(): void {
-  adjustConfig({ zoom: MIN_ZOOM, panX: 0, panY: 0 });
-}
-
 function adjustConfig(patch: Partial<FrameConfig>): void {
   sendControl({ type: 'publicConfig', patch });
 }
 
-function renderPublicSettings(): void {
-  if (!publicSettingsRoot) return;
-  const adapter: SettingsUiAdapter = {
-    getConfig: () => config,
-    updateConfig: (patch: SettingsPatch) => sendControl({ type: 'publicConfig', patch }),
-    capabilities: {
-      showAdminOnlyControls: false,
-      showGooglePhotos: false,
-      showStorage: false,
-    },
-  };
-  renderSharedSettings(publicSettingsRoot, adapter);
+function setZoom(zoom: number): void {
+  const z = clampN(zoom, MIN_ZOOM, MAX_ZOOM);
+  adjustConfig(z <= MIN_ZOOM + 0.001 ? { zoom: MIN_ZOOM, panX: 0, panY: 0 } : { zoom: z });
+}
+
+function setPan(panX: number, panY: number): void {
+  adjustConfig({
+    panX: clampN(panX, -1, 1),
+    panY: clampN(panY, -1, 1),
+  });
+}
+
+function resetZoomPan(): void {
+  adjustConfig({ zoom: MIN_ZOOM, panX: 0, panY: 0 });
 }
 
 function getElementByIds<T extends HTMLElement>(...ids: string[]): T | null {
@@ -345,13 +336,30 @@ function getElementByIds<T extends HTMLElement>(...ids: string[]): T | null {
   return null;
 }
 
+type PublicConfigKey =
+  | 'photoPeriod'
+  | 'transitionPeriod'
+  | 'zoom'
+  | 'panX'
+  | 'panY'
+  | 'fillMode'
+  | 'frameAspect'
+  | 'transition'
+  | 'motion'
+  | 'smartFraming'
+  | 'showQr';
+
+const NUMERIC_PUBLIC_CONFIG_KEYS = new Set<PublicConfigKey>(['photoPeriod', 'transitionPeriod', 'zoom', 'panX', 'panY']);
+const BOOLEAN_PUBLIC_CONFIG_KEYS = new Set<PublicConfigKey>(['smartFraming', 'showQr']);
+
 const controlsToggle = getElementByIds<HTMLButtonElement>('public-controls-toggle', 'controls-toggle');
+const publicControlsRoot = document.getElementById('public-controls') as HTMLElement | null;
+const publicSettingsRoot = document.getElementById('public-settings') as HTMLElement | null;
 const publicControls = getElementByIds<HTMLElement>('public-control-panel', 'public-controls');
 const pauseControl = getElementByIds<HTMLButtonElement>('public-play-pause', 'control-pause');
-const periodValue = document.getElementById('period-value') as HTMLElement | null;
 
 function isPublicControlTarget(target: EventTarget | null): boolean {
-  return target instanceof Element && Boolean(target.closest('#public-controls, #public-controls-toggle, #controls-toggle'));
+  return target instanceof Element && Boolean(target.closest('#public-controls, #public-control-panel, #public-controls-toggle, #controls-toggle'));
 }
 
 function setControlsOpen(open: boolean): void {
@@ -362,19 +370,114 @@ function setControlsOpen(open: boolean): void {
   controlsToggle.textContent = open ? 'Close' : 'Controls';
 }
 
+function configValueForControl(key: PublicConfigKey): string {
+  const value = config[key];
+  if (key === 'zoom' || key === 'panX' || key === 'panY') return String(Math.round(Number(value) * 100));
+  return String(value);
+}
+
+function publicConfigPatch(key: string | undefined, rawValue: string): Partial<FrameConfig> | null {
+  if (!key) return null;
+  const publicKey = key as PublicConfigKey;
+  if (NUMERIC_PUBLIC_CONFIG_KEYS.has(publicKey)) {
+    const divisor = publicKey === 'zoom' || publicKey === 'panX' || publicKey === 'panY' ? 100 : 1;
+    const parsed = Number(rawValue) / divisor;
+    return Number.isFinite(parsed) ? { [publicKey]: parsed } : null;
+  }
+  if (BOOLEAN_PUBLIC_CONFIG_KEYS.has(publicKey)) {
+    if (rawValue !== 'true' && rawValue !== 'false') return null;
+    return { [publicKey]: rawValue === 'true' };
+  }
+  if (['fillMode', 'frameAspect', 'transition', 'motion'].includes(publicKey)) {
+    return { [publicKey]: rawValue };
+  }
+  return null;
+}
+
+function sharedSettingsConfigPatch(patch: SettingsPatch): Partial<FrameConfig> | null {
+  const nextPatch: Partial<FrameConfig> = {};
+
+  for (const [key, value] of Object.entries(patch)) {
+    const publicKey = key as PublicConfigKey;
+    if (NUMERIC_PUBLIC_CONFIG_KEYS.has(publicKey)) {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) return null;
+      Object.assign(nextPatch, { [publicKey]: parsed });
+    } else if (BOOLEAN_PUBLIC_CONFIG_KEYS.has(publicKey)) {
+      if (typeof value === 'boolean') {
+        Object.assign(nextPatch, { [publicKey]: value });
+      } else if (value === 'true' || value === 'false') {
+        Object.assign(nextPatch, { [publicKey]: value === 'true' });
+      } else {
+        return null;
+      }
+    } else if (['fillMode', 'frameAspect', 'transition', 'motion'].includes(publicKey)) {
+      Object.assign(nextPatch, { [publicKey]: String(value) });
+    }
+  }
+
+  return Object.keys(nextPatch).length ? nextPatch : null;
+}
+
+function renderPublicSettings(): void {
+  if (!publicSettingsRoot) return;
+
+  const openPanels = new Map<string, boolean>();
+  publicSettingsRoot.querySelectorAll<HTMLElement>('.panel[data-panel-id]').forEach((panel) => {
+    const id = panel.dataset.panelId;
+    if (id) openPanels.set(id, panel.dataset.collapsed !== 'true');
+  });
+
+  renderSharedSettings(publicSettingsRoot, {
+    getConfig: () => config,
+    updateConfig: (patch: SettingsPatch) => {
+      const normalizedPatch = sharedSettingsConfigPatch(patch);
+      if (normalizedPatch) adjustConfig(normalizedPatch);
+    },
+  }, {
+    isPanelOpen: (id: string) => openPanels.get(id) ?? true,
+  });
+
+  publicSettingsRoot.querySelectorAll<HTMLButtonElement>('.panel-toggle').forEach((toggle) => {
+    toggle.addEventListener('click', () => {
+      const panel = toggle.closest<HTMLElement>('.panel');
+      const body = document.getElementById(toggle.getAttribute('aria-controls') ?? '');
+      if (!panel || !body) return;
+      const open = toggle.getAttribute('aria-expanded') !== 'true';
+      panel.dataset.collapsed = open ? 'false' : 'true';
+      toggle.setAttribute('aria-expanded', String(open));
+      body.toggleAttribute('aria-hidden', !open);
+      body.toggleAttribute('inert', !open);
+    });
+  });
+}
+
 function syncPublicControls(): void {
   if (pauseControl) {
-    pauseControl.textContent = paused ? 'Resume' : 'Pause';
+    pauseControl.textContent = paused ? '▶' : '⏸';
     pauseControl.setAttribute('aria-label', paused ? 'Resume slideshow' : 'Pause slideshow');
     pauseControl.setAttribute('aria-pressed', String(paused));
   }
-  if (periodValue) periodValue.textContent = `${Math.round(config.photoPeriod)}s`;
 
-  publicControls?.querySelectorAll<HTMLButtonElement>('[data-fill-mode]').forEach((button) => {
-    button.setAttribute('aria-pressed', String(button.dataset.fillMode === config.fillMode));
+  publicControls?.querySelectorAll<HTMLSelectElement>('select[data-config-key]').forEach((select) => {
+    const key = select.dataset.configKey as PublicConfigKey | undefined;
+    if (key) select.value = configValueForControl(key);
   });
-  publicControls?.querySelectorAll<HTMLButtonElement>('[data-motion]').forEach((button) => {
-    button.setAttribute('aria-pressed', String(button.dataset.motion === config.motion));
+
+  publicControls?.querySelectorAll<HTMLInputElement>('input[type=range][data-config-key]').forEach((input) => {
+    const key = input.dataset.configKey as PublicConfigKey | undefined;
+    if (key) input.value = configValueForControl(key);
+  });
+
+  publicControls?.querySelectorAll<HTMLElement>('[role=group][data-config-key]').forEach((group) => {
+    const key = group.dataset.configKey as PublicConfigKey | undefined;
+    if (!key) return;
+    const currentValue = configValueForControl(key);
+    group.querySelectorAll<HTMLButtonElement>('button[data-value]').forEach((button) => {
+      const selected = button.dataset.value === currentValue;
+      button.classList.toggle('is-selected', selected);
+      button.setAttribute('aria-pressed', String(selected));
+    });
   });
 }
 
@@ -389,51 +492,17 @@ function wirePublicControls(): void {
   getElementByIds<HTMLButtonElement>('public-next', 'control-next')?.addEventListener('click', () => sendControl({ type: 'next' }));
   pauseControl?.addEventListener('click', () => sendControl({ type: paused ? 'resume' : 'pause' }));
 
-  publicControls.querySelectorAll<HTMLButtonElement>('[data-period]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const delta = Number(button.dataset.period || 0);
-      adjustConfig({ photoPeriod: clampN(config.photoPeriod + delta, 5, 1200) });
-    });
-  });
-
-  publicControls.querySelectorAll<HTMLButtonElement>('[data-fill-mode]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const fillMode = button.dataset.fillMode as FillMode | undefined;
-      if (fillMode) adjustConfig({ fillMode });
-    });
-  });
-
-  publicControls.querySelector<HTMLButtonElement>('[data-zoom="in"]')?.addEventListener('click', () => {
-    adjustConfig({ zoom: clampN(config.zoom + 0.2, 1, 3) });
-  });
-  publicControls.querySelector<HTMLButtonElement>('[data-zoom="out"]')?.addEventListener('click', () => {
-    const z = clampN(config.zoom - 0.2, 1, 3);
-    adjustConfig(z <= 1.001 ? { zoom: 1, panX: 0, panY: 0 } : { zoom: z });
-  });
-  publicControls.querySelector<HTMLButtonElement>('[data-reset-view]')?.addEventListener('click', () => {
-    adjustConfig({ zoom: 1, panX: 0, panY: 0 });
-  });
-
-  publicControls.querySelectorAll<HTMLButtonElement>('[data-motion]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const motion = button.dataset.motion as MotionMode | undefined;
-      if (motion) adjustConfig({ motion });
-    });
-  });
-
   publicControls.querySelectorAll<HTMLSelectElement>('select[data-config-key]').forEach((select) => {
     select.addEventListener('change', () => {
-      const key = select.dataset.configKey;
-      if (key) adjustConfig({ [key]: select.value });
+      const patch = publicConfigPatch(select.dataset.configKey, select.value);
+      if (patch) adjustConfig(patch);
     });
   });
 
   publicControls.querySelectorAll<HTMLInputElement>('input[type=range][data-config-key]').forEach((input) => {
     input.addEventListener('change', () => {
-      const key = input.dataset.configKey;
-      if (!key) return;
-      const value = ['zoom', 'panX', 'panY'].includes(key) ? Number(input.value) / 100 : input.value;
-      adjustConfig({ [key]: value });
+      const patch = publicConfigPatch(input.dataset.configKey, input.value);
+      if (patch) adjustConfig(patch);
     });
   });
 
@@ -444,7 +513,8 @@ function wirePublicControls(): void {
       button.addEventListener('click', () => {
         const value = button.dataset.value;
         if (value === undefined) return;
-        adjustConfig({ [key]: value });
+        const patch = publicConfigPatch(key, value);
+        if (patch) adjustConfig(patch);
       });
     });
   });
@@ -511,6 +581,23 @@ function wireRemote(): void {
   });
 }
 
+function setPublicControlDisabled(selector: string, disabled: boolean): void {
+  publicControlsRoot?.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>(selector).forEach((control) => {
+    control.disabled = disabled;
+  });
+}
+
+function updateControlStates(): void {
+  const connected = socket?.readyState === WebSocket.OPEN;
+  const configControlsReady = connected && receivedConfigEvent;
+  const pauseControlReady = connected && receivedPausedEvent;
+
+  setPublicControlDisabled('#public-previous, #public-next', !connected);
+  setPublicControlDisabled('#public-play-pause', !pauseControlReady);
+  setPublicControlDisabled('#public-settings button, #public-settings input, #public-settings select', !configControlsReady);
+  syncPublicControls();
+}
+
 function connect(): void {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
@@ -537,6 +624,7 @@ window.addEventListener('resize', () => {
 });
 renderPublicSettings();
 wirePublicControls();
+updateControlStates();
 wireRemote();
 initCastReceiver(sendControl);
 connect();
