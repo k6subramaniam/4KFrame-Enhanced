@@ -44,7 +44,17 @@ export async function buildApp(https?: TlsMaterial): Promise<FastifyInstance> {
   await app.register(fastifyMultipart, { limits: { fileSize: 1024 * 1024 * 1024 } });
   await app.register(fastifyWebsocket);
 
-  // Raw media assets (photos, previews, thumbnails, posters, videos).
+  // Raw media assets (photos, previews, thumbnails, posters, videos). When the
+  // admin password is configured, protect these before the static plugin can
+  // serve private library files directly.
+  app.addHook('onRequest', async (req, reply) => {
+    if (!auth.authRequired()) return;
+    const requestPath = req.url.split('?')[0];
+    if (!requestPath.startsWith('/photos/')) return;
+    if (!auth.isAuthed(req.headers.cookie)) {
+      return reply.code(401).send({ error: 'unauthorized' });
+    }
+  });
   await app.register(fastifyStatic, { root: MEDIA_DIR, prefix: '/photos/', decorateReply: false });
 
   // Canonical admin URL. The admin SPA is built with a `/admin/` base, so requests

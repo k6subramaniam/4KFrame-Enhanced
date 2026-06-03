@@ -46,9 +46,9 @@ function safeUploadId(id: unknown): string | null {
   return typeof id === 'string' && /^[A-Za-z0-9_-]{8,128}$/.test(id) ? id : null;
 }
 
-/** /api/* paths reachable without a login (display/TV needs these; plus the login flow). */
+/** /api/* paths reachable without a login when an admin password is configured. */
 const OPEN_API = new Set([
-  '/api/health', '/api/current', '/api/qr', '/api/login', '/api/logout', '/api/me',
+  '/api/health', '/api/login', '/api/logout', '/api/me',
 ]);
 
 export async function registerApi(app: FastifyInstance): Promise<void> {

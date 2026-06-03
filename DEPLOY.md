@@ -166,10 +166,12 @@ a persistent container with a volume. **Vercel does not work** (serverless — n
 no long-lived WebSocket server, no ffmpeg).
 
 > 🔒 **Set `FRAME_ADMIN_PASSWORD` first** — a public URL is open to anyone otherwise.
-> With the password set, displays can still connect to `/ws` and receive live events without
-> a login, but unauthenticated WebSocket clients cannot send slideshow/config/cast controls.
-> These platforms terminate TLS at their edge and forward HTTP to the container, so set
-> `FRAME_DISABLE_HTTPS=1` (the public URL is still `https://`, and `wss://` works).
+> With the password set, browsers/TVs must log in before they can load `/api/current`,
+> `/api/qr`, or raw media under `/photos/`. Displays can still connect to `/ws` and receive
+> live events without a login, but unauthenticated WebSocket clients cannot send admin-only
+> slideshow/config/cast controls. These platforms terminate TLS at their edge and forward
+> HTTP to the container, so set `FRAME_DISABLE_HTTPS=1` (the public URL is still `https://`,
+> and `wss://` works).
 
 **Fly.io** — a [`fly.toml`](fly.toml) is included:
 ```bash
