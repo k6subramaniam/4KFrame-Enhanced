@@ -11,6 +11,7 @@
  */
 
 import { CAST_NAMESPACE, type ControlMessage } from '@4kframe/shared';
+import { castAuthToken } from './api.js';
 
 export const CAST_APP_ID = (import.meta as { env?: Record<string, string> }).env?.VITE_CAST_APP_ID ?? '';
 
@@ -43,6 +44,7 @@ declare global {
 let context: CastContext | null = null;
 let connected = false;
 let onChange: ((connected: boolean) => void) | undefined;
+let authToken: string | null | undefined;
 
 /**
  * Wire up the Cast sender. `onStateChange(connected)` fires when the SDK becomes ready
@@ -112,6 +114,8 @@ export async function castControl(msg: ControlMessage): Promise<boolean> {
   const session = context?.getCurrentSession();
   if (!session) return false;
   try {
+    authToken ??= await castAuthToken().catch(() => null);
+    if (authToken) await session.sendMessage(CAST_NAMESPACE, { type: 'auth', token: authToken });
     await session.sendMessage(CAST_NAMESPACE, msg);
     return true;
   } catch {

@@ -73,6 +73,7 @@ export interface ThumbsResponse {
 
 /** Commands a controller (admin / cast sender / display remote) sends to the server. */
 export type ControlMessage =
+  | { type: 'auth'; token: string }
   | { type: 'progress' }
   | { type: 'next' }
   | { type: 'previous' }

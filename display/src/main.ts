@@ -36,6 +36,7 @@ const publicSettingsRoot = document.getElementById('public-settings') as HTMLEle
 let config: FrameConfig = defaultConfig();
 let prevFrame: HTMLCanvasElement | null = null;
 let socket: WebSocket | null = null;
+const pendingControls: ControlMessage[] = [];
 
 // Current content, retained so we can recompose on screen resize / config change.
 let lastItems: MediaItem[] | null = null;
@@ -44,11 +45,17 @@ let showingVideo = false;
 let paused = false;
 let holding = false;
 
+function sendControlNow(msg: ControlMessage): void {
+  if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(msg));
+}
+
 /** Forward a control message to the backend (used to bridge Cast custom messages). */
 function sendControl(msg: ControlMessage): void {
   if (socket && socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify(msg));
+    sendControlNow(msg);
+    return;
   }
+  pendingControls.push(msg);
 }
 
 /** This display's render size in device pixels, capped to bound texture memory. */
@@ -517,6 +524,7 @@ function connect(): void {
   socket = ws;
   ws.onopen = () => {
     setStatus('');
+    for (const msg of pendingControls.splice(0)) sendControlNow(msg);
   };
   ws.onmessage = (ev) => {
     try { handleEvent(JSON.parse(ev.data) as FrameEvent); } catch { /* ignore */ }

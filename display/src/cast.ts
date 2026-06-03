@@ -62,6 +62,10 @@ function parseControl(data: unknown): ControlMessage | null {
   if (!raw || typeof raw !== 'object') return null;
   const type = (raw as { type?: unknown }).type;
   switch (type) {
+    case 'auth': {
+      const token = (raw as { token?: unknown }).token;
+      return typeof token === 'string' ? { type, token } : null;
+    }
     case 'progress':
     case 'next':
     case 'previous':
