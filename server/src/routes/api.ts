@@ -79,6 +79,9 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
     required: auth.authRequired(),
     authed: auth.isAuthed(req.headers.cookie),
   }));
+  app.get('/api/cast-auth', async () => ({
+    token: auth.issueToken(),
+  }));
 
   // --- Playback control (original) ---
   app.get('/api/progress', async () => { progress(); return { ok: true }; });

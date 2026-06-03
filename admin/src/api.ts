@@ -44,6 +44,13 @@ export async function logout(): Promise<void> {
   await fetch('/api/logout', { method: 'POST' });
 }
 
+export async function castAuthToken(): Promise<string | null> {
+  const res = await fetch('/api/cast-auth');
+  if (!res.ok) return null;
+  const json = (await res.json()) as { token?: unknown };
+  return typeof json.token === 'string' ? json.token : null;
+}
+
 export async function skipNext(): Promise<void> { await fetch('/api/next'); }
 export async function skipPrev(): Promise<void> { await fetch('/api/previous'); }
 

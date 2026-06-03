@@ -41,7 +41,8 @@ type PublicConfigPatch = Partial<Pick<FrameConfig,
 
 const ADMIN_CONTROL_TYPES = new Set<ControlMessage['type']>(['progress', 'cast', 'config']);
 // These display-local controls are only public when admin auth is disabled (private/LAN mode).
-// When FRAME_ADMIN_PASSWORD is set, /ws is closed before any state or controls are exposed.
+// When FRAME_ADMIN_PASSWORD is set, /ws stays pending until a cookie or auth message is
+// verified, so Cast receivers can authenticate without exposing state first.
 const PUBLIC_DISPLAY_CONTROL_TYPES = new Set<ControlMessage['type']>(['next', 'previous', 'pause', 'resume', 'publicConfig']);
 const PUBLIC_CONFIG_KEYS = new Set([
   'photoPeriod',
@@ -156,23 +157,26 @@ async function applyConfigPatch(patch: Partial<FrameConfig>): Promise<void> {
 
 export async function registerWs(app: FastifyInstance): Promise<void> {
   app.get('/ws', { websocket: true }, (socket, req) => {
-    const authed = auth.isAuthed(req.headers.cookie);
-    if (auth.authRequired() && !authed) {
-      socket.close(1008, 'authentication required');
-      return;
-    }
+    let authed = auth.isAuthed(req.headers.cookie);
+    let off: (() => void) | undefined;
 
     const send = (event: FrameEvent) => {
       if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(event));
     };
 
-    // Bridge hub events to this client.
-    const off = hub.onEvent(send);
+    const finishAuth = () => {
+      if (off) return;
 
-    // Send current state on connect.
-    send({ type: 'config', config: getConfig() });
-    const current = getCurrent();
-    if (current.length) send({ type: 'show', items: current, interactive: false });
+      // Bridge hub events to this client only after authentication.
+      off = hub.onEvent(send);
+
+      // Send current state only after authentication.
+      send({ type: 'config', config: getConfig() });
+      const current = getCurrent();
+      if (current.length) send({ type: 'show', items: current, interactive: false });
+    };
+
+    if (authed) finishAuth();
 
     socket.on('message', async (raw: Buffer) => {
       let msg: ControlMessage;
@@ -181,6 +185,15 @@ export async function registerWs(app: FastifyInstance): Promise<void> {
       } catch {
         return;
       }
+
+      if (msg.type === 'auth') {
+        if (auth.verifyToken(msg.token)) {
+          authed = true;
+          finishAuth();
+        }
+        return;
+      }
+
       if (!PUBLIC_DISPLAY_CONTROL_TYPES.has(msg.type) && !ADMIN_CONTROL_TYPES.has(msg.type)) return;
       if (auth.authRequired() && !authed) return;
 
@@ -203,6 +216,6 @@ export async function registerWs(app: FastifyInstance): Promise<void> {
       }
     });
 
-    socket.on('close', off);
+    socket.on('close', () => off?.());
   });
 }

@@ -91,7 +91,7 @@ async function waitForClose(ws: { readyState: number; CLOSED: number; on: (event
   return closed || ws.readyState === ws.CLOSED;
 }
 
-test('unauthenticated /ws clients are closed before state or controls when auth is required', async (t) => {
+test('unauthenticated /ws clients receive no state or controls until auth when auth is required', async (t) => {
   const app = await buildApp();
   const { ws, messages } = await connectWs(app);
   t.after(async () => {
@@ -99,7 +99,7 @@ test('unauthenticated /ws clients are closed before state or controls when auth 
     await app.close();
   });
 
-  assert.equal(await waitForClose(ws), true);
+  assert.equal(await waitForClose(ws), false);
   assert.deepEqual(await waitForCollected(messages, 1), []);
 
   const beforeItems = slideshow.getCurrent().map((item) => item.id);
@@ -120,6 +120,16 @@ test('unauthenticated /ws clients are closed before state or controls when auth 
   assert.equal(slideshow.isPaused(), beforePaused);
   assert.equal(store.getConfig().zoom, beforeConfig.zoom);
   assert.equal(store.getConfig().showInfo, beforeConfig.showInfo);
+
+  ws.send(JSON.stringify({ type: 'auth', token: auth.issueToken() }));
+  const authed = await waitForCollected(messages, 2);
+  assert.equal(authed[0]?.type, 'config');
+  assert.equal(authed[1]?.type, 'show');
+
+  ws.send(JSON.stringify({ type: 'cast', id: 'second' }));
+  const controlled = await waitForCollected(messages, 3);
+  assert.equal(controlled[2]?.type, 'show');
+  assert.deepEqual(controlled[2]?.type === 'show' ? controlled[2].items.map((item) => item.id) : [], ['second']);
 });
 
 test('authenticated /ws clients receive state and can use display controls when auth is required', async (t) => {

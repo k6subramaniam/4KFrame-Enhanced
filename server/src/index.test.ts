@@ -1,7 +1,7 @@
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { after, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { FastifyInstance } from 'fastify';
 
@@ -10,10 +10,11 @@ process.env.FRAME_DATA_DIR = await mkdtemp(path.join(tmpdir(), '4kframe-index-te
 process.env.FRAME_DISABLE_HTTPS = '1';
 delete process.env.FRAME_ADMIN_PASSWORD;
 
-const [{ buildApp }, { initStore }, { MEDIA_DIR }] = await Promise.all([
+const [{ buildApp }, { initStore }, { MEDIA_DIR }, auth] = await Promise.all([
   import('./index.js'),
   import('./store.js'),
   import('./env.js'),
+  import('./auth.js'),
 ]);
 
 async function buildTestApp() {
@@ -34,9 +35,18 @@ async function loginCookie(app: Awaited<ReturnType<typeof buildTestApp>>): Promi
   return Array.isArray(setCookie) ? setCookie[0] : setCookie;
 }
 
-test('GET /admin redirects to the canonical admin SPA path with trailing slash', async (t) => {
+async function withApp(password: string | undefined, run: (app: FastifyInstance) => Promise<void>): Promise<void> {
+  const previousPassword = process.env.FRAME_ADMIN_PASSWORD;
+  if (password === undefined) {
+    delete process.env.FRAME_ADMIN_PASSWORD;
+  } else {
+    process.env.FRAME_ADMIN_PASSWORD = password;
+  }
+
   const app = await buildTestApp();
-  t.after(async () => {
+  try {
+    await run(app);
+  } finally {
     await app.close();
     if (previousPassword === undefined) {
       delete process.env.FRAME_ADMIN_PASSWORD;
