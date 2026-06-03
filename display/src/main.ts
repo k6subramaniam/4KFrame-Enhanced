@@ -10,7 +10,7 @@
  * portrait frames at the same time — each connected display composes for its own screen.
  */
 
-import { defaultConfig, faceCenterToPan, type ControlMessage, type FrameConfig, type FillMode, type FrameEvent, type MediaItem } from '@4kframe/shared';
+import { defaultConfig, faceCenterToPan, type ControlMessage, type FrameConfig, type FillMode, type FrameEvent, type MediaItem, type MotionMode } from '@4kframe/shared';
 import { GLRenderer } from './gl.js';
 import { compose, contentRect } from './compositor.js';
 import { applyOverlays, setCaption, setStatus } from './overlays.js';
@@ -233,6 +233,7 @@ function handleEvent(event: FrameEvent): void {
     case 'config':
       config = event.config;
       applyOverlays(config);
+      syncPublicControls();
       rerender().catch((err) => console.error(err));
       break;
     case 'show':
@@ -252,6 +253,7 @@ function handleEvent(event: FrameEvent): void {
         motionAnim?.play();
       }
       setStatus(statusText());
+      syncPublicControls();
       break;
     case 'hold':
       holding = event.holding;
@@ -278,8 +280,97 @@ function adjustConfig(patch: Partial<FrameConfig>): void {
   sendControl({ type: 'config', patch });
 }
 
+const controlsToggle = document.getElementById('controls-toggle') as HTMLButtonElement | null;
+const publicControls = document.getElementById('public-controls') as HTMLElement | null;
+const pauseControl = document.getElementById('control-pause') as HTMLButtonElement | null;
+const periodValue = document.getElementById('period-value') as HTMLElement | null;
+
+function isPublicControlTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest('#public-controls, #controls-toggle'));
+}
+
+function setControlsOpen(open: boolean): void {
+  if (!controlsToggle || !publicControls) return;
+  publicControls.hidden = !open;
+  controlsToggle.setAttribute('aria-expanded', String(open));
+  controlsToggle.setAttribute('aria-label', open ? 'Close slideshow controls' : 'Open slideshow controls');
+  controlsToggle.textContent = open ? 'Close' : 'Controls';
+}
+
+function syncPublicControls(): void {
+  if (pauseControl) {
+    pauseControl.textContent = paused ? 'Resume' : 'Pause';
+    pauseControl.setAttribute('aria-label', paused ? 'Resume slideshow' : 'Pause slideshow');
+    pauseControl.setAttribute('aria-pressed', String(paused));
+  }
+  if (periodValue) periodValue.textContent = `${Math.round(config.photoPeriod)}s`;
+
+  publicControls?.querySelectorAll<HTMLButtonElement>('[data-fill-mode]').forEach((button) => {
+    button.setAttribute('aria-pressed', String(button.dataset.fillMode === config.fillMode));
+  });
+  publicControls?.querySelectorAll<HTMLButtonElement>('[data-motion]').forEach((button) => {
+    button.setAttribute('aria-pressed', String(button.dataset.motion === config.motion));
+  });
+}
+
+function wirePublicControls(): void {
+  if (!controlsToggle || !publicControls) return;
+
+  controlsToggle.addEventListener('click', () => {
+    setControlsOpen(publicControls.hidden);
+  });
+
+  document.getElementById('control-previous')?.addEventListener('click', () => sendControl({ type: 'previous' }));
+  document.getElementById('control-next')?.addEventListener('click', () => sendControl({ type: 'next' }));
+  pauseControl?.addEventListener('click', () => sendControl({ type: paused ? 'resume' : 'pause' }));
+
+  publicControls.querySelectorAll<HTMLButtonElement>('[data-period]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const delta = Number(button.dataset.period || 0);
+      adjustConfig({ photoPeriod: clampN(config.photoPeriod + delta, 5, 1200) });
+    });
+  });
+
+  publicControls.querySelectorAll<HTMLButtonElement>('[data-fill-mode]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const fillMode = button.dataset.fillMode as FillMode | undefined;
+      if (fillMode) adjustConfig({ fillMode, frameFill: fillMode === 'cover' });
+    });
+  });
+
+  publicControls.querySelector<HTMLButtonElement>('[data-zoom="in"]')?.addEventListener('click', () => {
+    adjustConfig({ zoom: clampN(config.zoom + 0.2, 1, 3) });
+  });
+  publicControls.querySelector<HTMLButtonElement>('[data-zoom="out"]')?.addEventListener('click', () => {
+    const z = clampN(config.zoom - 0.2, 1, 3);
+    adjustConfig(z <= 1.001 ? { zoom: 1, panX: 0, panY: 0 } : { zoom: z });
+  });
+  publicControls.querySelector<HTMLButtonElement>('[data-reset-view]')?.addEventListener('click', () => {
+    adjustConfig({ zoom: 1, panX: 0, panY: 0 });
+  });
+
+  publicControls.querySelectorAll<HTMLButtonElement>('[data-motion]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const motion = button.dataset.motion as MotionMode | undefined;
+      if (motion) adjustConfig({ motion });
+    });
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !publicControls.hidden) {
+      setControlsOpen(false);
+      controlsToggle.focus({ preventScroll: true });
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, { capture: true });
+
+  syncPublicControls();
+}
+
 function wireRemote(): void {
   window.addEventListener('keydown', (e) => {
+    if (isPublicControlTarget(e.target) || (e.key === 'Escape' && publicControls && !publicControls.hidden)) return;
     const zoomed = config.zoom > 1.01;
     const STEP = 0.15;
     switch (e.key) {
@@ -350,6 +441,7 @@ window.addEventListener('resize', () => {
   resizeTimer = setTimeout(() => rerender().catch((err) => console.error(err)), 150);
 });
 
+wirePublicControls();
 wireRemote();
 initCastReceiver(sendControl);
 connect();
