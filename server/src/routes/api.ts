@@ -46,14 +46,15 @@ function safeUploadId(id: unknown): string | null {
   return typeof id === 'string' && /^[A-Za-z0-9_-]{8,128}$/.test(id) ? id : null;
 }
 
-/** /api/* paths reachable without a login (display/TV needs these; plus the login flow). */
+/** /api/* paths reachable without a login when an admin password is configured. */
 const OPEN_API = new Set([
-  '/api/health', '/api/current', '/api/qr', '/api/login', '/api/logout', '/api/me',
+  '/api/health', '/api/login', '/api/logout', '/api/me',
 ]);
 
 export async function registerApi(app: FastifyInstance): Promise<void> {
-  // Gate management/control API behind the admin password (when one is set). Static assets,
-  // /ws and /photos are not under /api/ and stay open so TVs need no login.
+  // Gate protected API behind the admin password (when one is set). Keep only
+  // health and the login/session flow open; display state, QR, media redirects,
+  // library data, and management/control endpoints require auth.
   app.addHook('onRequest', async (req, reply) => {
     if (!auth.authRequired()) return;
     const path = req.url.split('?')[0];

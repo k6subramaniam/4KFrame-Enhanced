@@ -65,10 +65,13 @@ HTTPS is required for PWA install and to serve the display as a publicly reachab
 receiver.
 
 ### Admin password
-Set **`FRAME_ADMIN_PASSWORD`** to lock the admin: the admin UI and all management/control
-APIs then require that password (one login per browser, 30-day cookie), while the **display
-and TVs need no login**. Strongly recommended for any **public/cloud** deployment — without it
-the admin and your library are open to anyone with the URL. On a private LAN it's optional.
+Set **`FRAME_ADMIN_PASSWORD`** to lock the frame: the admin UI, management/control APIs,
+display state endpoints such as `/api/current` and `/api/qr`, and raw media under `/photos/`
+then require that password (one login per browser, 30-day cookie). The display shell and
+WebSocket can still connect, but the TV/browser must be authenticated before it can load
+private media or display state. Strongly recommended for any **public/cloud** deployment —
+without it the admin and your library are open to anyone with the URL. On a private LAN it's
+optional.
 
 ### Runtime dependencies
 - **ffmpeg** (in the Docker image) — video posters & transcoding. Videos that aren't already
@@ -165,7 +168,9 @@ of different shapes can run at once, each framed correctly. In **Admin → Scali
 `/api/thumbs` · `/api/cast/:id` · `/api/delete/:id` · `/api/photo/:id` ·
 `/api/preview/:id` · `/photos/:filename`
 New: `/api/upload` (and chunked `/api/upload/chunk` + `/api/upload/finish`), `/api/video/:id`,
-`/api/google/*`, `/api/qr`, `/api/logs`, WS `/ws`.
+`/api/google/*`, `/api/qr`, `/api/logs`, WS `/ws`. When `FRAME_ADMIN_PASSWORD` is set,
+only `/api/health`, `/api/login`, `/api/logout`, and `/api/me` stay unauthenticated; media,
+QR, display state, library, and control endpoints require a valid login cookie.
 
 > Large files are uploaded in 4 MB chunks and reassembled server-side, so big videos upload
 > even through proxies/CDNs that cap request body size (e.g. GitHub Codespaces' `413`). The
