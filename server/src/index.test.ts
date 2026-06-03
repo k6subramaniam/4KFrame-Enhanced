@@ -1,12 +1,14 @@
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
+import type { FastifyInstance } from 'fastify';
 
 process.env.FRAME_ADMIN_PASSWORD = 'test-index-password';
 process.env.FRAME_DATA_DIR = await mkdtemp(path.join(tmpdir(), '4kframe-index-test-'));
 process.env.FRAME_DISABLE_HTTPS = '1';
+delete process.env.FRAME_ADMIN_PASSWORD;
 
 const [{ buildApp }, { initStore }, { MEDIA_DIR }] = await Promise.all([
   import('./index.js'),
@@ -36,12 +38,49 @@ test('GET /admin redirects to the canonical admin SPA path with trailing slash',
   const app = await buildTestApp();
   t.after(async () => {
     await app.close();
+    if (previousPassword === undefined) {
+      delete process.env.FRAME_ADMIN_PASSWORD;
+    } else {
+      process.env.FRAME_ADMIN_PASSWORD = previousPassword;
+    }
+  }
+}
+
+test('GET /admin redirects to the canonical admin SPA path with trailing slash', async () => {
+  await withApp(undefined, async (app) => {
+    const response = await app.inject({ method: 'GET', url: '/admin' });
+
+    assert.equal(response.statusCode, 308);
+    assert.equal(response.headers.location, '/admin/');
   });
+});
 
-  const response = await app.inject({ method: 'GET', url: '/admin' });
+test('unauthenticated GET / redirects to admin login when FRAME_ADMIN_PASSWORD is set', async () => {
+  await withApp('display-password', async (app) => {
+    const response = await app.inject({ method: 'GET', url: '/' });
 
-  assert.equal(response.statusCode, 308);
-  assert.equal(response.headers.location, '/admin/');
+    assert.equal(response.statusCode, 302);
+    assert.equal(response.headers.location, '/admin/');
+  });
+});
+
+test('authenticated GET / succeeds with a valid frame_auth cookie when FRAME_ADMIN_PASSWORD is set', async () => {
+  await withApp('display-password', async (app) => {
+    const cookie = auth.setCookie(auth.issueToken(), false).split(';')[0];
+    const response = await app.inject({ method: 'GET', url: '/', headers: { cookie } });
+
+    assert.equal(response.statusCode, 200);
+    assert.match(response.body, /Display app/);
+  });
+});
+
+test('GET / remains public when FRAME_ADMIN_PASSWORD is unset', async () => {
+  await withApp(undefined, async (app) => {
+    const response = await app.inject({ method: 'GET', url: '/' });
+
+    assert.equal(response.statusCode, 200);
+    assert.match(response.body, /Display app/);
+  });
 });
 
 test('unauthenticated requests to protected display state endpoints are blocked when auth is required', async (t) => {

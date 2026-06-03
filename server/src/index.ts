@@ -61,6 +61,27 @@ export async function buildApp(https?: TlsMaterial): Promise<FastifyInstance> {
   // without the trailing slash need a redirect before static assets are evaluated.
   app.get('/admin', async (_req, reply) => reply.redirect('/admin/', 308));
 
+  // Protect the public display SPA with the same admin cookie when auth is enabled.
+  // The admin/login UI, APIs, media files and websocket stay reachable; everything else
+  // under the root static site (including SPA fallback URLs and assets) redirects to login.
+  app.addHook('onRequest', async (req, reply) => {
+    if (!auth.authRequired() || auth.isAuthed(req.headers.cookie)) return;
+    if (req.method !== 'GET' && req.method !== 'HEAD') return;
+
+    const path = req.url.split('?')[0];
+    if (
+      path === '/admin'
+      || path.startsWith('/admin/')
+      || path.startsWith('/api/')
+      || path.startsWith('/photos/')
+      || path === '/ws'
+    ) {
+      return;
+    }
+
+    return reply.redirect('/admin/');
+  });
+
   // Built SPAs, when available (after `npm run build`).
   if (existsSync(DISPLAY_DIST)) {
     await app.register(fastifyStatic, { root: DISPLAY_DIST, prefix: '/', decorateReply: false });
