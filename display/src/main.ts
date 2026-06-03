@@ -10,7 +10,18 @@
  * portrait frames at the same time — each connected display composes for its own screen.
  */
 
-import { defaultConfig, faceCenterToPan, type ControlMessage, type FrameConfig, type FillMode, type FrameEvent, type MediaItem } from '@4kframe/shared';
+import {
+  defaultConfig,
+  faceCenterToPan,
+  renderSharedSettings,
+  type ControlMessage,
+  type FrameConfig,
+  type FillMode,
+  type FrameEvent,
+  type MediaItem,
+  type SettingsPatch,
+  type SettingsUiAdapter,
+} from '@4kframe/shared';
 import { GLRenderer } from './gl.js';
 import { compose, contentRect } from './compositor.js';
 import { applyOverlays, setCaption, setStatus } from './overlays.js';
@@ -20,6 +31,7 @@ const canvas = document.getElementById('gl') as HTMLCanvasElement;
 const video = document.getElementById('video') as HTMLVideoElement;
 const videoBg = document.getElementById('video-bg') as HTMLElement;
 const renderer = new GLRenderer(canvas);
+const publicSettingsRoot = document.getElementById('public-settings') as HTMLElement | null;
 
 let config: FrameConfig = defaultConfig();
 let prevFrame: HTMLCanvasElement | null = null;
@@ -233,6 +245,7 @@ function handleEvent(event: FrameEvent): void {
     case 'config':
       config = event.config;
       applyOverlays(config);
+      renderPublicSettings();
       rerender().catch((err) => console.error(err));
       break;
     case 'show':
@@ -278,8 +291,24 @@ function adjustConfig(patch: Partial<FrameConfig>): void {
   sendControl({ type: 'config', patch });
 }
 
+function renderPublicSettings(): void {
+  if (!publicSettingsRoot) return;
+  const adapter: SettingsUiAdapter = {
+    getConfig: () => config,
+    updateConfig: (patch: SettingsPatch) => sendControl({ type: 'config', patch }),
+    capabilities: {
+      showAdminOnlyControls: false,
+      showGooglePhotos: false,
+      showStorage: false,
+    },
+  };
+  renderSharedSettings(publicSettingsRoot, adapter);
+}
+
 function wireRemote(): void {
   window.addEventListener('keydown', (e) => {
+    const target = e.target as HTMLElement | null;
+    if (target?.closest('#public-settings')) return;
     const zoomed = config.zoom > 1.01;
     const STEP = 0.15;
     switch (e.key) {
@@ -350,6 +379,7 @@ window.addEventListener('resize', () => {
   resizeTimer = setTimeout(() => rerender().catch((err) => console.error(err)), 150);
 });
 
+renderPublicSettings();
 wireRemote();
 initCastReceiver(sendControl);
 connect();
