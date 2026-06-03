@@ -52,9 +52,9 @@ const OPEN_API = new Set([
 ]);
 
 export async function registerApi(app: FastifyInstance): Promise<void> {
-  // Gate protected API behind the admin password (when one is set). Keep only
-  // health and the login/session flow open; display state, QR, media redirects,
-  // library data, and management/control endpoints require auth.
+  // Gate management/control API behind the admin password (when one is set). Static assets,
+  // /ws is authenticated in server/src/ws.ts when auth is enabled; /photos stays open so
+  // authenticated display clients can load media assets directly.
   app.addHook('onRequest', async (req, reply) => {
     if (!auth.authRequired()) return;
     const path = req.url.split('?')[0];
