@@ -18,6 +18,7 @@ import {
   type FillMode,
   type FrameEvent,
   type MediaItem,
+  type MotionMode,
   type SettingsPatch,
   type SettingsUiAdapter,
 } from '@4kframe/shared';
@@ -312,7 +313,7 @@ function renderPublicSettings(): void {
   if (!publicSettingsRoot) return;
   const adapter: SettingsUiAdapter = {
     getConfig: () => config,
-    updateConfig: (patch: SettingsPatch) => sendControl({ type: 'config', patch }),
+    updateConfig: (patch: SettingsPatch) => sendControl({ type: 'publicConfig', patch }),
     capabilities: {
       showAdminOnlyControls: false,
       showGooglePhotos: false,
@@ -322,13 +323,21 @@ function renderPublicSettings(): void {
   renderSharedSettings(publicSettingsRoot, adapter);
 }
 
-const controlsToggle = document.getElementById('controls-toggle') as HTMLButtonElement | null;
-const publicControls = document.getElementById('public-controls') as HTMLElement | null;
-const pauseControl = document.getElementById('control-pause') as HTMLButtonElement | null;
+function getElementByIds<T extends HTMLElement>(...ids: string[]): T | null {
+  for (const id of ids) {
+    const element = document.getElementById(id) as T | null;
+    if (element) return element;
+  }
+  return null;
+}
+
+const controlsToggle = getElementByIds<HTMLButtonElement>('public-controls-toggle', 'controls-toggle');
+const publicControls = getElementByIds<HTMLElement>('public-control-panel', 'public-controls');
+const pauseControl = getElementByIds<HTMLButtonElement>('public-play-pause', 'control-pause');
 const periodValue = document.getElementById('period-value') as HTMLElement | null;
 
 function isPublicControlTarget(target: EventTarget | null): boolean {
-  return target instanceof Element && Boolean(target.closest('#public-controls, #controls-toggle'));
+  return target instanceof Element && Boolean(target.closest('#public-controls, #public-controls-toggle, #controls-toggle'));
 }
 
 function setControlsOpen(open: boolean): void {
@@ -362,8 +371,8 @@ function wirePublicControls(): void {
     setControlsOpen(publicControls.hidden);
   });
 
-  document.getElementById('control-previous')?.addEventListener('click', () => sendControl({ type: 'previous' }));
-  document.getElementById('control-next')?.addEventListener('click', () => sendControl({ type: 'next' }));
+  getElementByIds<HTMLButtonElement>('public-previous', 'control-previous')?.addEventListener('click', () => sendControl({ type: 'previous' }));
+  getElementByIds<HTMLButtonElement>('public-next', 'control-next')?.addEventListener('click', () => sendControl({ type: 'next' }));
   pauseControl?.addEventListener('click', () => sendControl({ type: paused ? 'resume' : 'pause' }));
 
   publicControls.querySelectorAll<HTMLButtonElement>('[data-period]').forEach((button) => {
@@ -376,7 +385,7 @@ function wirePublicControls(): void {
   publicControls.querySelectorAll<HTMLButtonElement>('[data-fill-mode]').forEach((button) => {
     button.addEventListener('click', () => {
       const fillMode = button.dataset.fillMode as FillMode | undefined;
-      if (fillMode) adjustConfig({ fillMode, frameFill: fillMode === 'cover' });
+      if (fillMode) adjustConfig({ fillMode });
     });
   });
 
@@ -398,6 +407,34 @@ function wirePublicControls(): void {
     });
   });
 
+  publicControls.querySelectorAll<HTMLSelectElement>('select[data-config-key]').forEach((select) => {
+    select.addEventListener('change', () => {
+      const key = select.dataset.configKey;
+      if (key) adjustConfig({ [key]: select.value });
+    });
+  });
+
+  publicControls.querySelectorAll<HTMLInputElement>('input[type=range][data-config-key]').forEach((input) => {
+    input.addEventListener('change', () => {
+      const key = input.dataset.configKey;
+      if (!key) return;
+      const value = ['zoom', 'panX', 'panY'].includes(key) ? Number(input.value) / 100 : input.value;
+      adjustConfig({ [key]: value });
+    });
+  });
+
+  publicControls.querySelectorAll<HTMLElement>('[role=group][data-config-key]').forEach((group) => {
+    const key = group.dataset.configKey;
+    if (!key) return;
+    group.querySelectorAll<HTMLButtonElement>('button[data-value]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const value = button.dataset.value;
+        if (value === undefined) return;
+        adjustConfig({ [key]: value });
+      });
+    });
+  });
+
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !publicControls.hidden) {
       setControlsOpen(false);
@@ -407,13 +444,14 @@ function wirePublicControls(): void {
     }
   }, { capture: true });
 
+  setControlsOpen(false);
   syncPublicControls();
 }
 
 function wireRemote(): void {
   window.addEventListener('keydown', (e) => {
     const target = e.target as HTMLElement | null;
-    if (target?.closest('#public-settings')) return;
+    if (target?.closest('#public-settings') || isPublicControlTarget(target)) return;
     const zoomed = config.zoom > 1.01;
     switch (e.key) {
       case 'ArrowRight':
@@ -575,6 +613,7 @@ window.addEventListener('resize', () => {
   resizeTimer = setTimeout(() => rerender().catch((err) => console.error(err)), 150);
 });
 renderPublicSettings();
+wirePublicControls();
 wireRemote();
 wirePublicControls();
 initCastReceiver(sendControl);

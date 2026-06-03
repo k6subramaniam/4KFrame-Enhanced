@@ -80,7 +80,22 @@ export type ControlMessage =
   | { type: 'resume' }
   | { type: 'cast'; id: string }
   | { type: 'config'; patch: Partial<FrameConfig> | ApiDataPayload }
-  | { type: 'publicConfig'; patch: Partial<Pick<FrameConfig, 'zoom' | 'panX' | 'panY' | 'fillMode' | 'transition'>> | ApiDataPayload };
+  | {
+      type: 'publicConfig';
+      patch: Partial<Pick<FrameConfig,
+        | 'photoPeriod'
+        | 'transitionPeriod'
+        | 'zoom'
+        | 'panX'
+        | 'panY'
+        | 'fillMode'
+        | 'frameAspect'
+        | 'transition'
+        | 'motion'
+        | 'smartFraming'
+        | 'showQr'
+      >> | ApiDataPayload;
+    };
 
 /** Events the server pushes to displays and controllers. */
 export type FrameEvent =
