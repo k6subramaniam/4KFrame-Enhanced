@@ -12,17 +12,20 @@
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
-const PASSWORD = process.env.FRAME_ADMIN_PASSWORD || '';
 const COOKIE = 'frame_auth';
 const MAX_AGE_S = 60 * 60 * 24 * 30; // 30 days
 
 /** Auth is enforced only when a password is configured. */
+function password(): string {
+  return process.env.FRAME_ADMIN_PASSWORD || '';
+}
+
 export function authRequired(): boolean {
-  return PASSWORD.length > 0;
+  return password().length > 0;
 }
 
 function signingKey(): string {
-  return createHmac('sha256', '4kframe-admin-auth').update(PASSWORD).digest('hex');
+  return createHmac('sha256', '4kframe-admin-auth').update(password()).digest('hex');
 }
 
 function sign(data: string): string {
@@ -51,7 +54,7 @@ export function verifyToken(token: string | undefined): boolean {
 }
 
 export function checkPassword(pw: unknown): boolean {
-  return authRequired() && typeof pw === 'string' && equal(pw, PASSWORD);
+  return authRequired() && typeof pw === 'string' && equal(pw, password());
 }
 
 export function cookieFromHeader(header: string | undefined): string | undefined {
