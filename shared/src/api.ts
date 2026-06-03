@@ -79,7 +79,8 @@ export type ControlMessage =
   | { type: 'pause' }
   | { type: 'resume' }
   | { type: 'cast'; id: string }
-  | { type: 'config'; patch: Partial<FrameConfig> | ApiDataPayload };
+  | { type: 'config'; patch: Partial<FrameConfig> | ApiDataPayload }
+  | { type: 'publicConfig'; patch: Partial<Pick<FrameConfig, 'zoom' | 'panX' | 'panY' | 'fillMode' | 'transition'>> | ApiDataPayload };
 
 /** Events the server pushes to displays and controllers. */
 export type FrameEvent =

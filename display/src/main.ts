@@ -9,8 +9,18 @@
  * size, so the same library casts correctly to 16:9 TVs, ultrawide, 4:3, square and
  * portrait frames at the same time — each connected display composes for its own screen.
  */
-
-import { defaultConfig, faceCenterToPan, type ControlMessage, type FrameConfig, type FillMode, type FrameEvent, type MediaItem, type MotionMode } from '@4kframe/shared';
+import {
+  defaultConfig,
+  faceCenterToPan,
+  renderSharedSettings,
+  type ControlMessage,
+  type FrameConfig,
+  type FillMode,
+  type FrameEvent,
+  type MediaItem,
+  type SettingsPatch,
+  type SettingsUiAdapter,
+} from '@4kframe/shared';
 import { GLRenderer } from './gl.js';
 import { compose, contentRect } from './compositor.js';
 import { applyOverlays, setCaption, setStatus } from './overlays.js';
@@ -20,6 +30,7 @@ const canvas = document.getElementById('gl') as HTMLCanvasElement;
 const video = document.getElementById('video') as HTMLVideoElement;
 const videoBg = document.getElementById('video-bg') as HTMLElement;
 const renderer = new GLRenderer(canvas);
+const publicSettingsRoot = document.getElementById('public-settings') as HTMLElement | null;
 
 let config: FrameConfig = defaultConfig();
 let prevFrame: HTMLCanvasElement | null = null;
@@ -233,7 +244,7 @@ function handleEvent(event: FrameEvent): void {
     case 'config':
       config = event.config;
       applyOverlays(config);
-      syncPublicControls();
+      renderPublicSettings();
       rerender().catch((err) => console.error(err));
       break;
     case 'show':
@@ -277,7 +288,21 @@ function clampN(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
 function adjustConfig(patch: Partial<FrameConfig>): void {
-  sendControl({ type: 'config', patch });
+  sendControl({ type: 'publicConfig', patch });
+}
+
+function renderPublicSettings(): void {
+  if (!publicSettingsRoot) return;
+  const adapter: SettingsUiAdapter = {
+    getConfig: () => config,
+    updateConfig: (patch: SettingsPatch) => sendControl({ type: 'config', patch }),
+    capabilities: {
+      showAdminOnlyControls: false,
+      showGooglePhotos: false,
+      showStorage: false,
+    },
+  };
+  renderSharedSettings(publicSettingsRoot, adapter);
 }
 
 const controlsToggle = document.getElementById('controls-toggle') as HTMLButtonElement | null;
@@ -370,7 +395,8 @@ function wirePublicControls(): void {
 
 function wireRemote(): void {
   window.addEventListener('keydown', (e) => {
-    if (isPublicControlTarget(e.target) || (e.key === 'Escape' && publicControls && !publicControls.hidden)) return;
+    const target = e.target as HTMLElement | null;
+    if (target?.closest('#public-settings')) return;
     const zoomed = config.zoom > 1.01;
     const STEP = 0.15;
     switch (e.key) {
@@ -440,8 +466,7 @@ window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => rerender().catch((err) => console.error(err)), 150);
 });
-
-wirePublicControls();
+renderPublicSettings();
 wireRemote();
 initCastReceiver(sendControl);
 connect();

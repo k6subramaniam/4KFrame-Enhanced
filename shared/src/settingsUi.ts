@@ -1,0 +1,265 @@
+import {
+  EFFECT_PRESETS,
+  FRAME_ASPECTS,
+  MOTION_MODES,
+  PHOTO_PERIOD_PRESETS,
+  TRANSITIONS,
+  type ApiDataPayload,
+  type FrameConfig,
+} from './config.js';
+
+export type SettingsConfigSource = ApiDataPayload | FrameConfig;
+export type SettingsPatch = ApiDataPayload | Partial<FrameConfig>;
+
+export interface SettingsUiCapabilities {
+  showGooglePhotos?: boolean;
+  showStorage?: boolean;
+  showAdminOnlyControls?: boolean;
+}
+
+export interface SettingsUiAdapter {
+  getConfig(): SettingsConfigSource;
+  updateConfig(patch: SettingsPatch): void | Promise<void>;
+  capabilities?: SettingsUiCapabilities;
+}
+
+export interface SettingsPanelMetadata {
+  id: string;
+  title: string;
+  render(config: SettingsConfigSource): string;
+}
+
+export const PERIOD_LABELS: Record<number, string> = {
+  0: 'Paused',
+  5: '5s',
+  10: '10s',
+  15: '15s',
+  20: '20s',
+  40: '40s',
+  60: '60s',
+  300: '5 min',
+  600: '10 min',
+  1200: '20 min',
+};
+
+const ASPECT_LABELS: Record<string, string> = {
+  auto: 'Auto',
+  '16:9': '16:9',
+  '9:16': '9:16 ↕',
+  '4:3': '4:3',
+  '3:4': '3:4 ↕',
+  '1:1': '1:1',
+  '21:9': '21:9',
+};
+
+const MOTION_LABELS: Record<string, string> = {
+  off: 'Off',
+  zoom: 'Zoom',
+  pan: 'Pan',
+  zoompan: 'Zoom + Pan',
+};
+
+export function segmentButtons(
+  name: string,
+  options: { label: string; value: string; active: boolean }[],
+): string {
+  return `<div class="row seg" data-group="${name}">${options
+    .map((o) => `<button data-value="${o.value}" class="${o.active ? 'active' : ''}">${o.label}</button>`)
+    .join('')}</div>`;
+}
+
+export function settingsPanel(id: string, title: string, content: string, open = true): string {
+  const bodyId = `settings-panel-${id}`;
+  return `
+    <section class="panel" data-panel-id="${id}" data-collapsed="${open ? 'false' : 'true'}">
+      <h2 class="panel-heading">
+        <button class="panel-toggle" type="button" aria-expanded="${open}" aria-controls="${bodyId}">
+          <span>${title}</span>
+          <span class="panel-chevron" aria-hidden="true">⌄</span>
+        </button>
+      </h2>
+      <div class="panel-body" id="${bodyId}"${open ? '' : ' inert aria-hidden="true"'}>
+        <div class="panel-body-inner">${content}</div>
+      </div>
+    </section>`;
+}
+
+function getValue(config: SettingsConfigSource, key: keyof FrameConfig & string): unknown {
+  return config[key as keyof SettingsConfigSource];
+}
+
+function numeric(config: SettingsConfigSource, key: keyof FrameConfig & string, fallback: number): number {
+  const n = Number(getValue(config, key) ?? fallback);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function text(config: SettingsConfigSource, key: keyof FrameConfig & string, fallback: string): string {
+  const value = getValue(config, key);
+  return value === undefined ? fallback : String(value);
+}
+
+function bool(config: SettingsConfigSource, key: keyof FrameConfig & string, fallback: boolean): boolean {
+  const value = getValue(config, key);
+  if (value === undefined) return fallback;
+  if (typeof value === 'boolean') return value;
+  return value === 'true' || value === '1';
+}
+
+function fillMode(config: SettingsConfigSource): string {
+  const fill = bool(config, 'frameFill', true);
+  return text(config, 'fillMode', fill ? 'cover' : 'contain');
+}
+
+function effectValue(config: SettingsConfigSource): string {
+  const transPeriod = numeric(config, 'transitionPeriod', 0.75);
+  const entry = Object.entries(EFFECT_PRESETS).find(([, value]) => value === transPeriod);
+  return entry?.[0] ?? 'custom';
+}
+
+export const SHARED_SETTINGS_PANELS: SettingsPanelMetadata[] = [
+  {
+    id: 'photo-period',
+    title: 'Photo Period',
+    render: (config) => {
+      const period = Math.round(numeric(config, 'photoPeriod', 15));
+      return segmentButtons('photoPeriod', PHOTO_PERIOD_PRESETS.map((p) => ({
+        label: PERIOD_LABELS[p] ?? `${p}s`,
+        value: String(p),
+        active: p === period,
+      })));
+    },
+  },
+  {
+    id: 'effects',
+    title: 'Effects',
+    render: (config) => {
+      const activeEffect = effectValue(config);
+      const transition = text(config, 'transition', 'fade.glsl');
+      return `${segmentButtons('effect', Object.entries(EFFECT_PRESETS).map(([key, value]) => ({
+        label: key[0].toUpperCase() + key.slice(1),
+        value: String(value),
+        active: key === activeEffect,
+      })))}
+      <h3 class="panel-subheading">Transition</h3>
+      ${segmentButtons('transition', TRANSITIONS.map((t) => ({
+        label: t.replace('.glsl', ''),
+        value: t,
+        active: t === transition,
+      })))}`;
+    },
+  },
+  {
+    id: 'scaling',
+    title: 'Scaling',
+    render: (config) => {
+      const mode = fillMode(config);
+      const frameAspect = text(config, 'frameAspect', 'auto');
+      return `${segmentButtons('fillMode', [
+        { label: 'Cover', value: 'cover', active: mode === 'cover' },
+        { label: 'Contain', value: 'contain', active: mode === 'contain' },
+        { label: 'Blur Fill', value: 'blur', active: mode === 'blur' },
+        { label: 'Stretch', value: 'stretch', active: mode === 'stretch' },
+      ])}
+      <div class="muted" style="margin-top:.4rem">Cover crops · Contain letterboxes · Blur fills bars · Stretch distorts to fill.</div>
+      <h3 class="panel-subheading">Aspect Ratio</h3>
+      ${segmentButtons('frameAspect', FRAME_ASPECTS.map((a) => ({
+        label: ASPECT_LABELS[a] ?? a,
+        value: a,
+        active: a === frameAspect,
+      })))}
+      <div class="muted" style="margin-top:.4rem">Auto matches each screen (TV, ultrawide, square, portrait). Others force that shape, centered.</div>`;
+    },
+  },
+  {
+    id: 'zoom-pan',
+    title: 'Zoom &amp; Pan',
+    render: (config) => {
+      const zoom = numeric(config, 'zoom', 1);
+      const panX = numeric(config, 'panX', 0);
+      const panY = numeric(config, 'panY', 0);
+      return `<label class="field">Zoom <span class="muted" data-zoom-val>${Math.round(zoom * 100)}%</span>
+        <input type="range" data-range-key="zoom" min="100" max="300" step="5" value="${Math.round(zoom * 100)}" /></label>
+      <label class="field">Pan X <input type="range" data-range-key="panX" min="-100" max="100" step="5" value="${Math.round(panX * 100)}" /></label>
+      <label class="field">Pan Y <input type="range" data-range-key="panY" min="-100" max="100" step="5" value="${Math.round(panY * 100)}" /></label>
+      <div class="muted">Pan only has an effect when zoomed in (or content overflows the frame).</div>`;
+    },
+  },
+  {
+    id: 'motion',
+    title: 'Motion',
+    render: (config) => {
+      const motion = text(config, 'motion', 'off');
+      return `${segmentButtons('motion', MOTION_MODES.map((m) => ({
+        label: MOTION_LABELS[m] ?? m,
+        value: m,
+        active: m === motion,
+      })))}
+      <div class="muted" style="margin-top:.4rem">Slowly zooms/pans each photo while it's shown.</div>`;
+    },
+  },
+  {
+    id: 'smart-framing',
+    title: 'Smart Framing',
+    render: (config) => {
+      const smartFraming = bool(config, 'smartFraming', false);
+      return `${segmentButtons('smartFraming', [
+        { label: 'On', value: 'true', active: smartFraming },
+        { label: 'Off', value: 'false', active: !smartFraming },
+      ])}
+      <div class="muted" style="margin-top:.4rem">When available, face metadata keeps people near the center of cropped photos and video posters. Manual zoom or pan overrides it.</div>`;
+    },
+  },
+  {
+    id: 'qr-code',
+    title: 'QR Code',
+    render: (config) => {
+      const qr = bool(config, 'showQr', true);
+      return segmentButtons('showQr', [
+        { label: 'On', value: 'true', active: qr },
+        { label: 'Off', value: 'false', active: !qr },
+      ]);
+    },
+  },
+];
+
+export interface RenderSharedSettingsOptions {
+  isPanelOpen?: (id: string) => boolean;
+  panels?: SettingsPanelMetadata[];
+}
+
+export function renderSharedSettings(root: HTMLElement, adapter: SettingsUiAdapter, options: RenderSharedSettingsOptions = {}): void {
+  const panels = options.panels ?? SHARED_SETTINGS_PANELS;
+  const config = adapter.getConfig();
+  root.innerHTML = panels
+    .map((p) => settingsPanel(p.id, p.title, p.render(config), options.isPanelOpen?.(p.id) ?? true))
+    .join('');
+  wireSharedSettings(root, adapter);
+}
+
+export function wireSharedSettings(root: HTMLElement, adapter: SettingsUiAdapter): void {
+  root.querySelectorAll<HTMLElement>('[data-group]').forEach((group) => {
+    const key = group.dataset.group;
+    if (!key) return;
+    group.querySelectorAll<HTMLButtonElement>('button').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const value = btn.dataset.value;
+        if (value === undefined) return;
+        group.querySelectorAll('button').forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        await adapter.updateConfig(key === 'effect' ? { transitionPeriod: value } : { [key]: value });
+      });
+    });
+  });
+
+  root.querySelectorAll<HTMLInputElement>('[data-range-key]').forEach((el) => {
+    if (el.dataset.rangeKey === 'zoom') {
+      const zoomVal = root.querySelector<HTMLElement>('[data-zoom-val]');
+      el.addEventListener('input', () => { if (zoomVal) zoomVal.textContent = `${el.value}%`; });
+    }
+    el.addEventListener('change', async () => {
+      const key = el.dataset.rangeKey;
+      if (!key) return;
+      await adapter.updateConfig({ [key]: String(Number(el.value) / 100) });
+    });
+  });
+}

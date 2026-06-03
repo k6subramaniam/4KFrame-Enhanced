@@ -10,11 +10,13 @@ import type { FrameEvent, MediaItem, WsMessage } from '@4kframe/shared';
 process.env.FRAME_ADMIN_PASSWORD = 'test-ws-password';
 process.env.FRAME_DATA_DIR = await mkdtemp(path.join(tmpdir(), '4kframe-ws-test-'));
 
-const [{ registerWs }, store, slideshow, { hub }] = await Promise.all([
+const [{ registerWs }, store, slideshow, { hub }, auth, shared] = await Promise.all([
   import('./ws.js'),
   import('./store.js'),
   import('./slideshow.js'),
   import('./hub.js'),
+  import('./auth.js'),
+  import('@4kframe/shared'),
 ]);
 
 const photo = (id: string): MediaItem => ({
@@ -43,6 +45,9 @@ async function seedStore(): Promise<void> {
 
 async function buildApp() {
   await seedStore();
+  await store.setConfig({ ...shared.defaultConfig(), photoPeriod: 0 });
+  slideshow.setPaused(false);
+  slideshow.startSlideshow();
   const app = Fastify({ logger: false });
   await app.register(fastifyWebsocket);
   await registerWs(app);
@@ -55,9 +60,9 @@ function parseMessage(data: unknown): WsMessage {
   return JSON.parse(text) as WsMessage;
 }
 
-async function connectWs(app: Awaited<ReturnType<typeof buildApp>>) {
+async function connectWs(app: Awaited<ReturnType<typeof buildApp>>, cookie?: string) {
   const messages: WsMessage[] = [];
-  const ws = await app.injectWS('/ws', undefined, {
+  const ws = await app.injectWS('/ws', cookie ? { headers: { cookie } } : undefined, {
     onInit: (client) => {
       client.on('message', (data: unknown) => {
         messages.push(parseMessage(data));
@@ -94,7 +99,73 @@ test('unauthenticated /ws clients receive initial state and forwarded display ev
   assert.deepEqual(afterForward[2], event);
 });
 
-test('unauthenticated /ws clients cannot send mutating controls when auth is required', async (t) => {
+test('public /ws display controls work without admin auth', async (t) => {
+  const app = await buildApp();
+  const { ws, messages } = await connectWs(app);
+  t.after(async () => {
+    ws.terminate();
+    await app.close();
+  });
+
+  await waitForCollected(messages, 2);
+
+  ws.send(JSON.stringify({ type: 'next' }));
+  let collected = await waitForCollected(messages, 3);
+  assert.equal(collected[2]?.type, 'show');
+  assert.deepEqual(collected[2]?.type === 'show' ? collected[2].items.map((item) => item.id) : [], ['second']);
+
+  ws.send(JSON.stringify({ type: 'pause' }));
+  collected = await waitForCollected(messages, 4);
+  assert.deepEqual(collected[3], { type: 'paused', paused: true });
+  assert.equal(slideshow.isPaused(), true);
+
+  ws.send(JSON.stringify({ type: 'resume' }));
+  collected = await waitForCollected(messages, 5);
+  assert.deepEqual(collected[4], { type: 'paused', paused: false });
+  assert.equal(slideshow.isPaused(), false);
+
+  ws.send(JSON.stringify({ type: 'previous' }));
+  collected = await waitForCollected(messages, 6);
+  assert.equal(collected[5]?.type, 'show');
+  assert.deepEqual(collected[5]?.type === 'show' ? collected[5].items.map((item) => item.id) : [], ['first']);
+});
+
+test('public /ws config updates are limited to safe fields and validated', async (t) => {
+  const app = await buildApp();
+  const { ws, messages } = await connectWs(app);
+  t.after(async () => {
+    ws.terminate();
+    await app.close();
+  });
+
+  await waitForCollected(messages, 2);
+
+  ws.send(JSON.stringify({
+    type: 'publicConfig',
+    patch: { zoom: 99, panX: -4, panY: '0.5', fillMode: 'contain', transition: 'wipeDown.glsl' },
+  }));
+
+  let collected = await waitForCollected(messages, 3);
+  assert.equal(collected[2]?.type, 'config');
+  assert.equal(store.getConfig().zoom, 3);
+  assert.equal(store.getConfig().panX, -1);
+  assert.equal(store.getConfig().panY, 0.5);
+  assert.equal(store.getConfig().fillMode, 'contain');
+  assert.equal(store.getConfig().frameFill, false);
+  assert.equal(store.getConfig().transition, 'wipeDown.glsl');
+
+  const beforeConfig = store.getConfig();
+  const beforeCount = messages.length;
+  ws.send(JSON.stringify({ type: 'publicConfig', patch: { showInfo: false } }));
+  ws.send(JSON.stringify({ type: 'publicConfig', patch: { zoom: Number.NaN } }));
+  ws.send(JSON.stringify({ type: 'publicConfig', patch: { transition: 'evil.glsl' } }));
+
+  collected = await waitForCollected(messages, beforeCount + 1);
+  assert.equal(collected.length, beforeCount);
+  assert.equal(store.getConfig(), beforeConfig);
+});
+
+test('admin-only /ws controls remain blocked without auth', async (t) => {
   const app = await buildApp();
   const { ws, messages } = await connectWs(app);
   t.after(async () => {
@@ -106,14 +177,33 @@ test('unauthenticated /ws clients cannot send mutating controls when auth is req
   const beforeConfig = store.getConfig();
 
   ws.send(JSON.stringify({ type: 'config', patch: { showInfo: false } }));
-  ws.send(JSON.stringify({ type: 'next' }));
-  ws.send(JSON.stringify({ type: 'pause' }));
+  ws.send(JSON.stringify({ type: 'progress' }));
   ws.send(JSON.stringify({ type: 'cast', id: 'second' }));
 
   const beforeCount = messages.length;
   await waitForCollected(messages, beforeCount + 1);
   assert.equal(messages.length, beforeCount);
   assert.equal(store.getConfig().showInfo, beforeConfig.showInfo);
-  assert.equal(slideshow.isPaused(), false);
   assert.deepEqual(slideshow.getCurrent().map((item) => item.id), ['first']);
+});
+
+test('authenticated admins can use admin-only /ws controls', async (t) => {
+  const app = await buildApp();
+  const { ws, messages } = await connectWs(app, `frame_auth=${encodeURIComponent(auth.issueToken())}`);
+  t.after(async () => {
+    ws.terminate();
+    await app.close();
+  });
+
+  await waitForCollected(messages, 2);
+
+  ws.send(JSON.stringify({ type: 'config', patch: { showInfo: false } }));
+  let collected = await waitForCollected(messages, 3);
+  assert.equal(collected[2]?.type, 'config');
+  assert.equal(store.getConfig().showInfo, false);
+
+  ws.send(JSON.stringify({ type: 'cast', id: 'second' }));
+  collected = await waitForCollected(messages, 4);
+  assert.equal(collected[3]?.type, 'show');
+  assert.deepEqual(collected[3]?.type === 'show' ? collected[3].items.map((item) => item.id) : [], ['second']);
 });
