@@ -52,9 +52,9 @@ const OPEN_API = new Set([
 ]);
 
 export async function registerApi(app: FastifyInstance): Promise<void> {
-  // Gate management/control API behind the admin password (when one is set). Static assets,
-  // /ws is authenticated in server/src/ws.ts when auth is enabled; /photos stays open so
-  // authenticated display clients can load media assets directly.
+  // Gate management/control API behind the admin password (when one is set). Display
+  // shell/assets can load unauthenticated for Cast startup, but /ws is authenticated in
+  // server/src/ws.ts and /photos is protected in server/src/index.ts when auth is enabled.
   app.addHook('onRequest', async (req, reply) => {
     if (!auth.authRequired()) return;
     const path = req.url.split('?')[0];

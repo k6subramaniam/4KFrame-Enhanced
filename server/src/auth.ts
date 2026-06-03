@@ -3,8 +3,8 @@
  *
  * When FRAME_ADMIN_PASSWORD is set, mutating/management API routes require a valid signed
  * cookie obtained by POSTing the password to /api/login. The display WebSocket uses the
- * same cookie when auth is enabled; media under /photos and a few read-only endpoints stay
- * open so already-authorized displays can load assets.
+ * same cookie when auth is enabled; the display shell can load for Cast startup, but
+ * media under /photos and protected API state require authentication.
  *
  * Stateless: the cookie is `<expiry>.<HMAC(expiry)>` signed with a key derived from the
  * password, so changing the password invalidates existing sessions. No extra dependencies.

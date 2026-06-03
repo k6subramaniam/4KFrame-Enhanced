@@ -8,7 +8,6 @@ import type { FastifyInstance } from 'fastify';
 process.env.FRAME_ADMIN_PASSWORD = 'test-index-password';
 process.env.FRAME_DATA_DIR = await mkdtemp(path.join(tmpdir(), '4kframe-index-test-'));
 process.env.FRAME_DISABLE_HTTPS = '1';
-delete process.env.FRAME_ADMIN_PASSWORD;
 
 const [{ buildApp }, { initStore }, { MEDIA_DIR }, auth] = await Promise.all([
   import('./index.js'),
@@ -65,12 +64,12 @@ test('GET /admin redirects to the canonical admin SPA path with trailing slash',
   });
 });
 
-test('unauthenticated GET / redirects to admin login when FRAME_ADMIN_PASSWORD is set', async () => {
+test('unauthenticated GET / can load the display receiver shell when FRAME_ADMIN_PASSWORD is set', async () => {
   await withApp('display-password', async (app) => {
     const response = await app.inject({ method: 'GET', url: '/' });
 
-    assert.equal(response.statusCode, 302);
-    assert.equal(response.headers.location, '/admin/');
+    assert.equal(response.statusCode, 200);
+    assert.match(response.body, /<title>4KFrame<\/title>/);
   });
 });
 
@@ -80,7 +79,7 @@ test('authenticated GET / succeeds with a valid frame_auth cookie when FRAME_ADM
     const response = await app.inject({ method: 'GET', url: '/', headers: { cookie } });
 
     assert.equal(response.statusCode, 200);
-    assert.match(response.body, /Display app/);
+    assert.match(response.body, /<title>4KFrame<\/title>/);
   });
 });
 
@@ -89,7 +88,7 @@ test('GET / remains public when FRAME_ADMIN_PASSWORD is unset', async () => {
     const response = await app.inject({ method: 'GET', url: '/' });
 
     assert.equal(response.statusCode, 200);
-    assert.match(response.body, /Display app/);
+    assert.match(response.body, /<title>4KFrame<\/title>/);
   });
 });
 
@@ -99,7 +98,7 @@ test('unauthenticated requests to protected display state endpoints are blocked 
     await app.close();
   });
 
-  for (const url of ['/api/current', '/api/qr']) {
+  for (const url of ['/api/current', '/api/qr', '/api/cast-auth']) {
     const response = await app.inject({ method: 'GET', url });
     assert.equal(response.statusCode, 401, `${url} should require authentication`);
     assert.deepEqual(response.json(), { error: 'unauthorized' });
