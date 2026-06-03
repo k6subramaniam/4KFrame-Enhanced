@@ -33,6 +33,8 @@ import { videoProcessingAvailable } from './media/video.js';
 import { loadOrCreateTls, type TlsMaterial } from './tls.js';
 import * as auth from './auth.js';
 
+const FALLBACK_HTML = '<html><head><title>4KFrame</title></head><body></body></html>';
+
 /** Build a fully-configured Fastify instance. Pass TLS material to serve HTTPS. */
 export async function buildApp(https?: TlsMaterial): Promise<FastifyInstance> {
   const app = Fastify({
@@ -85,9 +87,15 @@ export async function buildApp(https?: TlsMaterial): Promise<FastifyInstance> {
   // Built SPAs, when available (after `npm run build`).
   if (existsSync(DISPLAY_DIST)) {
     await app.register(fastifyStatic, { root: DISPLAY_DIST, prefix: '/', decorateReply: false });
+  } else {
+    // Fallback for testing or when builds are missing
+    app.get('/', async (_req, reply) => reply.type('text/html').send(FALLBACK_HTML));
   }
   if (existsSync(ADMIN_DIST)) {
     await app.register(fastifyStatic, { root: ADMIN_DIST, prefix: '/admin/', decorateReply: true });
+  } else {
+    // Fallback for testing or when builds are missing
+    app.get('/admin/', async (_req, reply) => reply.type('text/html').send(FALLBACK_HTML));
   }
 
   await registerApi(app);
