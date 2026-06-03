@@ -2,8 +2,9 @@
  * Optional admin authentication.
  *
  * When FRAME_ADMIN_PASSWORD is set, mutating/management API routes require a valid signed
- * cookie obtained by POSTing the password to /api/login. The display, its WebSocket, media
- * under /photos and a few read-only endpoints stay open so TVs need no login.
+ * cookie obtained by POSTing the password to /api/login. The display WebSocket uses the
+ * same cookie when auth is enabled; media under /photos and a few read-only endpoints stay
+ * open so already-authorized displays can load assets.
  *
  * Stateless: the cookie is `<expiry>.<HMAC(expiry)>` signed with a key derived from the
  * password, so changing the password invalidates existing sessions. No extra dependencies.

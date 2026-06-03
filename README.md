@@ -66,9 +66,14 @@ receiver.
 
 ### Admin password
 Set **`FRAME_ADMIN_PASSWORD`** to lock the admin: the admin UI and all management/control
-APIs then require that password (one login per browser, 30-day cookie), while the **display
-and TVs need no login**. Strongly recommended for any **public/cloud** deployment — without it
-the admin and your library are open to anyone with the URL. On a private LAN it's optional.
+APIs and the **display WebSocket (`/ws`)** then require that password (one login per
+browser, 30-day cookie). Chromecast, kiosk, and TV-browser display clients must be opened
+after authenticating in that browser/session so the cookie is available to `/ws`; otherwise
+the server closes the socket before sending slideshow state or accepting remote controls.
+For a documented private LAN deployment where unauthenticated TV access is acceptable, leave
+`FRAME_ADMIN_PASSWORD` unset; in that mode `/ws` remains open to LAN display clients and
+their TV remote controls. Strongly recommended for any **public/cloud** deployment — without
+it the admin and your library are open to anyone with the URL. On a private LAN it's optional.
 
 ### Runtime dependencies
 - **ffmpeg** (in the Docker image) — video posters & transcoding. Videos that aren't already
@@ -134,7 +139,8 @@ pick items in Google's UI, and they're imported onto the frame.
   LAN via `POST /api/cast/:id`.
 
 ### TV remote / keyboard control
-When the display is open in a TV browser, the remote drives it directly:
+When the display is open in an authenticated TV browser (or in private LAN mode with
+`FRAME_ADMIN_PASSWORD` unset), the remote drives it directly:
 **→ / ↓ / Next = next**, **← / ↑ / Prev = previous**, **OK / Play-Pause = pause/resume**
 (pausing stops auto-advance and pauses the current video). **`+` / `-` zoom**, and once
 zoomed in the **arrows pan** the image (zoom back to 1× to navigate again); **`0` resets**.
@@ -165,7 +171,8 @@ of different shapes can run at once, each framed correctly. In **Admin → Scali
 `/api/thumbs` · `/api/cast/:id` · `/api/delete/:id` · `/api/photo/:id` ·
 `/api/preview/:id` · `/photos/:filename`
 New: `/api/upload` (and chunked `/api/upload/chunk` + `/api/upload/finish`), `/api/video/:id`,
-`/api/google/*`, `/api/qr`, `/api/logs`, WS `/ws`.
+`/api/google/*`, `/api/qr`, `/api/logs`, WS `/ws` (requires the `frame_auth` cookie when
+`FRAME_ADMIN_PASSWORD` is set; leave that variable unset only for private LAN display mode).
 
 > Large files are uploaded in 4 MB chunks and reassembled server-side, so big videos upload
 > even through proxies/CDNs that cap request body size (e.g. GitHub Codespaces' `413`). The
