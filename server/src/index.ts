@@ -14,6 +14,7 @@
  */
 
 import { existsSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import fastifyMultipart from '@fastify/multipart';
@@ -32,7 +33,7 @@ import { videoProcessingAvailable } from './media/video.js';
 import { loadOrCreateTls, type TlsMaterial } from './tls.js';
 
 /** Build a fully-configured Fastify instance. Pass TLS material to serve HTTPS. */
-async function buildApp(https?: TlsMaterial): Promise<FastifyInstance> {
+export async function buildApp(https?: TlsMaterial): Promise<FastifyInstance> {
   const app = Fastify({
     logger: true,
     bodyLimit: 1024 * 1024 * 512,
@@ -44,6 +45,10 @@ async function buildApp(https?: TlsMaterial): Promise<FastifyInstance> {
 
   // Raw media assets (photos, previews, thumbnails, posters, videos).
   await app.register(fastifyStatic, { root: MEDIA_DIR, prefix: '/photos/', decorateReply: false });
+
+  // Canonical admin URL. The admin SPA is built with a `/admin/` base, so requests
+  // without the trailing slash need a redirect before static assets are evaluated.
+  app.get('/admin', async (_req, reply) => reply.redirect('/admin/', 308));
 
   // Built SPAs, when available (after `npm run build`).
   if (existsSync(DISPLAY_DIST)) {
@@ -107,7 +112,9 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
