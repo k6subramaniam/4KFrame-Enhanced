@@ -101,12 +101,6 @@ test('unauthenticated requests to protected display state endpoints are blocked 
       assert.deepEqual(response.json(), { error: 'unauthorized' });
     }
   });
-
-  for (const url of ['/api/current', '/api/qr', '/api/cast-auth']) {
-    const response = await app.inject({ method: 'GET', url });
-    assert.equal(response.statusCode, 401, `${url} should require authentication`);
-    assert.deepEqual(response.json(), { error: 'unauthorized' });
-  }
 });
 
 test('unauthenticated requests to raw media under /photos are blocked when auth is required', async () => {
@@ -117,6 +111,9 @@ test('unauthenticated requests to raw media under /photos are blocked when auth 
 
     assert.equal(response.statusCode, 401);
     assert.deepEqual(response.json(), { error: 'unauthorized' });
+  });
+});
+
 test('Cast receiver handoff tokens can read protected media without an admin cookie', async (t) => {
   const app = await buildTestApp();
   t.after(async () => {
@@ -133,13 +130,6 @@ test('Cast receiver handoff tokens can read protected media without an admin coo
 
   assert.equal(photo.statusCode, 200);
   assert.equal(photo.body, 'cast token photo bytes');
-});
-
-test('authenticated requests can read protected display state and raw media', async (t) => {
-  const app = await buildTestApp();
-  t.after(async () => {
-    await app.close();
-  });
 });
 
 test('authenticated requests can read protected display state and raw media', async () => {
