@@ -17,6 +17,51 @@ const PERIOD_LABELS: Record<number, string> = {
   300: '5 min', 600: '10 min', 1200: '20 min',
 };
 
+const SETTINGS_PANEL_STATE_KEY = '4kframe.settings.panels';
+const MOBILE_PANEL_QUERY = '(max-width: 700px)';
+const MOBILE_DEFAULT_COLLAPSED = new Set(['qr-code', 'storage', 'google-photos']);
+
+type PanelState = Record<string, boolean>;
+
+function loadPanelState(): PanelState {
+  try {
+    const raw = localStorage.getItem(SETTINGS_PANEL_STATE_KEY);
+    return raw ? JSON.parse(raw) as PanelState : {};
+  } catch {
+    return {};
+  }
+}
+
+function savePanelState(state: PanelState): void {
+  try {
+    localStorage.setItem(SETTINGS_PANEL_STATE_KEY, JSON.stringify(state));
+  } catch {
+    // Ignore storage failures; the current DOM state still reflects the user's action.
+  }
+}
+
+function isPanelOpen(id: string, state: PanelState): boolean {
+  if (typeof state[id] === 'boolean') return state[id];
+  const mobile = window.matchMedia?.(MOBILE_PANEL_QUERY).matches ?? false;
+  return !(mobile && MOBILE_DEFAULT_COLLAPSED.has(id));
+}
+
+function panel(id: string, title: string, content: string, open: boolean): string {
+  const bodyId = `settings-panel-${id}`;
+  return `
+    <section class="panel" data-panel-id="${id}" data-collapsed="${open ? 'false' : 'true'}">
+      <h2 class="panel-heading">
+        <button class="panel-toggle" type="button" aria-expanded="${open}" aria-controls="${bodyId}">
+          <span>${title}</span>
+          <span class="panel-chevron" aria-hidden="true">⌄</span>
+        </button>
+      </h2>
+      <div class="panel-body" id="${bodyId}"${open ? '' : ' inert aria-hidden="true"'}>
+        <div class="panel-body-inner">${content}</div>
+      </div>
+    </section>`;
+}
+
 function seg(name: string, options: { label: string; value: string; active: boolean }[]): string {
   return `<div class="row seg" data-group="${name}">${options
     .map((o) => `<button data-value="${o.value}" class="${o.active ? 'active' : ''}">${o.label}</button>`)
@@ -33,6 +78,7 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload): P
   const panX = Number(data.panX ?? 0);
   const panY = Number(data.panY ?? 0);
   const motion = data.motion ?? 'off';
+  const smartFraming = (data.smartFraming ?? 'false') === 'true';
   const qr = (data.showQr ?? 'true') === 'true';
   const aspectLabels: Record<string, string> = { auto: 'Auto', '16:9': '16:9', '9:16': '9:16 ↕', '4:3': '4:3', '3:4': '3:4 ↕', '1:1': '1:1', '21:9': '21:9' };
   const motionLabels: Record<string, string> = { off: 'Off', zoom: 'Zoom', pan: 'Pan', zoompan: 'Zoom + Pan' };
@@ -48,64 +94,102 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload): P
     return entry?.[0] ?? 'custom';
   })();
 
-  root.innerHTML = `
-    <div class="panel">
-      <h2>Photo Period</h2>
-      ${seg('photoPeriod', PHOTO_PERIOD_PRESETS.map((p) => ({ label: PERIOD_LABELS[p] ?? `${p}s`, value: String(p), active: p === period })))}
-    </div>
-    <div class="panel">
-      <h2>Effects</h2>
-      ${seg('effect', Object.entries(EFFECT_PRESETS).map(([k, v]) => ({ label: k[0].toUpperCase() + k.slice(1), value: String(v), active: k === effectValue })))}
-      <h2 style="margin-top:1rem">Transition</h2>
-      ${seg('transition', TRANSITIONS.map((t) => ({ label: t.replace('.glsl', ''), value: t, active: t === transition })))}
-    </div>
-    <div class="panel">
-      <h2>Scaling</h2>
-      ${seg('fillMode', [
+  const panelState = loadPanelState();
+
+  root.innerHTML = [
+    panel(
+      'photo-period',
+      'Photo Period',
+      `${seg('photoPeriod', PHOTO_PERIOD_PRESETS.map((p) => ({ label: PERIOD_LABELS[p] ?? `${p}s`, value: String(p), active: p === period })))}`,
+      isPanelOpen('photo-period', panelState),
+    ),
+    panel(
+      'effects',
+      'Effects',
+      `${seg('effect', Object.entries(EFFECT_PRESETS).map(([k, v]) => ({ label: k[0].toUpperCase() + k.slice(1), value: String(v), active: k === effectValue })))}
+      <h3 class="panel-subheading">Transition</h3>
+      ${seg('transition', TRANSITIONS.map((t) => ({ label: t.replace('.glsl', ''), value: t, active: t === transition })))}`,
+      isPanelOpen('effects', panelState),
+    ),
+    panel(
+      'scaling',
+      'Scaling',
+      `${seg('fillMode', [
         { label: 'Cover', value: 'cover', active: fillMode === 'cover' },
         { label: 'Contain', value: 'contain', active: fillMode === 'contain' },
         { label: 'Blur Fill', value: 'blur', active: fillMode === 'blur' },
         { label: 'Stretch', value: 'stretch', active: fillMode === 'stretch' },
       ])}
       <div class="muted" style="margin-top:.4rem">Cover crops · Contain letterboxes · Blur fills bars · Stretch distorts to fill.</div>
-      <h2 style="margin-top:1rem">Aspect Ratio</h2>
+      <h3 class="panel-subheading">Aspect Ratio</h3>
       ${seg('frameAspect', FRAME_ASPECTS.map((a) => ({ label: aspectLabels[a] ?? a, value: a, active: a === frameAspect })))}
-      <div class="muted" style="margin-top:.4rem">Auto matches each screen (TV, ultrawide, square, portrait). Others force that shape, centered.</div>
-    </div>
-    <div class="panel">
-      <h2>Zoom &amp; Pan</h2>
-      <label class="field">Zoom <span class="muted" id="zoom-val">${Math.round(zoom * 100)}%</span>
+      <div class="muted" style="margin-top:.4rem">Auto matches each screen (TV, ultrawide, square, portrait). Others force that shape, centered.</div>`,
+      isPanelOpen('scaling', panelState),
+    ),
+    panel(
+      'zoom-pan',
+      'Zoom &amp; Pan',
+      `<label class="field">Zoom <span class="muted" id="zoom-val">${Math.round(zoom * 100)}%</span>
         <input type="range" id="zoom" min="100" max="300" step="5" value="${Math.round(zoom * 100)}" /></label>
       <label class="field">Pan X <input type="range" id="panX" min="-100" max="100" step="5" value="${Math.round(panX * 100)}" /></label>
       <label class="field">Pan Y <input type="range" id="panY" min="-100" max="100" step="5" value="${Math.round(panY * 100)}" /></label>
       <div class="muted">Pan only has an effect when zoomed in (or content overflows the frame).</div>
-      <h2 style="margin-top:1rem">Motion (Ken Burns)</h2>
+      <h3 class="panel-subheading">Motion (Ken Burns)</h3>
       ${seg('motion', MOTION_MODES.map((m) => ({ label: motionLabels[m] ?? m, value: m, active: m === motion })))}
       <div class="muted" style="margin-top:.4rem">Slowly zooms/pans each photo while it's shown.</div>
-    </div>
-    <div class="panel">
-      <h2>QR Code</h2>
-      ${seg('showQr', [
+      <h3 class="panel-subheading">Smart face framing</h3>
+      ${seg('smartFraming', [
+        { label: 'On', value: 'true', active: smartFraming },
+        { label: 'Off', value: 'false', active: !smartFraming },
+      ])}
+      <div class="muted" style="margin-top:.4rem">When available, face metadata keeps people near the center of cropped photos and video posters. Manual zoom or pan overrides it.</div>`,
+      isPanelOpen('zoom-pan', panelState),
+    ),
+    panel(
+      'qr-code',
+      'QR Code',
+      `${seg('showQr', [
         { label: 'On', value: 'true', active: qr },
         { label: 'Off', value: 'false', active: !qr },
-      ])}
-    </div>
-    <div class="panel">
-      <h2>Storage</h2>
-      <div class="muted">${pct}% used · ${usedMB} MB used · ${freeMB} MB free</div>
-    </div>
-    <div class="panel">
-      <h2>Google Photos</h2>
-      ${gp.connected
+      ])}`,
+      isPanelOpen('qr-code', panelState),
+    ),
+    panel(
+      'storage',
+      'Storage',
+      `<div class="muted">${pct}% used · ${usedMB} MB used · ${freeMB} MB free</div>`,
+      isPanelOpen('storage', panelState),
+    ),
+    panel(
+      'google-photos',
+      'Google Photos',
+      `${gp.connected
         ? '<div class="muted">Connected. Pick photos &amp; videos to import onto the frame.</div>'
           + '<div class="row"><button id="gpick">Import from Google Photos</button>'
           + '<a href="/api/google/disconnect" class="muted" style="margin-left:.75rem">Disconnect</a></div>'
           + '<div class="muted" id="gpick-status"></div>'
         : gp.configured
           ? '<div class="row"><a href="/api/google/auth"><button>Connect Google Photos</button></a></div>'
-          : '<div class="muted">Set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET on the server to enable Google Photos import.</div>'}
-    </div>
-  `;
+          : '<div class="muted">Set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET on the server to enable Google Photos import.</div>'}`,
+      isPanelOpen('google-photos', panelState),
+    ),
+  ].join('');
+
+  root.querySelectorAll<HTMLButtonElement>('.panel-toggle').forEach((toggle) => {
+    toggle.addEventListener('click', () => {
+      const panelEl = toggle.closest<HTMLElement>('.panel');
+      const id = panelEl?.dataset.panelId;
+      if (!panelEl || !id) return;
+      const open = toggle.getAttribute('aria-expanded') !== 'true';
+      const body = document.getElementById(toggle.getAttribute('aria-controls') ?? '');
+      panelEl.dataset.collapsed = open ? 'false' : 'true';
+      toggle.setAttribute('aria-expanded', String(open));
+      body?.toggleAttribute('aria-hidden', !open);
+      body?.toggleAttribute('inert', !open);
+      const nextState = { ...loadPanelState(), [id]: open };
+      savePanelState(nextState);
+    });
+  });
 
   root.querySelectorAll<HTMLElement>('[data-group]').forEach((group) => {
     const key = group.dataset.group!;

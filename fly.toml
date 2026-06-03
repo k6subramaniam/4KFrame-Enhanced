@@ -2,7 +2,7 @@
 #
 # First time:
 #   fly launch --no-deploy --copy-config --name <your-unique-name>   # or edit `app` below
-#   fly volume create frame_data --size 10 --region <region>          # persistent media library
+#   fly volume create frame_data --size 10 --region iad               # persistent media library; match primary_region
 #   fly secrets set FRAME_ADMIN_PASSWORD=your-strong-password         # lock the admin
 #   # (optional Google Photos) fly secrets set GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... \
 #   #   GOOGLE_REDIRECT_URI=https://<your-app>.fly.dev/api/google/callback

@@ -19,9 +19,16 @@ export const ADMIN_DIST = path.resolve(__dirname, '../../admin/dist');
 
 // Note: empty-string env values (which `.env` / compose interpolation can produce) are
 // treated as "unset" via `||`, so they fall back to defaults rather than breaking.
-export const HTTP_PORT = Number(process.env.FRAME_HTTP_PORT) || DEFAULT_HTTP_PORT;
+// PaaS platforms (Railway/Fly/Render/Heroku) inject `PORT` and route to it, so honour it
+// when `FRAME_HTTP_PORT` isn't set, otherwise the platform healthcheck can't reach us.
+export const HTTP_PORT = Number(process.env.FRAME_HTTP_PORT) || Number(process.env.PORT) || DEFAULT_HTTP_PORT;
 export const HTTPS_PORT = Number(process.env.FRAME_HTTPS_PORT) || DEFAULT_HTTPS_PORT;
 export const HOST = process.env.FRAME_HOST || '0.0.0.0';
+
+/** Smart Face Match is opt-in and disabled by default. */
+export function faceMatchEnabled(): boolean {
+  return process.env.FRAME_ENABLE_FACE_MATCH === '1';
+}
 
 /** HTTPS is served on {@link HTTPS_PORT} unless explicitly disabled. */
 export const HTTPS_ENABLED = process.env.FRAME_DISABLE_HTTPS !== '1';
