@@ -165,19 +165,37 @@ function handleVideoError(item: MediaItem): void {
 }
 
 /** Position the <video> into the aspect content rect and set its backdrop. */
-function fittedMediaSize(item: MediaItem, frameW: number, frameH: number, fillMode: FillMode, zoom = 1): { w: number; h: number } {
-  if (fillMode === 'stretch') return { w: frameW * zoom, h: frameH * zoom };
+function effectiveVideoFit(fillMode: FillMode): 'cover' | 'contain' | 'stretch' {
+  // Blur mode keeps the sharp foreground video contained above the blurred backdrop.
+  if (fillMode === 'blur') return 'contain';
+  return fillMode;
+}
+
+function fittedMediaSize(
+  item: MediaItem,
+  frameW: number,
+  frameH: number,
+  fillMode: FillMode | 'cover' | 'contain' | 'stretch',
+  zoom = 1,
+): { w: number; h: number } {
+  const safeZoom = Math.max(1, Number.isFinite(zoom) ? zoom : 1);
+  if (fillMode === 'stretch') return { w: frameW * safeZoom, h: frameH * safeZoom };
   const fit = fillMode === 'cover' ? 'cover' : 'contain';
   const base = fit === 'cover'
     ? Math.max(frameW / item.width, frameH / item.height)
     : Math.min(frameW / item.width, frameH / item.height);
-  return { w: item.width * base * zoom, h: item.height * base * zoom };
+  return { w: item.width * base * safeZoom, h: item.height * base * safeZoom };
 }
 
-function smartVideoPan(item: MediaItem, r: { w: number; h: number }, fitted: { w: number; h: number }): { panX: number; panY: number } {
-  const hasManualOverride = Math.abs(config.panX) > 0.001 || Math.abs(config.panY) > 0.001 || config.zoom > 1.001;
-  if (!config.smartFraming || hasManualOverride || !item.faces?.length) return { panX: config.panX, panY: config.panY };
+function hasManualVideoOverride(): boolean {
+  return Math.abs(config.panX) > 0.001 || Math.abs(config.panY) > 0.001 || config.zoom > 1.001;
+}
 
+function smartVideoObjectPosition(item: MediaItem, r: { w: number; h: number }, fit: 'cover' | 'contain' | 'stretch'): { panX: number; panY: number } {
+  if (hasManualVideoOverride()) return { panX: config.panX, panY: config.panY };
+  if (!config.smartFraming || !item.faces?.length) return { panX: 0, panY: 0 };
+
+  const fitted = fittedMediaSize(item, r.w, r.h, fit, config.zoom);
   return faceCenterToPan({
     item,
     frameWidth: r.w,
@@ -189,22 +207,27 @@ function smartVideoPan(item: MediaItem, r: { w: number; h: number }, fitted: { w
 
 function layoutVideo(item: MediaItem): void {
   const r = contentRect(window.innerWidth, window.innerHeight, config.frameAspect);
-  const fillMode = config.fillMode === 'blur' ? 'contain' : config.fillMode;
-  const zoom = clampN(config.zoom, MIN_ZOOM, MAX_ZOOM);
-  const fitted = fittedMediaSize(item, r.w, r.h, fillMode, zoom);
-  const pan = smartVideoPan(item, r, fitted);
+  const fit = effectiveVideoFit(config.fillMode);
+  const fitted = fittedMediaSize(item, r.w, r.h, fit, config.zoom);
+  const pan = smartVideoObjectPosition(item, r, fit);
   const overflowX = Math.max(0, fitted.w - r.w);
   const overflowY = Math.max(0, fitted.h - r.h);
-  const dx = r.x + (r.w - fitted.w) / 2 - (clampN(pan.panX, -1, 1) * overflowX) / 2;
-  const dy = r.y + (r.h - fitted.h) / 2 - (clampN(pan.panY, -1, 1) * overflowY) / 2;
+  const left = r.x + (r.w - fitted.w) / 2 - (pan.panX * overflowX) / 2;
+  const top = r.y + (r.h - fitted.h) / 2 - (pan.panY * overflowY) / 2;
+  const clipTop = Math.max(0, r.y - top);
+  const clipRight = Math.max(0, left + fitted.w - (r.x + r.w));
+  const clipBottom = Math.max(0, top + fitted.h - (r.y + r.h));
+  const clipLeft = Math.max(0, r.x - left);
 
-  video.style.left = `${dx}px`;
-  video.style.top = `${dy}px`;
+  video.style.left = `${left}px`;
+  video.style.top = `${top}px`;
   video.style.width = `${fitted.w}px`;
   video.style.height = `${fitted.h}px`;
+  // The element box already encodes cover/contain/stretch plus manual zoom/pan, so fill it
+  // directly and clip any overflow back to the content rect.
   video.style.objectFit = 'fill';
   video.style.objectPosition = '50% 50%';
-  video.style.clipPath = `inset(${Math.max(0, r.y - dy)}px ${Math.max(0, dx + fitted.w - (r.x + r.w))}px ${Math.max(0, dy + fitted.h - (r.y + r.h))}px ${Math.max(0, r.x - dx)}px)`;
+  video.style.clipPath = `inset(${clipTop}px ${clipRight}px ${clipBottom}px ${clipLeft}px)`;
 
   // Opaque backdrop hides the stale photo behind any bars; blurred poster in blur mode.
   videoBg.classList.add('visible');
