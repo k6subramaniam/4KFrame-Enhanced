@@ -5,7 +5,7 @@
  * of photos and videos, the settings panel, and Google Cast sender wiring.
  */
 
-import type { MediaItem } from '@4kframe/shared';
+import { parseFilename, type MediaItem } from '@4kframe/shared';
 import {
   fetchItems, fetchData, castItem, deleteItem, upload, thumbUrl,
   skipNext, skipPrev, getPlayback, setPaused, setHold, toggleEnabled,
@@ -16,8 +16,10 @@ import { initCastSender, isCastReady, castControl, toggleCastSession } from './c
 
 type Mode = 'cast' | 'view' | 'delete';
 type PeopleFilter = 'all' | 'has-faces' | 'similar-faces' | 'labeled';
+type MediaSort = 'uploaded-desc' | 'uploaded-asc' | 'filename-asc' | 'filename-desc';
 let mode: Mode = 'cast';
 let peopleFilter: PeopleFilter = 'all';
+let mediaSort: MediaSort = 'uploaded-desc';
 let labelFilter = '';
 let items: MediaItem[] = [];
 
@@ -31,6 +33,7 @@ const controlsBackdrop = document.getElementById('controls-backdrop') as HTMLEle
 let controlsOpen = false;
 const peopleFilterSelect = document.getElementById('people-filter') as HTMLSelectElement | null;
 const labelFilterSelect = document.getElementById('label-filter') as HTMLSelectElement | null;
+const mediaSortSelect = document.getElementById('media-sort') as HTMLSelectElement | null;
 const peopleSummary = document.getElementById('people-summary') as HTMLElement | null;
 
 const HINTS: Record<Mode, string> = {
@@ -46,7 +49,7 @@ function fmtDuration(sec: number): string {
 
 function renderGrid(): void {
   grid.innerHTML = '';
-  const visibleItems = filterPeople(items);
+  const visibleItems = sortMedia(filterPeople(items));
   renderPeopleSummary(visibleItems);
   for (const item of visibleItems) {
     const tile = document.createElement('div');
@@ -80,6 +83,25 @@ function filterPeople(source: MediaItem[]): MediaItem[] {
   }
   if (peopleFilter === 'similar-faces') return source.filter((item) => hasSimilarFace(item, source));
   return source;
+}
+
+function sortMedia(source: MediaItem[]): MediaItem[] {
+  const sorted = [...source];
+  if (mediaSort === 'filename-asc' || mediaSort === 'filename-desc') {
+    const direction = mediaSort === 'filename-asc' ? 1 : -1;
+    return sorted.sort((a, b) => direction * a.file.localeCompare(b.file, undefined, { numeric: true, sensitivity: 'base' }));
+  }
+
+  const direction = mediaSort === 'uploaded-asc' ? 1 : -1;
+  return sorted.sort((a, b) => direction * (uploadTimestamp(a) - uploadTimestamp(b)));
+}
+
+function uploadTimestamp(item: MediaItem): number {
+  if (Number.isFinite(item.createdAt) && item.createdAt > 0) return item.createdAt;
+  const identity = parseFilename(item.file)?.identity;
+  if (!identity) return 0;
+  const timestamp = identity.length > 13 ? Number(identity.slice(0, -3)) : Number(identity);
+  return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
 function hasSimilarFace(item: MediaItem, source: MediaItem[]): boolean {
@@ -128,6 +150,15 @@ function wirePeopleFilters(): void {
   });
   labelFilterSelect?.addEventListener('change', () => {
     labelFilter = labelFilterSelect.value;
+    renderGrid();
+  });
+}
+
+function wireSorting(): void {
+  if (!mediaSortSelect) return;
+  mediaSortSelect.value = mediaSort;
+  mediaSortSelect.addEventListener('change', () => {
+    mediaSort = (mediaSortSelect.value || 'uploaded-desc') as MediaSort;
     renderGrid();
   });
 }
@@ -284,6 +315,7 @@ async function start(): Promise<void> {
     wirePlayback();
     wireControlSheet();
     wirePeopleFilters();
+    wireSorting();
     setMode('cast');
   }
   await refresh();
