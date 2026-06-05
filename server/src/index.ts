@@ -52,13 +52,11 @@ export async function buildApp(https?: TlsMaterial): Promise<FastifyInstance> {
   // token (so a Cast receiver, which can't send our cookie, can load media via a handoff URL).
   app.addHook('onRequest', async (req, reply) => {
     if (!auth.authRequired()) return;
-    const qIndex = req.url.indexOf('?');
-    const requestPath = qIndex >= 0 ? req.url.slice(0, qIndex) : req.url;
+    const url = new URL(req.url, 'http://frame.local');
+    const requestPath = url.pathname;
     if (!requestPath.startsWith('/photos/')) return;
-    const frameAuth = qIndex >= 0
-      ? new URLSearchParams(req.url.slice(qIndex + 1)).get('frame_auth') ?? undefined
-      : undefined;
-    if (!auth.isAuthedRequest(req.headers.cookie, frameAuth)) {
+    const frameAuthToken = url.searchParams.get('frame_auth') ?? undefined;
+    if (!auth.isAuthed(req.headers.cookie) && !auth.verifyToken(frameAuthToken)) {
       return reply.code(401).send({ error: 'unauthorized' });
     }
   });
