@@ -37,6 +37,7 @@ let socket: WebSocket | null = null;
 // Current content, retained so we can recompose on screen resize / config change.
 let lastItems: MediaItem[] | null = null;
 let lastVideoItem: MediaItem | null = null;
+let currentIntrinsicVideoItemId: string | null = null;
 let showingVideo = false;
 let paused = false;
 let holding = false;
@@ -143,10 +144,16 @@ function startMotion(): void {
 async function renderVideo(item: MediaItem): Promise<void> {
   showingVideo = true;
   lastVideoItem = item;
+  currentIntrinsicVideoItemId = null;
   layoutVideo(item);
   video.muted = config.videoMuted;
   video.loop = config.videoLoop || holding;
   video.onerror = () => handleVideoError(item);
+  video.onloadedmetadata = () => {
+    if (lastVideoItem?.id !== item.id) return;
+    currentIntrinsicVideoItemId = item.id;
+    layoutVideo(item);
+  };
   video.src = `/photos/${item.file}`;
   video.classList.add('visible');
   try { await video.play(); } catch { /* autoplay may require muted; already muted */ }
@@ -171,8 +178,16 @@ function effectiveVideoFit(fillMode: FillMode): 'cover' | 'contain' | 'stretch' 
   return fillMode;
 }
 
+function knownItemDimensions(item: MediaItem): { w: number; h: number } | null {
+  if (item.width > 0 && item.height > 0) return { w: item.width, h: item.height };
+  if (currentIntrinsicVideoItemId === item.id && video.videoWidth > 0 && video.videoHeight > 0) {
+    return { w: video.videoWidth, h: video.videoHeight };
+  }
+  return null;
+}
+
 function fittedMediaSize(
-  item: MediaItem,
+  dimensions: { w: number; h: number },
   frameW: number,
   frameH: number,
   fillMode: FillMode | 'cover' | 'contain' | 'stretch',
@@ -182,9 +197,9 @@ function fittedMediaSize(
   if (fillMode === 'stretch') return { w: frameW * safeZoom, h: frameH * safeZoom };
   const fit = fillMode === 'cover' ? 'cover' : 'contain';
   const base = fit === 'cover'
-    ? Math.max(frameW / item.width, frameH / item.height)
-    : Math.min(frameW / item.width, frameH / item.height);
-  return { w: item.width * base * safeZoom, h: item.height * base * safeZoom };
+    ? Math.max(frameW / dimensions.w, frameH / dimensions.h)
+    : Math.min(frameW / dimensions.w, frameH / dimensions.h);
+  return { w: dimensions.w * base * safeZoom, h: dimensions.h * base * safeZoom };
 }
 
 function hasManualVideoOverride(): boolean {
@@ -195,7 +210,10 @@ function smartVideoObjectPosition(item: MediaItem, r: { w: number; h: number }, 
   if (hasManualVideoOverride()) return { panX: config.panX, panY: config.panY };
   if (!config.smartFraming || !item.faces?.length) return { panX: 0, panY: 0 };
 
-  const fitted = fittedMediaSize(item, r.w, r.h, fit, config.zoom);
+  const dimensions = knownItemDimensions(item);
+  if (!dimensions) return { panX: 0, panY: 0 };
+
+  const fitted = fittedMediaSize(dimensions, r.w, r.h, fit, config.zoom);
   return faceCenterToPan({
     item,
     frameWidth: r.w,
@@ -208,7 +226,21 @@ function smartVideoObjectPosition(item: MediaItem, r: { w: number; h: number }, 
 function layoutVideo(item: MediaItem): void {
   const r = contentRect(window.innerWidth, window.innerHeight, config.frameAspect);
   const fit = effectiveVideoFit(config.fillMode);
-  const fitted = fittedMediaSize(item, r.w, r.h, fit, config.zoom);
+  const dimensions = knownItemDimensions(item);
+
+  if (!dimensions) {
+    video.style.left = `${r.x}px`;
+    video.style.top = `${r.y}px`;
+    video.style.width = `${r.w}px`;
+    video.style.height = `${r.h}px`;
+    video.style.objectFit = fit === 'stretch' ? 'fill' : fit;
+    video.style.objectPosition = '50% 50%';
+    video.style.clipPath = '';
+    layoutVideoBackdrop(item);
+    return;
+  }
+
+  const fitted = fittedMediaSize(dimensions, r.w, r.h, fit, config.zoom);
   const pan = smartVideoObjectPosition(item, r, fit);
   const overflowX = Math.max(0, fitted.w - r.w);
   const overflowY = Math.max(0, fitted.h - r.h);
@@ -229,6 +261,10 @@ function layoutVideo(item: MediaItem): void {
   video.style.objectPosition = '50% 50%';
   video.style.clipPath = `inset(${clipTop}px ${clipRight}px ${clipBottom}px ${clipLeft}px)`;
 
+  layoutVideoBackdrop(item);
+}
+
+function layoutVideoBackdrop(item: MediaItem): void {
   // Opaque backdrop hides the stale photo behind any bars; blurred poster in blur mode.
   videoBg.classList.add('visible');
   if (config.fillMode === 'blur' && item.poster) {
@@ -241,7 +277,9 @@ function layoutVideo(item: MediaItem): void {
 function hideVideo(): void {
   showingVideo = false;
   lastVideoItem = null;
+  currentIntrinsicVideoItemId = null;
   video.onerror = null;
+  video.onloadedmetadata = null;
   video.classList.remove('visible');
   videoBg.classList.remove('visible');
   video.pause();
@@ -681,14 +719,13 @@ function wirePublicControls(): void {
     });
   });
 
-  publicControls.querySelectorAll<HTMLButtonElement>('button[data-quick-action]').forEach((button) => {
+  publicControlsRoot.querySelectorAll<HTMLButtonElement>('button[data-quick-action]').forEach((button) => {
     button.addEventListener('click', () => {
       const action = button.dataset.quickAction as QuickAction | undefined;
       if (action) applyQuickAction(action);
     });
   });
 
-  publicControls.querySelectorAll<HTMLSelectElement>('select[data-config-key]').forEach((select) => {
   publicControlsRoot.querySelectorAll<HTMLSelectElement>('select[data-config-key]').forEach((select) => {
     select.addEventListener('change', () => {
       registerPublicControlActivity();
