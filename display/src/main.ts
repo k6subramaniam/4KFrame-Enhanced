@@ -210,7 +210,7 @@ function layoutVideo(item: MediaItem): void {
   const fillMode = config.fillMode === 'blur' ? 'contain' : config.fillMode;
   const zoom = clampN(config.zoom, MIN_ZOOM, MAX_ZOOM);
   const fitted = fittedMediaSize(item, r.w, r.h, fillMode, zoom);
-  const pan = smartVideoPan(item, r, fitted);
+  const pan = smartVideoObjectPosition(item, r, fillMode);
   const overflowX = Math.max(0, fitted.w - r.w);
   const overflowY = Math.max(0, fitted.h - r.h);
   const dx = r.x + (r.w - fitted.w) / 2 - (clampN(pan.panX, -1, 1) * overflowX) / 2;
@@ -388,18 +388,6 @@ const CONTROL_DIM_TIMEOUT_MS = 2600;
 const CONTROL_HIDE_TIMEOUT_MS = 7600;
 let controlDimTimer: ReturnType<typeof window.setTimeout> | undefined;
 let controlHideTimer: ReturnType<typeof window.setTimeout> | undefined;
-
-type QuickAction =
-  | 'fill-cover'
-  | 'fill-contain'
-  | 'smart-crop'
-  | 'zoom-in'
-  | 'zoom-out'
-  | 'reset-view'
-  | 'pan-up'
-  | 'pan-down'
-  | 'pan-left'
-  | 'pan-right';
 
 const QUICK_ACTIONS = [
   'fill-cover',
@@ -664,49 +652,6 @@ function updateQuickActionDisabledStates(root: ParentNode, configControlsReady: 
     const action = button.dataset.quickAction;
     button.disabled = isQuickAction(action) ? quickActionDisabled(action, configControlsReady) : !configControlsReady;
   });
-}
-
-function syncPublicControls(): void {
-  if (pauseControl) {
-    pauseControl.textContent = paused ? '▶' : '⏸';
-    pauseControl.setAttribute('aria-label', paused ? 'Resume slideshow' : 'Pause slideshow');
-    pauseControl.setAttribute('aria-pressed', String(paused));
-  }
-}
-
-function quickActionDisabled(action: QuickAction, configControlsReady: boolean): boolean {
-  if (!configControlsReady) return true;
-  switch (action) {
-    case 'zoom-in':
-      return config.zoom >= MAX_ZOOM - 0.001;
-    case 'zoom-out':
-      return config.zoom <= MIN_ZOOM + 0.001;
-    case 'reset-view':
-      return config.zoom <= MIN_ZOOM + 0.001 && Math.abs(config.panX) <= 0.001 && Math.abs(config.panY) <= 0.001;
-    case 'pan-up':
-      return config.panY <= -1 + 0.001;
-    case 'pan-down':
-      return config.panY >= 1 - 0.001;
-    case 'pan-left':
-      return config.panX <= -1 + 0.001;
-    case 'pan-right':
-      return config.panX >= 1 - 0.001;
-    default:
-      return false;
-  }
-}
-
-function quickActionSelected(action: QuickAction): boolean {
-  switch (action) {
-    case 'fill-cover':
-      return config.fillMode === 'cover';
-    case 'fill-contain':
-      return config.fillMode === 'contain';
-    case 'smart-crop':
-      return config.fillMode === 'cover' && config.smartFraming;
-    default:
-      return false;
-  }
 }
 
 function syncPublicControls(): void {
