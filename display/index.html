@@ -62,12 +62,21 @@
       .public-control-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 0 0 0.75rem; }
       .public-control-title { font-size: 0.95rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
       .public-control-note { font-size: 0.72rem; color: rgba(255,255,255,0.6); }
-      #public-playback { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; margin-bottom: 0.8rem; }
+      #public-playback { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; margin-bottom: 0.55rem; }
+      #public-quick-actions { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.38rem; margin-bottom: 0.8rem; }
+      .public-pan-actions { display: grid; grid-column: span 2; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.28rem; }
+      .public-pan-actions .public-icon-button[data-quick-action="pan-up"] { grid-column: 2; }
+      .public-pan-actions .public-icon-button[data-quick-action="pan-left"] { grid-column: 1; }
+      .public-pan-actions .public-icon-button[data-quick-action="pan-down"] { grid-column: 2; }
+      .public-pan-actions .public-icon-button[data-quick-action="pan-right"] { grid-column: 3; }
       .public-icon-button, #public-settings button { min-height: 2.35rem; border: 1px solid rgba(255,255,255,0.16);
         border-radius: 0.8rem; color: #fff; background: rgba(255,255,255,0.08); cursor: auto; }
       .public-icon-button { font-size: 1.1rem; }
+      .public-icon-button[data-quick-action] { min-height: 2rem; padding: 0 0.42rem; font-size: 0.9rem; font-weight: 700; }
       .public-icon-button:hover, .public-icon-button:focus-visible, #public-settings button:hover, #public-settings button:focus-visible {
         background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.34); }
+      .public-icon-button.active, .public-icon-button[aria-pressed="true"] { background: rgba(56,189,248,0.28); border-color: rgba(125,211,252,0.72); }
+      .public-icon-button:disabled, #public-settings button:disabled { opacity: 0.36; cursor: not-allowed; }
       #public-settings { display: grid; grid-template-columns: 1fr; gap: 0.72rem; }
       #public-settings .panel { border: 1px solid rgba(255,255,255,0.12); border-radius: 0.9rem;
         background: rgba(255,255,255,0.055); overflow: hidden; }
@@ -145,6 +154,19 @@
             <button id="public-previous" class="public-icon-button" type="button" data-control="previous" aria-label="Previous photo">‹</button>
             <button id="public-play-pause" class="public-icon-button" type="button" data-control="play-pause" aria-label="Play or pause">⏯</button>
             <button id="public-next" class="public-icon-button" type="button" data-control="next" aria-label="Next photo">›</button>
+          </div>
+          <div id="public-quick-actions" aria-label="Quick crop, zoom, and pan controls">
+            <button id="public-fill-cover" class="public-icon-button" type="button" data-quick-action="cover" aria-label="Use cover crop" aria-pressed="false">Crop</button>
+            <button id="public-smart-framing" class="public-icon-button" type="button" data-quick-action="smart-framing" aria-label="Toggle smart crop" aria-pressed="false">Smart</button>
+            <button class="public-icon-button" type="button" data-quick-action="zoom-out" aria-label="Zoom out">−</button>
+            <button class="public-icon-button" type="button" data-quick-action="zoom-in" aria-label="Zoom in">+</button>
+            <button class="public-icon-button" type="button" data-quick-action="reset" aria-label="Reset zoom and pan">Reset</button>
+            <div class="public-pan-actions" role="group" aria-label="Pan controls">
+              <button class="public-icon-button" type="button" data-quick-action="pan-up" aria-label="Pan up">↑</button>
+              <button class="public-icon-button" type="button" data-quick-action="pan-left" aria-label="Pan left">←</button>
+              <button class="public-icon-button" type="button" data-quick-action="pan-down" aria-label="Pan down">↓</button>
+              <button class="public-icon-button" type="button" data-quick-action="pan-right" aria-label="Pan right">→</button>
+            </div>
           </div>
           <div id="public-settings" aria-label="Slideshow settings"></div>
         </aside>

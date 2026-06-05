@@ -359,6 +359,8 @@ const publicSettingsRoot = document.getElementById('public-settings') as HTMLEle
 const publicControls = getElementByIds<HTMLElement>('public-control-panel', 'public-controls');
 const pauseControl = getElementByIds<HTMLButtonElement>('public-play-pause', 'control-pause');
 
+const PAN_QUICK_ACTIONS = new Set(['pan-up', 'pan-down', 'pan-left', 'pan-right']);
+
 function isPublicControlTarget(target: EventTarget | null): boolean {
   return target instanceof Element && Boolean(target.closest('#public-controls, #public-control-panel, #public-controls-toggle, #controls-toggle'));
 }
@@ -375,6 +377,26 @@ function configValueForControl(key: PublicConfigKey): string {
   const value = config[key];
   if (key === 'zoom' || key === 'panX' || key === 'panY') return String(Math.round(Number(value) * 100));
   return String(value);
+}
+
+function fittedOverflow(item: MediaItem, frameW: number, frameH: number): boolean {
+  const fit = config.fillMode === 'blur' ? 'contain' : config.fillMode;
+  const fitted = fittedMediaSize(item, frameW, frameH, fit);
+  const width = fitted.w * config.zoom;
+  const height = fitted.h * config.zoom;
+  return width > frameW + 1 || height > frameH + 1;
+}
+
+function canPanCurrentView(): boolean {
+  if (config.zoom > 1.01) return true;
+  const visibleItem = showingVideo ? lastVideoItem : lastItems?.length === 1 ? lastItems[0] : null;
+  if (!visibleItem || config.fillMode === 'stretch') return false;
+  const r = contentRect(window.innerWidth, window.innerHeight, config.frameAspect);
+  return fittedOverflow(visibleItem, r.w, r.h);
+}
+
+function publicControlsReady(): boolean {
+  return socket?.readyState === WebSocket.OPEN && receivedConfigEvent;
 }
 
 function publicConfigPatch(key: string | undefined, rawValue: string): Partial<FrameConfig> | null {
@@ -480,6 +502,25 @@ function syncPublicControls(): void {
       button.setAttribute('aria-pressed', String(selected));
     });
   });
+
+  const coverControl = publicControls?.querySelector<HTMLButtonElement>('[data-quick-action="cover"]');
+  if (coverControl) {
+    const active = config.fillMode === 'cover';
+    coverControl.classList.toggle('active', active);
+    coverControl.setAttribute('aria-pressed', String(active));
+  }
+
+  const smartFramingControl = publicControls?.querySelector<HTMLButtonElement>('[data-quick-action="smart-framing"]');
+  if (smartFramingControl) {
+    smartFramingControl.classList.toggle('active', config.smartFraming);
+    smartFramingControl.setAttribute('aria-pressed', String(config.smartFraming));
+  }
+
+  const canPan = publicControlsReady() && canPanCurrentView();
+  publicControls?.querySelectorAll<HTMLButtonElement>('[data-quick-action]').forEach((button) => {
+    const action = button.dataset.quickAction;
+    if (action && PAN_QUICK_ACTIONS.has(action)) button.disabled = !canPan;
+  });
 }
 
 function wirePublicControls(): void {
@@ -492,6 +533,40 @@ function wirePublicControls(): void {
   getElementByIds<HTMLButtonElement>('public-previous', 'control-previous')?.addEventListener('click', () => sendControl({ type: 'previous' }));
   getElementByIds<HTMLButtonElement>('public-next', 'control-next')?.addEventListener('click', () => sendControl({ type: 'next' }));
   pauseControl?.addEventListener('click', () => sendControl({ type: paused ? 'resume' : 'pause' }));
+
+  publicControls.querySelectorAll<HTMLButtonElement>('[data-quick-action]').forEach((button) => {
+    button.addEventListener('click', () => {
+      switch (button.dataset.quickAction) {
+        case 'cover':
+          adjustConfig({ fillMode: 'cover' });
+          break;
+        case 'smart-framing':
+          adjustConfig({ smartFraming: !config.smartFraming });
+          break;
+        case 'zoom-in':
+          setZoom(config.zoom + ZOOM_STEP);
+          break;
+        case 'zoom-out':
+          setZoom(config.zoom - ZOOM_STEP);
+          break;
+        case 'reset':
+          resetZoomPan();
+          break;
+        case 'pan-up':
+          setPan(config.panX, config.panY - PAN_STEP);
+          break;
+        case 'pan-down':
+          setPan(config.panX, config.panY + PAN_STEP);
+          break;
+        case 'pan-left':
+          setPan(config.panX - PAN_STEP, config.panY);
+          break;
+        case 'pan-right':
+          setPan(config.panX + PAN_STEP, config.panY);
+          break;
+      }
+    });
+  });
 
   publicControls.querySelectorAll<HTMLSelectElement>('select[data-config-key]').forEach((select) => {
     select.addEventListener('change', () => {
@@ -596,6 +671,7 @@ function updateControlStates(): void {
   setPublicControlDisabled('#public-previous, #public-next', !connected);
   setPublicControlDisabled('#public-play-pause', !pauseControlReady);
   setPublicControlDisabled('#public-settings button, #public-settings input, #public-settings select', !configControlsReady);
+  setPublicControlDisabled('#public-quick-actions button', !configControlsReady);
   syncPublicControls();
 }
 
