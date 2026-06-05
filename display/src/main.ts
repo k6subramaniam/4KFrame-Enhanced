@@ -165,38 +165,46 @@ function handleVideoError(item: MediaItem): void {
 }
 
 /** Position the <video> into the aspect content rect and set its backdrop. */
-function fittedMediaSize(item: MediaItem, frameW: number, frameH: number, fillMode: FillMode): { w: number; h: number } {
-  if (fillMode === 'stretch') return { w: frameW, h: frameH };
+function fittedMediaSize(item: MediaItem, frameW: number, frameH: number, fillMode: FillMode, zoom = 1): { w: number; h: number } {
+  if (fillMode === 'stretch') return { w: frameW * zoom, h: frameH * zoom };
   const fit = fillMode === 'cover' ? 'cover' : 'contain';
   const base = fit === 'cover'
     ? Math.max(frameW / item.width, frameH / item.height)
     : Math.min(frameW / item.width, frameH / item.height);
-  return { w: item.width * base, h: item.height * base };
+  return { w: item.width * base * zoom, h: item.height * base * zoom };
 }
 
-function smartVideoObjectPosition(item: MediaItem, r: { w: number; h: number }): string {
+function smartVideoPan(item: MediaItem, r: { w: number; h: number }, fitted: { w: number; h: number }): { panX: number; panY: number } {
   const hasManualOverride = Math.abs(config.panX) > 0.001 || Math.abs(config.panY) > 0.001 || config.zoom > 1.001;
-  if (!config.smartFraming || hasManualOverride || !item.faces?.length) return '50% 50%';
+  if (!config.smartFraming || hasManualOverride || !item.faces?.length) return { panX: config.panX, panY: config.panY };
 
-  const fitted = fittedMediaSize(item, r.w, r.h, config.fillMode);
-  const pan = faceCenterToPan({
+  return faceCenterToPan({
     item,
     frameWidth: r.w,
     frameHeight: r.h,
     fittedWidth: fitted.w,
     fittedHeight: fitted.h,
   });
-  return `${(pan.panX + 1) * 50}% ${(pan.panY + 1) * 50}%`;
 }
 
 function layoutVideo(item: MediaItem): void {
   const r = contentRect(window.innerWidth, window.innerHeight, config.frameAspect);
-  video.style.left = `${r.x}px`;
-  video.style.top = `${r.y}px`;
-  video.style.width = `${r.w}px`;
-  video.style.height = `${r.h}px`;
-  video.style.objectFit = config.fillMode === 'cover' ? 'cover' : config.fillMode === 'stretch' ? 'fill' : 'contain';
-  video.style.objectPosition = smartVideoObjectPosition(item, r);
+  const fillMode = config.fillMode === 'blur' ? 'contain' : config.fillMode;
+  const zoom = clampN(config.zoom, MIN_ZOOM, MAX_ZOOM);
+  const fitted = fittedMediaSize(item, r.w, r.h, fillMode, zoom);
+  const pan = smartVideoPan(item, r, fitted);
+  const overflowX = Math.max(0, fitted.w - r.w);
+  const overflowY = Math.max(0, fitted.h - r.h);
+  const dx = r.x + (r.w - fitted.w) / 2 - (clampN(pan.panX, -1, 1) * overflowX) / 2;
+  const dy = r.y + (r.h - fitted.h) / 2 - (clampN(pan.panY, -1, 1) * overflowY) / 2;
+
+  video.style.left = `${dx}px`;
+  video.style.top = `${dy}px`;
+  video.style.width = `${fitted.w}px`;
+  video.style.height = `${fitted.h}px`;
+  video.style.objectFit = 'fill';
+  video.style.objectPosition = '50% 50%';
+  video.style.clipPath = `inset(${Math.max(0, r.y - dy)}px ${Math.max(0, dx + fitted.w - (r.x + r.w))}px ${Math.max(0, dy + fitted.h - (r.y + r.h))}px ${Math.max(0, r.x - dx)}px)`;
 
   // Opaque backdrop hides the stale photo behind any bars; blurred poster in blur mode.
   videoBg.classList.add('visible');
@@ -359,6 +367,25 @@ const publicSettingsRoot = document.getElementById('public-settings') as HTMLEle
 const publicControls = getElementByIds<HTMLElement>('public-control-panel', 'public-controls');
 const pauseControl = getElementByIds<HTMLButtonElement>('public-play-pause', 'control-pause');
 
+const QUICK_ACTIONS = [
+  'fill-cover',
+  'fill-contain',
+  'smart-crop',
+  'zoom-in',
+  'zoom-out',
+  'reset-view',
+  'pan-up',
+  'pan-down',
+  'pan-left',
+  'pan-right',
+] as const;
+
+type QuickAction = typeof QUICK_ACTIONS[number];
+
+function isQuickAction(action: string | undefined): action is QuickAction {
+  return QUICK_ACTIONS.includes(action as QuickAction);
+}
+
 function isPublicControlTarget(target: EventTarget | null): boolean {
   return target instanceof Element && Boolean(target.closest('#public-controls, #public-control-panel, #public-controls-toggle, #controls-toggle'));
 }
@@ -453,6 +480,116 @@ function renderPublicSettings(): void {
   });
 }
 
+function applyQuickAction(action: QuickAction): void {
+  switch (action) {
+    case 'fill-cover': {
+      const patch = publicConfigPatch('fillMode', 'cover');
+      if (patch) adjustConfig(patch);
+      break;
+    }
+    case 'fill-contain': {
+      const patch = publicConfigPatch('fillMode', 'contain');
+      if (patch) adjustConfig(patch);
+      break;
+    }
+    case 'smart-crop':
+      adjustConfig({ fillMode: 'cover', smartFraming: true, zoom: MIN_ZOOM, panX: 0, panY: 0 });
+      break;
+    case 'zoom-in':
+      setZoom(config.zoom + ZOOM_STEP);
+      break;
+    case 'zoom-out':
+      setZoom(config.zoom - ZOOM_STEP);
+      break;
+    case 'reset-view':
+      resetZoomPan();
+      break;
+    case 'pan-up':
+      setPan(config.panX, config.panY - PAN_STEP);
+      break;
+    case 'pan-down':
+      setPan(config.panX, config.panY + PAN_STEP);
+      break;
+    case 'pan-left':
+      setPan(config.panX - PAN_STEP, config.panY);
+      break;
+    case 'pan-right':
+      setPan(config.panX + PAN_STEP, config.panY);
+      break;
+  }
+}
+
+function quickActionDisabled(action: QuickAction, configControlsReady: boolean): boolean {
+  if (!configControlsReady) return true;
+  switch (action) {
+    case 'zoom-in':
+      return config.zoom >= MAX_ZOOM - 0.001;
+    case 'zoom-out':
+      return config.zoom <= MIN_ZOOM + 0.001;
+    case 'reset-view':
+      return config.zoom <= MIN_ZOOM + 0.001 && Math.abs(config.panX) <= 0.001 && Math.abs(config.panY) <= 0.001;
+    case 'pan-up':
+      return config.panY <= -1 + 0.001;
+    case 'pan-down':
+      return config.panY >= 1 - 0.001;
+    case 'pan-left':
+      return config.panX <= -1 + 0.001;
+    case 'pan-right':
+      return config.panX >= 1 - 0.001;
+    default:
+      return false;
+  }
+}
+
+function quickActionSelected(action: QuickAction): boolean {
+  switch (action) {
+    case 'fill-cover':
+      return config.fillMode === 'cover';
+    case 'fill-contain':
+      return config.fillMode === 'contain';
+    case 'smart-crop':
+      return config.fillMode === 'cover' && config.smartFraming;
+    default:
+      return false;
+  }
+}
+
+function isQuickActionToggle(action: QuickAction): boolean {
+  return action === 'fill-cover' || action === 'fill-contain' || action === 'smart-crop';
+}
+
+function quickActionButtons(root: ParentNode): NodeListOf<HTMLButtonElement> {
+  return root.querySelectorAll<HTMLButtonElement>('button[data-quick-action]');
+}
+
+function wireQuickActions(root: ParentNode): void {
+  quickActionButtons(root).forEach((button) => {
+    button.addEventListener('click', () => {
+      const action = button.dataset.quickAction;
+      if (isQuickAction(action)) applyQuickAction(action);
+    });
+  });
+}
+
+function syncQuickActions(root: ParentNode): void {
+  quickActionButtons(root).forEach((button) => {
+    const action = button.dataset.quickAction;
+    if (!isQuickAction(action)) return;
+    const selected = quickActionSelected(action);
+    button.classList.toggle('is-selected', selected);
+    if (isQuickActionToggle(action)) {
+      button.setAttribute('aria-pressed', String(selected));
+    }
+  });
+}
+
+function updateQuickActionDisabledStates(root: ParentNode, configControlsReady: boolean): void {
+  quickActionButtons(root).forEach((button) => {
+    const action = button.dataset.quickAction;
+    button.disabled = isQuickAction(action) ? quickActionDisabled(action, configControlsReady) : !configControlsReady;
+  });
+}
+
 function syncPublicControls(): void {
   if (pauseControl) {
     pauseControl.textContent = paused ? '▶' : '⏸';
@@ -480,6 +617,8 @@ function syncPublicControls(): void {
       button.setAttribute('aria-pressed', String(selected));
     });
   });
+
+  if (publicControls) syncQuickActions(publicControls);
 }
 
 function wirePublicControls(): void {
@@ -492,6 +631,8 @@ function wirePublicControls(): void {
   getElementByIds<HTMLButtonElement>('public-previous', 'control-previous')?.addEventListener('click', () => sendControl({ type: 'previous' }));
   getElementByIds<HTMLButtonElement>('public-next', 'control-next')?.addEventListener('click', () => sendControl({ type: 'next' }));
   pauseControl?.addEventListener('click', () => sendControl({ type: paused ? 'resume' : 'pause' }));
+
+  wireQuickActions(publicControls);
 
   publicControls.querySelectorAll<HTMLSelectElement>('select[data-config-key]').forEach((select) => {
     select.addEventListener('change', () => {
@@ -596,6 +737,7 @@ function updateControlStates(): void {
   setPublicControlDisabled('#public-previous, #public-next', !connected);
   setPublicControlDisabled('#public-play-pause', !pauseControlReady);
   setPublicControlDisabled('#public-settings button, #public-settings input, #public-settings select', !configControlsReady);
+  if (publicControlsRoot) updateQuickActionDisabledStates(publicControlsRoot, configControlsReady);
   syncPublicControls();
 }
 
