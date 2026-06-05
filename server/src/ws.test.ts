@@ -109,13 +109,18 @@ test('unauthenticated /ws display clients receive state and can use safe display
   assert.deepEqual(collected[4], { type: 'paused', paused: true });
   assert.equal(slideshow.isPaused(), true);
 
-  ws.send(JSON.stringify({ type: 'publicConfig', patch: { zoom: 2 } }));
+  ws.send(JSON.stringify({ type: 'cast', id: 'first' }));
   collected = await waitForCollected(messages, 6);
-  assert.equal(collected[5]?.type, 'config');
+  assert.equal(collected[5]?.type, 'show');
+  assert.deepEqual(collected[5]?.type === 'show' ? collected[5].items.map((item) => item.id) : [], ['first']);
+
+  ws.send(JSON.stringify({ type: 'publicConfig', patch: { zoom: 2 } }));
+  collected = await waitForCollected(messages, 7);
+  assert.equal(collected[6]?.type, 'config');
   assert.equal(store.getConfig().zoom, 2);
 });
 
-test('unauthenticated /ws clients cannot use admin-only controls when auth is required', async (t) => {
+test('unauthenticated /ws clients cannot use non-display admin controls when auth is required', async (t) => {
   const app = await buildApp();
   const { ws, messages } = await connectWs(app);
   t.after(async () => {
@@ -128,7 +133,6 @@ test('unauthenticated /ws clients cannot use admin-only controls when auth is re
   const beforeConfig = store.getConfig();
 
   ws.send(JSON.stringify({ type: 'config', patch: { showInfo: false } }));
-  ws.send(JSON.stringify({ type: 'cast', id: 'second' }));
   ws.send(JSON.stringify({ type: 'progress' }));
 
   const collected = await waitForCollected(messages, 3);

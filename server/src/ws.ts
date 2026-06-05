@@ -42,10 +42,12 @@ type PublicConfigPatch = Partial<Pick<FrameConfig,
   | 'showQr'
 >>;
 
-const ADMIN_CONTROL_TYPES = new Set<ControlMessage['type']>(['progress', 'cast', 'config']);
+const ADMIN_CONTROL_TYPES = new Set<ControlMessage['type']>(['progress', 'config']);
 // These display-local controls remain public so unauthenticated display receivers can
-// keep working when the admin password gates the admin UI and management APIs.
-const PUBLIC_DISPLAY_CONTROL_TYPES = new Set<ControlMessage['type']>(['next', 'previous', 'pause', 'resume', 'publicConfig']);
+// keep working when the admin password gates the admin UI and management APIs. Native
+// Chromecast receivers also forward sender selections as `cast` over this public
+// display WebSocket, so keep item selection public for the receiver flow.
+const PUBLIC_DISPLAY_CONTROL_TYPES = new Set<ControlMessage['type']>(['next', 'previous', 'pause', 'resume', 'cast', 'publicConfig']);
 const PUBLIC_CONFIG_KEYS = new Set([
   'photoPeriod',
   'transitionPeriod',
