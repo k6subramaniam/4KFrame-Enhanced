@@ -80,18 +80,7 @@ async function waitForCollected(messages: WsMessage[], count: number, timeoutMs 
   return messages.slice();
 }
 
-async function waitForClose(ws: { readyState: number; CLOSED: number; on: (event: 'close', listener: () => void) => void }, timeoutMs = 250): Promise<boolean> {
-  if (ws.readyState === ws.CLOSED) return true;
-  let closed = false;
-  ws.on('close', () => { closed = true; });
-  const deadline = Date.now() + timeoutMs;
-  while (!closed && ws.readyState !== ws.CLOSED && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  return closed || ws.readyState === ws.CLOSED;
-}
-
-test('unauthenticated /ws clients are closed before state or controls when auth is required', async (t) => {
+test('unauthenticated /ws display clients receive state and can use safe display controls when auth is required', async (t) => {
   const app = await buildApp();
   const { ws, messages } = await connectWs(app);
   t.after(async () => {
@@ -99,26 +88,52 @@ test('unauthenticated /ws clients are closed before state or controls when auth 
     await app.close();
   });
 
-  assert.equal(await waitForClose(ws), true);
-  assert.deepEqual(await waitForCollected(messages, 1), []);
+  const initial = await waitForCollected(messages, 2);
+  assert.equal(ws.readyState, ws.OPEN);
+  assert.equal(initial[0]?.type, 'config');
+  assert.equal(initial[1]?.type, 'show');
+  assert.deepEqual(initial[1]?.type === 'show' ? initial[1].items.map((item) => item.id) : [], ['first']);
 
+  const event: FrameEvent = { type: 'log', level: 'info', message: 'display event visible to unauthenticated receivers' };
+  hub.emitEvent(event);
+  let collected = await waitForCollected(messages, 3);
+  assert.deepEqual(collected[2], event);
+
+  ws.send(JSON.stringify({ type: 'next' }));
+  collected = await waitForCollected(messages, 4);
+  assert.equal(collected[3]?.type, 'show');
+  assert.deepEqual(collected[3]?.type === 'show' ? collected[3].items.map((item) => item.id) : [], ['second']);
+
+  ws.send(JSON.stringify({ type: 'pause' }));
+  collected = await waitForCollected(messages, 5);
+  assert.deepEqual(collected[4], { type: 'paused', paused: true });
+  assert.equal(slideshow.isPaused(), true);
+
+  ws.send(JSON.stringify({ type: 'publicConfig', patch: { zoom: 2 } }));
+  collected = await waitForCollected(messages, 6);
+  assert.equal(collected[5]?.type, 'config');
+  assert.equal(store.getConfig().zoom, 2);
+});
+
+test('unauthenticated /ws clients cannot use admin-only controls when auth is required', async (t) => {
+  const app = await buildApp();
+  const { ws, messages } = await connectWs(app);
+  t.after(async () => {
+    ws.terminate();
+    await app.close();
+  });
+
+  await waitForCollected(messages, 2);
   const beforeItems = slideshow.getCurrent().map((item) => item.id);
-  const beforePaused = slideshow.isPaused();
   const beforeConfig = store.getConfig();
 
-  if (ws.readyState === ws.OPEN) {
-    ws.send(JSON.stringify({ type: 'next' }));
-    ws.send(JSON.stringify({ type: 'pause' }));
-    ws.send(JSON.stringify({ type: 'publicConfig', patch: { zoom: 2 } }));
-    ws.send(JSON.stringify({ type: 'config', patch: { showInfo: false } }));
-  }
-  hub.emitEvent({ type: 'log', level: 'info', message: 'unauthenticated clients must not receive forwarded events' } as FrameEvent);
+  ws.send(JSON.stringify({ type: 'config', patch: { showInfo: false } }));
+  ws.send(JSON.stringify({ type: 'cast', id: 'second' }));
+  ws.send(JSON.stringify({ type: 'progress' }));
 
-  await waitForCollected(messages, 1);
-  assert.deepEqual(messages, []);
+  const collected = await waitForCollected(messages, 3);
+  assert.equal(collected.length, 2);
   assert.deepEqual(slideshow.getCurrent().map((item) => item.id), beforeItems);
-  assert.equal(slideshow.isPaused(), beforePaused);
-  assert.equal(store.getConfig().zoom, beforeConfig.zoom);
   assert.equal(store.getConfig().showInfo, beforeConfig.showInfo);
 });
 

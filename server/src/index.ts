@@ -52,13 +52,11 @@ export async function buildApp(https?: TlsMaterial): Promise<FastifyInstance> {
   // token (so a Cast receiver, which can't send our cookie, can load media via a handoff URL).
   app.addHook('onRequest', async (req, reply) => {
     if (!auth.authRequired()) return;
-    const qIndex = req.url.indexOf('?');
-    const requestPath = qIndex >= 0 ? req.url.slice(0, qIndex) : req.url;
+    const url = new URL(req.url, 'http://frame.local');
+    const requestPath = url.pathname;
     if (!requestPath.startsWith('/photos/')) return;
-    const frameAuth = qIndex >= 0
-      ? new URLSearchParams(req.url.slice(qIndex + 1)).get('frame_auth') ?? undefined
-      : undefined;
-    if (!auth.isAuthedRequest(req.headers.cookie, frameAuth)) {
+    const frameAuthToken = url.searchParams.get('frame_auth') ?? undefined;
+    if (!auth.isAuthed(req.headers.cookie) && !auth.verifyToken(frameAuthToken)) {
       return reply.code(401).send({ error: 'unauthorized' });
     }
   });
@@ -69,8 +67,9 @@ export async function buildApp(https?: TlsMaterial): Promise<FastifyInstance> {
   app.get('/admin', async (_req, reply) => reply.redirect('/admin/', 308));
 
   // The display SPA (and its assets) stays public so a TV / Chromecast needs no login.
-  // The admin password only gates the admin UI and the management/mutating APIs; private
-  // data is protected separately (media under /photos, and the control APIs).
+  // Do not add a root static-site auth redirect here: FRAME_ADMIN_PASSWORD gates the
+  // admin UI plus management/mutating APIs, while /photos is protected by the narrow
+  // media hook above and /ws remains reachable for display receivers.
 
   // Built SPAs, when available (after `npm run build`).
   if (existsSync(DISPLAY_DIST)) {
