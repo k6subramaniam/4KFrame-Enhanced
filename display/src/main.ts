@@ -728,7 +728,6 @@ function wirePublicControls(): void {
 
   wireQuickActions(publicControls);
 
-  publicControls.querySelectorAll<HTMLSelectElement>('select[data-config-key]').forEach((select) => {
   publicControlsRoot.querySelectorAll<HTMLSelectElement>('select[data-config-key]').forEach((select) => {
     select.addEventListener('change', () => {
       registerPublicControlActivity();
