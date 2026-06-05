@@ -43,8 +43,8 @@ type PublicConfigPatch = Partial<Pick<FrameConfig,
 >>;
 
 const ADMIN_CONTROL_TYPES = new Set<ControlMessage['type']>(['progress', 'cast', 'config']);
-// These display-local controls are only public when admin auth is disabled (private/LAN mode).
-// When FRAME_ADMIN_PASSWORD is set, /ws is closed before any state or controls are exposed.
+// These display-local controls remain public so unauthenticated display receivers can
+// keep working when the admin password gates the admin UI and management APIs.
 const PUBLIC_DISPLAY_CONTROL_TYPES = new Set<ControlMessage['type']>(['next', 'previous', 'pause', 'resume', 'publicConfig']);
 const PUBLIC_CONFIG_KEYS = new Set([
   'photoPeriod',
@@ -165,10 +165,6 @@ async function applyConfigPatch(patch: Partial<FrameConfig>): Promise<void> {
 export async function registerWs(app: FastifyInstance): Promise<void> {
   app.get('/ws', { websocket: true }, (socket, req) => {
     const authed = auth.isAuthed(req.headers.cookie);
-    if (auth.authRequired() && !authed) {
-      socket.close(1008, 'authentication required');
-      return;
-    }
 
     const send = (event: FrameEvent) => {
       if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(event));
@@ -190,7 +186,7 @@ export async function registerWs(app: FastifyInstance): Promise<void> {
         return;
       }
       if (!PUBLIC_DISPLAY_CONTROL_TYPES.has(msg.type) && !ADMIN_CONTROL_TYPES.has(msg.type)) return;
-      if (auth.authRequired() && !authed) return;
+      if (ADMIN_CONTROL_TYPES.has(msg.type) && !authed) return;
 
       switch (msg.type) {
         case 'progress': progress(); break;

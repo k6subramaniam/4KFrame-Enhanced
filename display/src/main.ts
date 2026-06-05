@@ -165,19 +165,37 @@ function handleVideoError(item: MediaItem): void {
 }
 
 /** Position the <video> into the aspect content rect and set its backdrop. */
-function fittedMediaSize(item: MediaItem, frameW: number, frameH: number, fillMode: FillMode, zoom = 1): { w: number; h: number } {
-  if (fillMode === 'stretch') return { w: frameW * zoom, h: frameH * zoom };
+function effectiveVideoFit(fillMode: FillMode): 'cover' | 'contain' | 'stretch' {
+  // Blur mode keeps the sharp foreground video contained above the blurred backdrop.
+  if (fillMode === 'blur') return 'contain';
+  return fillMode;
+}
+
+function fittedMediaSize(
+  item: MediaItem,
+  frameW: number,
+  frameH: number,
+  fillMode: FillMode | 'cover' | 'contain' | 'stretch',
+  zoom = 1,
+): { w: number; h: number } {
+  const safeZoom = Math.max(1, Number.isFinite(zoom) ? zoom : 1);
+  if (fillMode === 'stretch') return { w: frameW * safeZoom, h: frameH * safeZoom };
   const fit = fillMode === 'cover' ? 'cover' : 'contain';
   const base = fit === 'cover'
     ? Math.max(frameW / item.width, frameH / item.height)
     : Math.min(frameW / item.width, frameH / item.height);
-  return { w: item.width * base * zoom, h: item.height * base * zoom };
+  return { w: item.width * base * safeZoom, h: item.height * base * safeZoom };
 }
 
-function smartVideoPan(item: MediaItem, r: { w: number; h: number }, fitted: { w: number; h: number }): { panX: number; panY: number } {
-  const hasManualOverride = Math.abs(config.panX) > 0.001 || Math.abs(config.panY) > 0.001 || config.zoom > 1.001;
-  if (!config.smartFraming || hasManualOverride || !item.faces?.length) return { panX: config.panX, panY: config.panY };
+function hasManualVideoOverride(): boolean {
+  return Math.abs(config.panX) > 0.001 || Math.abs(config.panY) > 0.001 || config.zoom > 1.001;
+}
 
+function smartVideoObjectPosition(item: MediaItem, r: { w: number; h: number }, fit: 'cover' | 'contain' | 'stretch'): { panX: number; panY: number } {
+  if (hasManualVideoOverride()) return { panX: config.panX, panY: config.panY };
+  if (!config.smartFraming || !item.faces?.length) return { panX: 0, panY: 0 };
+
+  const fitted = fittedMediaSize(item, r.w, r.h, fit, config.zoom);
   return faceCenterToPan({
     item,
     frameWidth: r.w,
@@ -365,7 +383,23 @@ const controlsToggle = getElementByIds<HTMLButtonElement>('public-controls-toggl
 const publicControlsRoot = document.getElementById('public-controls') as HTMLElement | null;
 const publicSettingsRoot = document.getElementById('public-settings') as HTMLElement | null;
 const publicControls = getElementByIds<HTMLElement>('public-control-panel', 'public-controls');
-const pauseControl = getElementByIds<HTMLButtonElement>('public-play-pause', 'control-pause');
+const bottomController = document.getElementById('public-bottom-controller') as HTMLElement | null;
+const CONTROL_DIM_TIMEOUT_MS = 2600;
+const CONTROL_HIDE_TIMEOUT_MS = 7600;
+let controlDimTimer: ReturnType<typeof window.setTimeout> | undefined;
+let controlHideTimer: ReturnType<typeof window.setTimeout> | undefined;
+
+type QuickAction =
+  | 'fill-cover'
+  | 'fill-contain'
+  | 'smart-crop'
+  | 'zoom-in'
+  | 'zoom-out'
+  | 'reset-view'
+  | 'pan-up'
+  | 'pan-down'
+  | 'pan-left'
+  | 'pan-right';
 
 const QUICK_ACTIONS = [
   'fill-cover',
@@ -390,12 +424,54 @@ function isPublicControlTarget(target: EventTarget | null): boolean {
   return target instanceof Element && Boolean(target.closest('#public-controls, #public-control-panel, #public-controls-toggle, #controls-toggle'));
 }
 
-function setControlsOpen(open: boolean): void {
+function bottomControllerHasFocus(): boolean {
+  return Boolean(bottomController?.contains(document.activeElement));
+}
+
+function clearControlIdleTimers(): void {
+  window.clearTimeout(controlDimTimer);
+  window.clearTimeout(controlHideTimer);
+  controlDimTimer = undefined;
+  controlHideTimer = undefined;
+}
+
+function showBottomController(): void {
+  bottomController?.classList.remove('is-hidden', 'is-dim');
+}
+
+function scheduleControlIdle(): void {
+  if (!bottomController) return;
+  clearControlIdleTimers();
+  controlDimTimer = window.setTimeout(() => {
+    if (!bottomControllerHasFocus()) bottomController.classList.add('is-dim');
+  }, CONTROL_DIM_TIMEOUT_MS);
+  controlHideTimer = window.setTimeout(() => {
+    if (!bottomControllerHasFocus()) bottomController.classList.add('is-hidden');
+  }, CONTROL_HIDE_TIMEOUT_MS);
+}
+
+function registerPublicControlActivity(): void {
+  showBottomController();
+  scheduleControlIdle();
+}
+
+function isDisplayRemoteKey(key: string): boolean {
+  return [
+    'ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp',
+    'PageDown', 'MediaTrackNext', 'n', 'N',
+    'PageUp', 'MediaTrackPrevious', 'p', 'P',
+    '+', '=', 'Add', '-', '_', 'Subtract', '0',
+    'Enter', ' ', 'Spacebar', 'MediaPlayPause', 'MediaPlay', 'MediaPause',
+  ].includes(key);
+}
+
+function setControlsOpen(open: boolean, revealController = true): void {
   if (!controlsToggle || !publicControls) return;
   publicControls.hidden = !open;
   controlsToggle.setAttribute('aria-expanded', String(open));
   controlsToggle.setAttribute('aria-label', open ? 'Close slideshow controls' : 'Open slideshow controls');
   controlsToggle.textContent = open ? 'Close' : 'Controls';
+  if (revealController) registerPublicControlActivity();
 }
 
 function configValueForControl(key: PublicConfigKey): string {
@@ -596,6 +672,49 @@ function syncPublicControls(): void {
     pauseControl.setAttribute('aria-label', paused ? 'Resume slideshow' : 'Pause slideshow');
     pauseControl.setAttribute('aria-pressed', String(paused));
   }
+}
+
+function quickActionDisabled(action: QuickAction, configControlsReady: boolean): boolean {
+  if (!configControlsReady) return true;
+  switch (action) {
+    case 'zoom-in':
+      return config.zoom >= MAX_ZOOM - 0.001;
+    case 'zoom-out':
+      return config.zoom <= MIN_ZOOM + 0.001;
+    case 'reset-view':
+      return config.zoom <= MIN_ZOOM + 0.001 && Math.abs(config.panX) <= 0.001 && Math.abs(config.panY) <= 0.001;
+    case 'pan-up':
+      return config.panY <= -1 + 0.001;
+    case 'pan-down':
+      return config.panY >= 1 - 0.001;
+    case 'pan-left':
+      return config.panX <= -1 + 0.001;
+    case 'pan-right':
+      return config.panX >= 1 - 0.001;
+    default:
+      return false;
+  }
+}
+
+function quickActionSelected(action: QuickAction): boolean {
+  switch (action) {
+    case 'fill-cover':
+      return config.fillMode === 'cover';
+    case 'fill-contain':
+      return config.fillMode === 'contain';
+    case 'smart-crop':
+      return config.fillMode === 'cover' && config.smartFraming;
+    default:
+      return false;
+  }
+}
+
+function syncPublicControls(): void {
+  publicControlsRoot?.querySelectorAll<HTMLButtonElement>('[data-control="play-pause"], #control-pause').forEach((button) => {
+    button.textContent = paused ? '▶' : '⏸';
+    button.setAttribute('aria-label', paused ? 'Resume slideshow' : 'Pause slideshow');
+    button.setAttribute('aria-pressed', String(paused));
+  });
 
   publicControls?.querySelectorAll<HTMLSelectElement>('select[data-config-key]').forEach((select) => {
     const key = select.dataset.configKey as PublicConfigKey | undefined;
@@ -618,41 +737,75 @@ function syncPublicControls(): void {
     });
   });
 
-  if (publicControls) syncQuickActions(publicControls);
+  publicControls?.querySelectorAll<HTMLButtonElement>('button[data-quick-action]').forEach((button) => {
+    const action = button.dataset.quickAction as QuickAction | undefined;
+    if (!action) return;
+    const selected = quickActionSelected(action);
+    button.classList.toggle('is-selected', selected);
+    if (action === 'fill-cover' || action === 'fill-contain' || action === 'smart-crop') {
+      button.setAttribute('aria-pressed', String(selected));
+    }
+  });
 }
 
 function wirePublicControls(): void {
-  if (!controlsToggle || !publicControls) return;
+  if (!publicControlsRoot) return;
 
-  controlsToggle.addEventListener('click', () => {
-    setControlsOpen(publicControls.hidden);
+  controlsToggle?.addEventListener('click', () => {
+    setControlsOpen(publicControls?.hidden ?? true);
   });
 
-  getElementByIds<HTMLButtonElement>('public-previous', 'control-previous')?.addEventListener('click', () => sendControl({ type: 'previous' }));
-  getElementByIds<HTMLButtonElement>('public-next', 'control-next')?.addEventListener('click', () => sendControl({ type: 'next' }));
-  pauseControl?.addEventListener('click', () => sendControl({ type: paused ? 'resume' : 'pause' }));
+  publicControlsRoot.querySelectorAll<HTMLButtonElement>('[data-control="previous"], #control-previous').forEach((button) => {
+    button.addEventListener('click', () => {
+      registerPublicControlActivity();
+      goPrevious();
+    });
+  });
+  publicControlsRoot.querySelectorAll<HTMLButtonElement>('[data-control="next"], #control-next').forEach((button) => {
+    button.addEventListener('click', () => {
+      registerPublicControlActivity();
+      goNext();
+    });
+  });
+  publicControlsRoot.querySelectorAll<HTMLButtonElement>('[data-control="play-pause"], #control-pause').forEach((button) => {
+    button.addEventListener('click', () => {
+      registerPublicControlActivity();
+      togglePause();
+    });
+  });
+
+  publicControls.querySelectorAll<HTMLButtonElement>('button[data-quick-action]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const action = button.dataset.quickAction as QuickAction | undefined;
+      if (action) applyQuickAction(action);
+    });
+  });
 
   wireQuickActions(publicControls);
 
   publicControls.querySelectorAll<HTMLSelectElement>('select[data-config-key]').forEach((select) => {
+  publicControlsRoot.querySelectorAll<HTMLSelectElement>('select[data-config-key]').forEach((select) => {
     select.addEventListener('change', () => {
+      registerPublicControlActivity();
       const patch = publicConfigPatch(select.dataset.configKey, select.value);
       if (patch) adjustConfig(patch);
     });
   });
 
-  publicControls.querySelectorAll<HTMLInputElement>('input[type=range][data-config-key]').forEach((input) => {
+  publicControlsRoot.querySelectorAll<HTMLInputElement>('input[type=range][data-config-key]').forEach((input) => {
     input.addEventListener('change', () => {
+      registerPublicControlActivity();
       const patch = publicConfigPatch(input.dataset.configKey, input.value);
       if (patch) adjustConfig(patch);
     });
   });
 
-  publicControls.querySelectorAll<HTMLElement>('[role=group][data-config-key]').forEach((group) => {
+  publicControlsRoot.querySelectorAll<HTMLElement>('[role=group][data-config-key]').forEach((group) => {
     const key = group.dataset.configKey;
     if (!key) return;
     group.querySelectorAll<HTMLButtonElement>('button[data-value]').forEach((button) => {
       button.addEventListener('click', () => {
+        registerPublicControlActivity();
         const value = button.dataset.value;
         if (value === undefined) return;
         const patch = publicConfigPatch(key, value);
@@ -661,16 +814,27 @@ function wirePublicControls(): void {
     });
   });
 
+  window.addEventListener('pointermove', registerPublicControlActivity, { passive: true });
+  window.addEventListener('pointerdown', registerPublicControlActivity, { passive: true });
+  window.addEventListener('touchstart', registerPublicControlActivity, { passive: true });
+  window.addEventListener('focusin', (e) => {
+    if (isPublicControlTarget(e.target)) registerPublicControlActivity();
+  });
+  window.addEventListener('focusout', (e) => {
+    if (isPublicControlTarget(e.target)) scheduleControlIdle();
+  });
+
   window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !publicControls.hidden) {
+    if (isDisplayRemoteKey(e.key)) registerPublicControlActivity();
+    if (e.key === 'Escape' && publicControls && !publicControls.hidden) {
       setControlsOpen(false);
-      controlsToggle.focus({ preventScroll: true });
+      controlsToggle?.focus({ preventScroll: true });
       e.preventDefault();
       e.stopPropagation();
     }
   }, { capture: true });
 
-  setControlsOpen(false);
+  setControlsOpen(false, false);
   syncPublicControls();
 }
 
@@ -719,6 +883,7 @@ function wireRemote(): void {
       default:
         return;
     }
+    registerPublicControlActivity();
     e.preventDefault();
   });
 }
@@ -734,8 +899,8 @@ function updateControlStates(): void {
   const configControlsReady = connected && receivedConfigEvent;
   const pauseControlReady = connected && receivedPausedEvent;
 
-  setPublicControlDisabled('#public-previous, #public-next', !connected);
-  setPublicControlDisabled('#public-play-pause', !pauseControlReady);
+  setPublicControlDisabled('[data-control="previous"], [data-control="next"], #control-previous, #control-next', !connected);
+  setPublicControlDisabled('[data-control="play-pause"], #control-pause', !pauseControlReady);
   setPublicControlDisabled('#public-settings button, #public-settings input, #public-settings select', !configControlsReady);
   if (publicControlsRoot) updateQuickActionDisabledStates(publicControlsRoot, configControlsReady);
   syncPublicControls();
