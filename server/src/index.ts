@@ -69,8 +69,9 @@ export async function buildApp(https?: TlsMaterial): Promise<FastifyInstance> {
   app.get('/admin', async (_req, reply) => reply.redirect('/admin/', 308));
 
   // The display SPA (and its assets) stays public so a TV / Chromecast needs no login.
-  // The admin password only gates the admin UI and the management/mutating APIs; private
-  // data is protected separately (media under /photos, and the control APIs).
+  // Do not add a root static-site auth redirect here: FRAME_ADMIN_PASSWORD gates the
+  // admin UI plus management/mutating APIs, while /photos is protected by the narrow
+  // media hook above and /ws remains reachable for display receivers.
 
   // Built SPAs, when available (after `npm run build`).
   if (existsSync(DISPLAY_DIST)) {
