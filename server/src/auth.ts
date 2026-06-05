@@ -78,3 +78,14 @@ export function clearCookie(): string {
 export function isAuthed(cookieHeader: string | undefined): boolean {
   return !authRequired() || verifyToken(cookieFromHeader(cookieHeader));
 }
+
+/**
+ * Authorize a request by the auth cookie OR a valid `frame_auth` query token. The query
+ * token lets a Cast receiver (which can't send our cookie) load protected `/photos` media
+ * via a handoff URL like `/photos/x.jpg?frame_auth=<token>`.
+ */
+export function isAuthedRequest(cookieHeader: string | undefined, frameAuthToken: string | undefined): boolean {
+  if (!authRequired()) return true;
+  if (verifyToken(cookieFromHeader(cookieHeader))) return true;
+  return frameAuthToken !== undefined && verifyToken(frameAuthToken);
+}

@@ -46,14 +46,19 @@ export async function buildApp(https?: TlsMaterial): Promise<FastifyInstance> {
   await app.register(fastifyMultipart, { limits: { fileSize: 1024 * 1024 * 1024 } });
   await app.register(fastifyWebsocket);
 
-  // Raw media assets (photos, previews, thumbnails, posters, videos). When the
-  // admin password is configured, protect these before the static plugin can
-  // serve private library files directly.
+  // Raw media assets (photos, previews, thumbnails, posters, videos). When the admin
+  // password is configured, protect these before the static plugin can serve private
+  // library files directly. Authorized by the admin cookie OR a valid `frame_auth` query
+  // token (so a Cast receiver, which can't send our cookie, can load media via a handoff URL).
   app.addHook('onRequest', async (req, reply) => {
     if (!auth.authRequired()) return;
-    const requestPath = req.url.split('?')[0];
+    const qIndex = req.url.indexOf('?');
+    const requestPath = qIndex >= 0 ? req.url.slice(0, qIndex) : req.url;
     if (!requestPath.startsWith('/photos/')) return;
-    if (!auth.isAuthed(req.headers.cookie)) {
+    const frameAuth = qIndex >= 0
+      ? new URLSearchParams(req.url.slice(qIndex + 1)).get('frame_auth') ?? undefined
+      : undefined;
+    if (!auth.isAuthedRequest(req.headers.cookie, frameAuth)) {
       return reply.code(401).send({ error: 'unauthorized' });
     }
   });
@@ -63,26 +68,9 @@ export async function buildApp(https?: TlsMaterial): Promise<FastifyInstance> {
   // without the trailing slash need a redirect before static assets are evaluated.
   app.get('/admin', async (_req, reply) => reply.redirect('/admin/', 308));
 
-  // Protect the public display SPA with the same admin cookie when auth is enabled.
-  // The admin/login UI, APIs, media files and websocket stay reachable; everything else
-  // under the root static site (including SPA fallback URLs and assets) redirects to login.
-  app.addHook('onRequest', async (req, reply) => {
-    if (!auth.authRequired() || auth.isAuthed(req.headers.cookie)) return;
-    if (req.method !== 'GET' && req.method !== 'HEAD') return;
-
-    const path = req.url.split('?')[0];
-    if (
-      path === '/admin'
-      || path.startsWith('/admin/')
-      || path.startsWith('/api/')
-      || path.startsWith('/photos/')
-      || path === '/ws'
-    ) {
-      return;
-    }
-
-    return reply.redirect('/admin/');
-  });
+  // The display SPA (and its assets) stays public so a TV / Chromecast needs no login.
+  // The admin password only gates the admin UI and the management/mutating APIs; private
+  // data is protected separately (media under /photos, and the control APIs).
 
   // Built SPAs, when available (after `npm run build`).
   if (existsSync(DISPLAY_DIST)) {
