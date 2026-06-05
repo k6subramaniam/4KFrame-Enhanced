@@ -16,8 +16,10 @@ import { initCastSender, isCastReady, castControl, toggleCastSession } from './c
 
 type Mode = 'cast' | 'view' | 'delete';
 type PeopleFilter = 'all' | 'has-faces' | 'similar-faces' | 'labeled';
+type SortMode = 'date-desc' | 'date-asc' | 'filename-asc' | 'filename-desc';
 let mode: Mode = 'cast';
 let peopleFilter: PeopleFilter = 'all';
+let sortMode: SortMode = 'date-desc';
 let labelFilter = '';
 let items: MediaItem[] = [];
 
@@ -31,6 +33,7 @@ const controlsBackdrop = document.getElementById('controls-backdrop') as HTMLEle
 let controlsOpen = false;
 const peopleFilterSelect = document.getElementById('people-filter') as HTMLSelectElement | null;
 const labelFilterSelect = document.getElementById('label-filter') as HTMLSelectElement | null;
+const sortSelect = document.getElementById('media-sort') as HTMLSelectElement | null;
 const peopleSummary = document.getElementById('people-summary') as HTMLElement | null;
 
 const HINTS: Record<Mode, string> = {
@@ -46,7 +49,7 @@ function fmtDuration(sec: number): string {
 
 function renderGrid(): void {
   grid.innerHTML = '';
-  const visibleItems = filterPeople(items);
+  const visibleItems = sortItems(filterPeople(items));
   renderPeopleSummary(visibleItems);
   for (const item of visibleItems) {
     const tile = document.createElement('div');
@@ -71,6 +74,21 @@ function renderGrid(): void {
     });
     grid.appendChild(tile);
   }
+}
+
+const filenameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+function sortItems(source: MediaItem[]): MediaItem[] {
+  return [...source].sort((a, b) => {
+    if (sortMode === 'date-asc' || sortMode === 'date-desc') {
+      const direction = sortMode === 'date-asc' ? 1 : -1;
+      const dateCompare = (a.createdAt - b.createdAt) * direction;
+      return dateCompare || filenameCollator.compare(a.file, b.file) || a.id.localeCompare(b.id);
+    }
+
+    const direction = sortMode === 'filename-asc' ? 1 : -1;
+    return (filenameCollator.compare(a.file, b.file) * direction) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id);
+  });
 }
 
 function filterPeople(source: MediaItem[]): MediaItem[] {
@@ -121,6 +139,7 @@ function escapeHtml(value: string): string {
 }
 
 function wirePeopleFilters(): void {
+  if (sortSelect) sortMode = (sortSelect.value || sortMode) as SortMode;
   peopleFilterSelect?.addEventListener('change', () => {
     peopleFilter = (peopleFilterSelect.value || 'all') as PeopleFilter;
     syncPeopleLabels();
@@ -128,6 +147,10 @@ function wirePeopleFilters(): void {
   });
   labelFilterSelect?.addEventListener('change', () => {
     labelFilter = labelFilterSelect.value;
+    renderGrid();
+  });
+  sortSelect?.addEventListener('change', () => {
+    sortMode = (sortSelect.value || 'date-desc') as SortMode;
     renderGrid();
   });
 }
