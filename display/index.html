@@ -44,6 +44,28 @@
         font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #fff; }
       #public-controls, #public-controls * { box-sizing: border-box; }
       #public-controls button, #public-controls input, #public-controls select { font: inherit; }
+      #public-controls button:focus-visible, #public-controls input:focus-visible, #public-controls select:focus-visible {
+        outline: 3px solid var(--display-ring); outline-offset: 3px; box-shadow: 0 0 0 6px rgba(14,165,233,0.22);
+      }
+      #public-bottom-controller { position: absolute; left: 50%; bottom: max(1.25rem, env(safe-area-inset-bottom));
+        display: flex; align-items: center; justify-content: center; gap: 0.8rem; padding: 0.7rem;
+        min-width: min(28rem, calc(100vw - 2rem)); pointer-events: auto; cursor: auto;
+        border: 1px solid rgba(255,255,255,0.14); border-radius: 999px;
+        background: linear-gradient(180deg, rgba(15,23,42,0.78), rgba(3,7,18,0.66));
+        box-shadow: 0 18px 54px rgba(0,0,0,0.48); backdrop-filter: blur(18px);
+        opacity: 0.96; transform: translate(-50%, 0) scale(1); transition: opacity 220ms ease, transform 220ms ease, filter 220ms ease;
+      }
+      #public-bottom-controller.is-dim { opacity: 0.34; filter: saturate(0.84); transform: translate(-50%, 0.35rem) scale(0.98); }
+      #public-bottom-controller.is-hidden { opacity: 0; pointer-events: none; transform: translate(-50%, 1.1rem) scale(0.96); }
+      #public-bottom-controller:focus-within { opacity: 1; filter: none; transform: translate(-50%, 0) scale(1); }
+      .public-playback-button { display: inline-grid; place-items: center; min-width: 3.5rem; min-height: 3.5rem;
+        border: 1px solid rgba(255,255,255,0.18); border-radius: 999px; color: #fff;
+        background: rgba(255,255,255,0.1); cursor: auto; font-size: 1.35rem; line-height: 1;
+        text-shadow: 0 1px 6px rgba(0,0,0,0.45); transition: background 160ms ease, border-color 160ms ease, transform 160ms ease, opacity 160ms ease;
+      }
+      .public-playback-button:hover, .public-playback-button:focus-visible { background: rgba(255,255,255,0.22); border-color: rgba(255,255,255,0.44); transform: translateY(-1px); }
+      .public-playback-button:disabled { opacity: 0.46; cursor: not-allowed; }
+      .public-playback-button.primary { min-width: 4.25rem; min-height: 4.25rem; font-size: 1.55rem; background: rgba(56,189,248,0.22); border-color: rgba(125,211,252,0.46); }
       #public-controls-toggle { position: absolute; top: max(1rem, env(safe-area-inset-top));
         right: max(1rem, env(safe-area-inset-right)); pointer-events: auto; cursor: auto; border: 1px solid rgba(255,255,255,0.16);
         border-radius: 999px; padding: 0.48rem 0.72rem; color: rgba(255,255,255,0.82); background: rgba(10,10,14,0.18);
@@ -94,7 +116,10 @@
         #public-settings { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       }
       @media (max-width: 700px) {
-        #public-controls-toggle { top: auto; bottom: max(1rem, env(safe-area-inset-bottom)); right: 50%; transform: translateX(50%); }
+        #public-bottom-controller { gap: 0.55rem; min-width: auto; width: min(24rem, calc(100vw - 1.25rem)); padding: 0.55rem; }
+        .public-playback-button { min-width: 3rem; min-height: 3rem; font-size: 1.15rem; }
+        .public-playback-button.primary { min-width: 3.65rem; min-height: 3.65rem; font-size: 1.35rem; }
+        #public-controls-toggle { top: auto; bottom: calc(max(1rem, env(safe-area-inset-bottom)) + 5.35rem); right: 50%; transform: translateX(50%); }
         #public-controls-toggle:hover, #public-controls-toggle:focus-visible { transform: translateX(50%) translateY(-1px); }
         #public-control-panel { position: absolute; inset: auto 0 0 0; width: auto; max-height: 58vh; border-radius: 1.25rem 1.25rem 0 0;
           padding: 1rem max(1rem, env(safe-area-inset-right)) max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
@@ -135,6 +160,11 @@
       <div id="qr" class="overlay hidden"><img alt="Scan to manage" /></div>
       <div id="status" class="overlay">Connecting…</div>
       <section id="public-controls" aria-label="Public slideshow controls">
+        <nav id="public-bottom-controller" class="is-hidden" aria-label="Playback controls">
+          <button id="public-bottom-previous" class="public-playback-button" type="button" data-control="previous" aria-label="Previous item">‹</button>
+          <button id="public-bottom-play-pause" class="public-playback-button primary" type="button" data-control="play-pause" aria-label="Play or pause slideshow" aria-pressed="false">⏯</button>
+          <button id="public-bottom-next" class="public-playback-button" type="button" data-control="next" aria-label="Next item">›</button>
+        </nav>
         <button id="public-controls-toggle" type="button" aria-controls="public-control-panel" aria-expanded="false">Controls</button>
         <aside id="public-control-panel" aria-label="Slideshow controls" hidden>
           <div class="public-control-header">
