@@ -357,7 +357,7 @@ const controlsToggle = getElementByIds<HTMLButtonElement>('public-controls-toggl
 const publicControlsRoot = document.getElementById('public-controls') as HTMLElement | null;
 const publicSettingsRoot = document.getElementById('public-settings') as HTMLElement | null;
 const publicControls = getElementByIds<HTMLElement>('public-control-panel', 'public-controls');
-const pauseControl = getElementByIds<HTMLButtonElement>('public-play-pause', 'control-pause');
+const pauseControls = Array.from(document.querySelectorAll<HTMLButtonElement>('#public-play-pause, #public-bottom-play-pause, #control-pause'));
 
 function isPublicControlTarget(target: EventTarget | null): boolean {
   return target instanceof Element && Boolean(target.closest('#public-controls, #public-control-panel, #public-controls-toggle, #controls-toggle'));
@@ -454,11 +454,11 @@ function renderPublicSettings(): void {
 }
 
 function syncPublicControls(): void {
-  if (pauseControl) {
+  pauseControls.forEach((pauseControl) => {
     pauseControl.textContent = paused ? '▶' : '⏸';
     pauseControl.setAttribute('aria-label', paused ? 'Resume slideshow' : 'Pause slideshow');
     pauseControl.setAttribute('aria-pressed', String(paused));
-  }
+  });
 
   publicControls?.querySelectorAll<HTMLSelectElement>('select[data-config-key]').forEach((select) => {
     const key = select.dataset.configKey as PublicConfigKey | undefined;
@@ -482,16 +482,78 @@ function syncPublicControls(): void {
   });
 }
 
+const PUBLIC_CONTROLS_DIM_DELAY_MS = 2600;
+const PUBLIC_CONTROLS_HIDE_DELAY_MS = 8000;
+let publicControlsDimTimer: ReturnType<typeof setTimeout> | undefined;
+let publicControlsHideTimer: ReturnType<typeof setTimeout> | undefined;
+
+function publicControlsContainFocus(): boolean {
+  return Boolean(publicControlsRoot && document.activeElement instanceof Element && publicControlsRoot.contains(document.activeElement));
+}
+
+function clearPublicControlsIdleTimers(): void {
+  clearTimeout(publicControlsDimTimer);
+  clearTimeout(publicControlsHideTimer);
+}
+
+function setPublicControlsVisibilityState(state: 'visible' | 'dimmed' | 'hidden'): void {
+  if (!publicControlsRoot) return;
+  publicControlsRoot.classList.toggle('is-dimmed', state === 'dimmed');
+  publicControlsRoot.classList.toggle('is-hidden', state === 'hidden');
+}
+
+function resetPublicControlsIdleTimers(): void {
+  if (!publicControlsRoot) return;
+  clearPublicControlsIdleTimers();
+  setPublicControlsVisibilityState('visible');
+
+  publicControlsDimTimer = window.setTimeout(() => {
+    if (publicControlsContainFocus()) {
+      resetPublicControlsIdleTimers();
+      return;
+    }
+    setPublicControlsVisibilityState('dimmed');
+  }, PUBLIC_CONTROLS_DIM_DELAY_MS);
+
+  publicControlsHideTimer = window.setTimeout(() => {
+    if (publicControlsContainFocus()) {
+      resetPublicControlsIdleTimers();
+      return;
+    }
+    setPublicControlsVisibilityState('hidden');
+  }, PUBLIC_CONTROLS_HIDE_DELAY_MS);
+}
+
+function wirePublicControlsIdleTimer(): void {
+  if (!publicControlsRoot) return;
+  const activityEvents: Array<keyof WindowEventMap> = ['pointermove', 'pointerdown', 'touchstart', 'keydown'];
+  activityEvents.forEach((eventName) => {
+    window.addEventListener(eventName, resetPublicControlsIdleTimers, { capture: true, passive: true });
+  });
+  publicControlsRoot.addEventListener('focusin', resetPublicControlsIdleTimers);
+  publicControlsRoot.addEventListener('focusout', resetPublicControlsIdleTimers);
+  resetPublicControlsIdleTimers();
+}
+
 function wirePublicControls(): void {
   if (!controlsToggle || !publicControls) return;
 
+  wirePublicControlsIdleTimer();
+
   controlsToggle.addEventListener('click', () => {
+    resetPublicControlsIdleTimers();
     setControlsOpen(publicControls.hidden);
   });
 
-  getElementByIds<HTMLButtonElement>('public-previous', 'control-previous')?.addEventListener('click', () => sendControl({ type: 'previous' }));
-  getElementByIds<HTMLButtonElement>('public-next', 'control-next')?.addEventListener('click', () => sendControl({ type: 'next' }));
-  pauseControl?.addEventListener('click', () => sendControl({ type: paused ? 'resume' : 'pause' }));
+  document.querySelectorAll<HTMLButtonElement>('#public-previous, #public-bottom-previous, #control-previous').forEach((button) => {
+    button.addEventListener('click', () => sendControl({ type: 'previous' }));
+  });
+  document.querySelectorAll<HTMLButtonElement>('#public-next, #public-bottom-next, #control-next').forEach((button) => {
+    button.addEventListener('click', () => sendControl({ type: 'next' }));
+  });
+  pauseControls.forEach((pauseControl) => {
+    pauseControl.addEventListener('click', () => sendControl({ type: paused ? 'resume' : 'pause' }));
+  });
 
   publicControls.querySelectorAll<HTMLSelectElement>('select[data-config-key]').forEach((select) => {
     select.addEventListener('change', () => {
@@ -593,8 +655,8 @@ function updateControlStates(): void {
   const configControlsReady = connected && receivedConfigEvent;
   const pauseControlReady = connected && receivedPausedEvent;
 
-  setPublicControlDisabled('#public-previous, #public-next', !connected);
-  setPublicControlDisabled('#public-play-pause', !pauseControlReady);
+  setPublicControlDisabled('#public-previous, #public-bottom-previous, #public-next, #public-bottom-next', !connected);
+  setPublicControlDisabled('#public-play-pause, #public-bottom-play-pause', !pauseControlReady);
   setPublicControlDisabled('#public-settings button, #public-settings input, #public-settings select', !configControlsReady);
   syncPublicControls();
 }
