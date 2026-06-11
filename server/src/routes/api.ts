@@ -8,10 +8,13 @@ import { promises as fs } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import QRCode from 'qrcode';
 import {
+  FILL_MODES,
+  FRAME_ASPECTS,
   fromApiData,
   toApiData,
   type ApiDataPayload,
   type CurrentResponse,
+  type MediaFramingOverride,
   type MediaItem,
 } from '@4kframe/shared';
 import { MEDIA_DIR, DATA_DIR } from '../env.js';
@@ -22,6 +25,7 @@ import {
   getItem,
   addItem,
   updateItem,
+  updateItemFraming,
   removeItem,
 } from '../store.js';
 import { ingestImage } from '../media/images.js';
@@ -137,6 +141,35 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
     refresh();
     hub.emitEvent({ type: 'library', items: listItems() });
     return { ok: true };
+  });
+
+
+
+  // --- Per-item framing overrides ---
+  app.patch('/api/media/:id/framing', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const current = getItem(id);
+    if (!current) return reply.code(404).send({ error: 'not found' });
+    const patch = sanitizeFramingPatch((req.body ?? {}) as Record<string, unknown>);
+    if (!patch.ok) return reply.code(400).send({ error: patch.error });
+    const nextFraming = { ...(current.framing ?? {}), ...patch.value };
+    for (const [key, value] of Object.entries(nextFraming)) {
+      if (value === undefined) delete nextFraming[key as keyof MediaFramingOverride];
+    }
+    const updated = await updateItemFraming(id, nextFraming);
+    refresh();
+    hub.emitEvent({ type: 'library', items: listItems() });
+    if (updated) hub.emitEvent({ type: 'show', items: getCurrent(), interactive: true });
+    return { ok: true, item: updated };
+  });
+
+  app.delete('/api/media/:id/framing', async (req, reply) => {
+    const updated = await updateItemFraming((req.params as { id: string }).id, undefined);
+    if (!updated) return reply.code(404).send({ error: 'not found' });
+    refresh();
+    hub.emitEvent({ type: 'library', items: listItems() });
+    hub.emitEvent({ type: 'show', items: getCurrent(), interactive: true });
+    return { ok: true, item: updated };
   });
 
   // --- Photo / preview redirects by id (original) ---
@@ -280,6 +313,45 @@ async function ingestUpload(buf: Buffer, filename: string, mimetype?: string): P
   await addItem(item);
   enqueueTranscode(item);
   return item;
+}
+
+
+function sanitizeFramingPatch(body: Record<string, unknown>): { ok: true; value: MediaFramingOverride } | { ok: false; error: string } {
+  const value: MediaFramingOverride = {};
+  const known = new Set(['fillMode', 'frameAspect', 'zoom', 'panX', 'panY', 'smartFraming']);
+  for (const key of Object.keys(body)) {
+    if (!known.has(key)) return { ok: false, error: `unknown framing field: ${key}` };
+  }
+
+  if (body.fillMode !== undefined) {
+    if (body.fillMode === null) value.fillMode = undefined;
+    else if (typeof body.fillMode === 'string' && (FILL_MODES as readonly string[]).includes(body.fillMode)) value.fillMode = body.fillMode as MediaFramingOverride['fillMode'];
+    else return { ok: false, error: 'invalid fillMode' };
+  }
+  if (body.frameAspect !== undefined) {
+    if (body.frameAspect === null) value.frameAspect = undefined;
+    else if (typeof body.frameAspect === 'string' && (FRAME_ASPECTS as readonly string[]).includes(body.frameAspect)) value.frameAspect = body.frameAspect as MediaFramingOverride['frameAspect'];
+    else return { ok: false, error: 'invalid frameAspect' };
+  }
+  for (const key of ['zoom', 'panX', 'panY'] as const) {
+    const raw = body[key];
+    if (raw === undefined) continue;
+    if (raw === null) {
+      value[key] = undefined;
+      continue;
+    }
+    const numberValue = typeof raw === 'number' ? raw : Number(raw);
+    if (!Number.isFinite(numberValue)) return { ok: false, error: `invalid ${key}` };
+    if (key === 'zoom') value.zoom = Math.max(1, Math.min(3, numberValue));
+    else value[key] = Math.max(-1, Math.min(1, numberValue));
+  }
+  if (body.smartFraming !== undefined) {
+    if (body.smartFraming === null) value.smartFraming = undefined;
+    else if (typeof body.smartFraming === 'boolean') value.smartFraming = body.smartFraming;
+    else if (body.smartFraming === 'true' || body.smartFraming === 'false') value.smartFraming = body.smartFraming === 'true';
+    else return { ok: false, error: 'invalid smartFraming' };
+  }
+  return { ok: true, value };
 }
 
 async function withStorage() {

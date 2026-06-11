@@ -13,6 +13,7 @@ import path from 'node:path';
 import {
   defaultConfig,
   type FrameConfig,
+  type MediaFramingOverride,
   type MediaItem,
 } from '@4kframe/shared';
 import { DB_FILE, DATA_DIR, MEDIA_DIR } from './env.js';
@@ -107,6 +108,22 @@ export async function updateItem(id: string, patch: Partial<MediaItem>): Promise
   const item = db().items.find((i) => i.id === id);
   if (!item) return undefined;
   Object.assign(item, patch);
+  await flush();
+  return item;
+}
+
+/** Replace or clear the per-item framing override for one media item. */
+export async function updateItemFraming(
+  id: string,
+  framing: MediaFramingOverride | undefined,
+): Promise<MediaItem | undefined> {
+  const item = db().items.find((i) => i.id === id);
+  if (!item) return undefined;
+  if (framing && Object.keys(framing).length > 0) {
+    item.framing = framing;
+  } else {
+    delete item.framing;
+  }
   await flush();
   return item;
 }

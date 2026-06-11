@@ -8,8 +8,22 @@
  *   /api/upload, /api/google/*, /api/video/:id, WebSocket /ws
  */
 
-import type { ApiDataPayload, FrameConfig } from './config.js';
+import type { ApiDataPayload, FillMode, FrameAspect, FrameConfig } from './config.js';
 import type { MediaKind } from './filename.js';
+
+
+/** Per-media framing controls that override the global frame settings for one item. */
+export interface MediaFramingOverride {
+  fillMode?: FillMode;
+  frameAspect?: FrameAspect;
+  /** Manual zoom factor (1 = none … 3 = 3×). */
+  zoom?: number;
+  /** Manual pan -1..1 (0 = centered), applied within any overflow. */
+  panX?: number;
+  panY?: number;
+  /** Bias crops toward detected face boxes unless manual pan/zoom is active. */
+  smartFraming?: boolean;
+}
 
 export interface FaceBox {
   x: number;
@@ -56,6 +70,8 @@ export interface MediaItem {
   transcoding?: boolean;
   /** Whether the item is included in automatic slideshow rotation (default true). */
   enabled?: boolean;
+  /** Optional per-item framing overrides merged over the global frame config at render time. */
+  framing?: MediaFramingOverride;
 }
 
 /** Response of `/api/current` — the active item(s) plus the loose config payload. */

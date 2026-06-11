@@ -1,6 +1,6 @@
 /** Thin REST client for the admin PWA. */
 
-import type { ApiDataPayload, MediaItem } from '@4kframe/shared';
+import type { ApiDataPayload, MediaFramingOverride, MediaItem } from '@4kframe/shared';
 
 export async function fetchItems(): Promise<MediaItem[]> {
   const res = await fetch('/api/thumbs');
@@ -25,6 +25,24 @@ export async function castItem(id: string): Promise<void> {
 
 export async function deleteItem(id: string): Promise<void> {
   await fetch(`/api/delete/${id}`);
+}
+
+export async function updateItemFraming(id: string, framing: MediaFramingOverride): Promise<MediaItem> {
+  const res = await fetch(`/api/media/${encodeURIComponent(id)}/framing`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(framing),
+  });
+  if (!res.ok) throw new Error(`failed to update item framing (${res.status})`);
+  const json = (await res.json()) as { item: MediaItem };
+  return json.item;
+}
+
+export async function clearItemFraming(id: string): Promise<MediaItem> {
+  const res = await fetch(`/api/media/${encodeURIComponent(id)}/framing`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(`failed to clear item framing (${res.status})`);
+  const json = (await res.json()) as { item: MediaItem };
+  return json.item;
 }
 
 export interface AuthState { required: boolean; authed: boolean; }

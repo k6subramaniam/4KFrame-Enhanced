@@ -16,7 +16,16 @@
  *                cropped) — the premium digital-frame look.
  */
 
-import { aspectRatio, faceCenterToPan, type FillMode, type FrameAspect, type MediaItem } from '@4kframe/shared';
+import { aspectRatio, faceCenterToPan, type FillMode, type FrameAspect, type FrameConfig, type MediaItem } from '@4kframe/shared';
+
+export type FramingConfig = Pick<FrameConfig, 'fillMode' | 'frameAspect' | 'zoom' | 'panX' | 'panY' | 'smartFraming'>;
+
+export function itemFramingConfig(globalConfig: FramingConfig, item: MediaItem | undefined): FramingConfig {
+  return {
+    ...globalConfig,
+    ...(item?.framing ?? {}),
+  };
+}
 
 export interface ComposeOptions {
   /** Screen size in device pixels. */
@@ -173,13 +182,18 @@ export async function compose(items: MediaItem[], opts: ComposeOptions): Promise
   if (valid.length >= 2) {
     // Dual layout: split the content rect along its longer axis (side-by-side or stacked).
     const [a, b] = splitRect(rect);
-    drawTransformed(ctx, valid[0].img, a, smartTransform(valid[0].item, valid[0].img, a, { fit: 'cover', zoom: 1, panX: 0, panY: 0 }, opts.smartFraming));
-    drawTransformed(ctx, valid[1].img, b, smartTransform(valid[1].item, valid[1].img, b, { fit: 'cover', zoom: 1, panX: 0, panY: 0 }, opts.smartFraming));
+    const first = itemFramingConfig({ fillMode: opts.fillMode, frameAspect: opts.aspect, zoom: opts.zoom, panX: opts.panX, panY: opts.panY, smartFraming: opts.smartFraming }, valid[0].item);
+    const second = itemFramingConfig({ fillMode: opts.fillMode, frameAspect: opts.aspect, zoom: opts.zoom, panX: opts.panX, panY: opts.panY, smartFraming: opts.smartFraming }, valid[1].item);
+    drawTransformed(ctx, valid[0].img, a, smartTransform(valid[0].item, valid[0].img, a, { fit: 'cover', zoom: first.zoom, panX: first.panX, panY: first.panY }, first.smartFraming));
+    drawTransformed(ctx, valid[1].img, b, smartTransform(valid[1].item, valid[1].img, b, { fit: 'cover', zoom: second.zoom, panX: second.panX, panY: second.panY }, second.smartFraming));
   } else {
     // blur shows the sharp image "contained" over the blurred background; others use their mode.
-    const fit = opts.fillMode === 'blur' ? 'contain' : opts.fillMode;
-    const transform = smartTransform(valid[0].item, valid[0].img, rect, { fit, zoom: opts.zoom, panX: opts.panX, panY: opts.panY }, opts.smartFraming);
-    drawTransformed(ctx, valid[0].img, rect, transform);
+    const itemConfig = itemFramingConfig({ fillMode: opts.fillMode, frameAspect: opts.aspect, zoom: opts.zoom, panX: opts.panX, panY: opts.panY, smartFraming: opts.smartFraming }, valid[0].item);
+    const itemRect = contentRect(canvas.width, canvas.height, itemConfig.frameAspect);
+    const fit = itemConfig.fillMode === 'blur' ? 'contain' : itemConfig.fillMode;
+    if (itemConfig.fillMode === 'blur' && opts.fillMode !== 'blur') drawBlurredBackground(ctx, valid[0].img, canvas.width, canvas.height);
+    const transform = smartTransform(valid[0].item, valid[0].img, itemRect, { fit, zoom: itemConfig.zoom, panX: itemConfig.panX, panY: itemConfig.panY }, itemConfig.smartFraming);
+    drawTransformed(ctx, valid[0].img, itemRect, transform);
   }
   return canvas;
 }
