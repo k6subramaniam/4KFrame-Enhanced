@@ -645,18 +645,6 @@ function wireQuickActions(root: ParentNode): void {
   });
 }
 
-function syncQuickActions(root: ParentNode): void {
-  quickActionButtons(root).forEach((button) => {
-    const action = button.dataset.quickAction;
-    if (!isQuickAction(action)) return;
-    const selected = quickActionSelected(action);
-    button.classList.toggle('is-selected', selected);
-    if (isQuickActionToggle(action)) {
-      button.setAttribute('aria-pressed', String(selected));
-    }
-  });
-}
-
 function updateQuickActionDisabledStates(root: ParentNode, configControlsReady: boolean): void {
   quickActionButtons(root).forEach((button) => {
     const action = button.dataset.quickAction;
