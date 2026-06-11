@@ -200,7 +200,7 @@ function smartVideoObjectPosition(item: MediaItem, r: { w: number; h: number }, 
 
 function layoutVideo(item: MediaItem): void {
   const r = contentRect(window.innerWidth, window.innerHeight, config.frameAspect);
-  const fillMode = config.fillMode === 'blur' ? 'contain' : config.fillMode;
+  const fillMode = effectiveVideoFit(config.fillMode);
   const zoom = clampN(config.zoom, MIN_ZOOM, MAX_ZOOM);
   const fitted = fittedMediaSize(item, r.w, r.h, fillMode, zoom);
   const pan = smartVideoObjectPosition(item, r, fillMode);
@@ -663,15 +663,7 @@ function syncPublicControls(): void {
     });
   });
 
-  publicControls?.querySelectorAll<HTMLButtonElement>('button[data-quick-action]').forEach((button) => {
-    const action = button.dataset.quickAction as QuickAction | undefined;
-    if (!action) return;
-    const selected = quickActionSelected(action);
-    button.classList.toggle('is-selected', selected);
-    if (action === 'fill-cover' || action === 'fill-contain' || action === 'smart-crop') {
-      button.setAttribute('aria-pressed', String(selected));
-    }
-  });
+  if (publicControls) syncQuickActions(publicControls);
 }
 
 function wirePublicControls(): void {
