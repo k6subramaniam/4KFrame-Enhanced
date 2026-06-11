@@ -164,6 +164,13 @@ function handleVideoError(item: MediaItem): void {
   }, 2500);
 }
 
+/** Position the <video> into the aspect content rect and set its backdrop. */
+function effectiveVideoFit(fillMode: FillMode): 'cover' | 'contain' | 'stretch' {
+  // Blur mode keeps the sharp foreground video contained above the blurred backdrop.
+  if (fillMode === 'blur') return 'contain';
+  return fillMode;
+}
+
 function fittedMediaSize(
   item: MediaItem,
   frameW: number,
