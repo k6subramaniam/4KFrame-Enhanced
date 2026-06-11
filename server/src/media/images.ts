@@ -15,6 +15,7 @@ import path from 'node:path';
 import { buildFilename, newIdentity, type MediaItem } from '@4kframe/shared';
 import { MEDIA_DIR } from '../env.js';
 import { detectFacesInImageBuffer } from './faceMatch.js';
+import { detectFocusRegionsInImageBuffer } from './focusRegions.js';
 
 export const MAIN_MAX = 3840;
 export const PREVIEW_MAX = 858;
@@ -84,6 +85,7 @@ export async function ingestImage(
   const thumbName = sharp ? variantName(identity, await dimsFor(sharp, buf, THUMB_MAX)) : mainName;
 
   const faces = await detectFacesInImageBuffer(faceInput);
+  const focusRegions = await detectFocusRegionsInImageBuffer(faceInput, faces);
 
   const item: MediaItem = {
     id: identity,
@@ -97,6 +99,7 @@ export async function ingestImage(
     source,
     caption,
     ...(faces ? { faces } : {}),
+    ...(focusRegions ? { focusRegions } : {}),
   };
   return { item };
 }
