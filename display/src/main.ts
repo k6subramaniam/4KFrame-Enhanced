@@ -149,7 +149,7 @@ async function renderVideo(item: MediaItem): Promise<void> {
   video.onerror = () => handleVideoError(item);
   video.src = `/photos/${item.file}`;
   video.classList.add('visible');
-  try { await video.play(); } catch { /* autoplay may require muted; already muted */ }
+  try { await video.play(); } catch { /* Browser autoplay policy may require user interaction for audible video. */ }
   setCaption([item], config);
 }
 

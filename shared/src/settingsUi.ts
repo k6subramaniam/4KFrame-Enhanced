@@ -27,6 +27,8 @@ export interface SettingsUiAdapter {
 export interface SettingsPanelMetadata {
   id: string;
   title: string;
+  /** Admin-only panels are intentionally omitted from the public TV controls. */
+  adminOnly?: boolean;
   render(config: SettingsConfigSource): string;
 }
 
@@ -215,6 +217,19 @@ export const SHARED_SETTINGS_PANELS: SettingsPanelMetadata[] = [
     },
   },
   {
+    id: 'video-audio',
+    title: 'Video Audio',
+    adminOnly: true,
+    render: (config) => {
+      const videoMuted = bool(config, 'videoMuted', false);
+      return `${segmentButtons('videoMuted', [
+        { label: 'Sound on', value: 'false', active: !videoMuted },
+        { label: 'Muted', value: 'true', active: videoMuted },
+      ])}
+      <div class="muted" style="margin-top:.4rem">Choose whether videos play through the TV speakers.</div>`;
+    },
+  },
+  {
     id: 'photo-period',
     title: 'Photo Period',
     render: (config) => {
@@ -337,8 +352,29 @@ export interface RenderSharedSettingsOptions {
   panels?: SettingsPanelMetadata[];
 }
 
+export function settingsPanelsForCapabilities(
+  panels: SettingsPanelMetadata[],
+  capabilities: SettingsUiCapabilities = {},
+): SettingsPanelMetadata[] {
+  return panels.filter((panel) => !panel.adminOnly || capabilities.showAdminOnlyControls === true);
+}
+
+export function settingsSelectionPatch(key: string, value: string): SettingsPatch {
+  if (key === 'effect') return { transitionPeriod: value };
+  if (key === 'videoMuted') return { videoMuted: value === 'true' };
+  return { [key]: value };
+}
+
+export async function applySettingsSelection(
+  adapter: SettingsUiAdapter,
+  key: string,
+  value: string,
+): Promise<void> {
+  await adapter.updateConfig(settingsSelectionPatch(key, value));
+}
+
 export function renderSharedSettings(root: HTMLElement, adapter: SettingsUiAdapter, options: RenderSharedSettingsOptions = {}): void {
-  const panels = options.panels ?? SHARED_SETTINGS_PANELS;
+  const panels = settingsPanelsForCapabilities(options.panels ?? SHARED_SETTINGS_PANELS, adapter.capabilities);
   const config = adapter.getConfig();
   root.innerHTML = panels
     .map((p) => settingsPanel(p.id, p.title, p.render(config), options.isPanelOpen?.(p.id) ?? true))
@@ -373,7 +409,7 @@ export function wireSharedSettings(root: HTMLElement, adapter: SettingsUiAdapter
         if (value === undefined) return;
         group.querySelectorAll('button').forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
-        await adapter.updateConfig(key === 'effect' ? { transitionPeriod: value } : { [key]: value });
+        await applySettingsSelection(adapter, key, value);
       });
     });
   });

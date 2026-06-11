@@ -14,6 +14,25 @@ test('defaultConfig uses both photos and videos for playback', () => {
   assert.equal(defaultConfig().playbackMediaMode, 'both');
 });
 
+test('defaultConfig enables video sound for normal TV playback', () => {
+  assert.equal(defaultConfig().videoMuted, false);
+});
+
+test('videoMuted serialises and parses both muted and audible choices', () => {
+  const base = defaultConfig();
+
+  for (const videoMuted of [true, false]) {
+    const payload = toApiData({ ...base, videoMuted });
+    assert.equal(payload.videoMuted, String(videoMuted));
+    assert.equal(fromApiData(base, payload).videoMuted, videoMuted);
+  }
+});
+
+test('fromApiData preserves the persisted videoMuted choice when a patch omits it', () => {
+  assert.equal(fromApiData({ ...defaultConfig(), videoMuted: true }, {}).videoMuted, true);
+  assert.equal(fromApiData({ ...defaultConfig(), videoMuted: false }, {}).videoMuted, false);
+});
+
 test('toApiData serialises fillMode/frameAspect and mirrors legacy frameFill', () => {
   const blur: FrameConfig = { ...defaultConfig(), fillMode: 'blur', frameAspect: '4:3' };
   const d = toApiData(blur);

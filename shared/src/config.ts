@@ -166,7 +166,7 @@ export function defaultConfig(): FrameConfig {
     frameHeight: 2160,
     showInfo: true,
     showQr: true,
-    videoMuted: true,
+    videoMuted: false,
     videoLoop: true,
     googlePhotos: {
       connected: false,
