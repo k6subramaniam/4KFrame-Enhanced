@@ -164,13 +164,6 @@ function handleVideoError(item: MediaItem): void {
   }, 2500);
 }
 
-/** Position the <video> into the aspect content rect and set its backdrop. */
-function effectiveVideoFit(fillMode: FillMode): 'cover' | 'contain' | 'stretch' {
-  // Blur mode keeps the sharp foreground video contained above the blurred backdrop.
-  if (fillMode === 'blur') return 'contain';
-  return fillMode;
-}
-
 function fittedMediaSize(
   item: MediaItem,
   frameW: number,
@@ -635,18 +628,6 @@ function wireQuickActions(root: ParentNode): void {
   });
 }
 
-function syncQuickActions(root: ParentNode): void {
-  quickActionButtons(root).forEach((button) => {
-    const action = button.dataset.quickAction;
-    if (!isQuickAction(action)) return;
-    const selected = quickActionSelected(action);
-    button.classList.toggle('is-selected', selected);
-    if (isQuickActionToggle(action)) {
-      button.setAttribute('aria-pressed', String(selected));
-    }
-  });
-}
-
 function updateQuickActionDisabledStates(root: ParentNode, configControlsReady: boolean): void {
   quickActionButtons(root).forEach((button) => {
     const action = button.dataset.quickAction;
@@ -711,7 +692,16 @@ function wirePublicControls(): void {
     });
   });
 
-  if (publicControls) wireQuickActions(publicControls);
+  if (publicControls) {
+    publicControls.querySelectorAll<HTMLButtonElement>('button[data-quick-action]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const action = button.dataset.quickAction as QuickAction | undefined;
+        if (action) applyQuickAction(action);
+      });
+    });
+
+    wireQuickActions(publicControls);
+  }
 
   publicControlsRoot.querySelectorAll<HTMLSelectElement>('select[data-config-key]').forEach((select) => {
     select.addEventListener('change', () => {
