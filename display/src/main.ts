@@ -24,6 +24,7 @@ import { GLRenderer } from './gl.js';
 import { compose, contentRect } from './compositor.js';
 import { applyOverlays, setCaption, setStatus } from './overlays.js';
 import { initCastReceiver } from './cast.js';
+import { syncVideoPlaybackProperties } from './videoPlayback.js';
 
 const canvas = document.getElementById('gl') as HTMLCanvasElement;
 const video = document.getElementById('video') as HTMLVideoElement;
@@ -140,16 +141,34 @@ function startMotion(): void {
   });
 }
 
+function reportPlaybackBlocked(error: unknown): void {
+  console.error('Video playback was blocked.', error);
+  setStatus('Video playback was blocked. Press Play to resume.');
+}
+
+/** Keep the active video element aligned with persisted playback settings. */
+function syncActiveVideoPlaybackProperties(restartAfterUnmute = false): void {
+  syncVideoPlaybackProperties(video, {
+    muted: config.videoMuted,
+    loop: config.videoLoop || holding,
+    restartAfterUnmute: restartAfterUnmute && showingVideo && !paused,
+    onPlaybackRejected: reportPlaybackBlocked,
+  });
+}
+
 async function renderVideo(item: MediaItem): Promise<void> {
   showingVideo = true;
   lastVideoItem = item;
   layoutVideo(item);
-  video.muted = config.videoMuted;
-  video.loop = config.videoLoop || holding;
+  syncActiveVideoPlaybackProperties();
   video.onerror = () => handleVideoError(item);
   video.src = `/photos/${item.file}`;
   video.classList.add('visible');
-  try { await video.play(); } catch { /* autoplay may require muted; already muted */ }
+  try {
+    await video.play();
+  } catch (error) {
+    reportPlaybackBlocked(error);
+  }
   setCaption([item], config);
 }
 
@@ -270,6 +289,7 @@ function handleEvent(event: FrameEvent): void {
     case 'config':
       receivedConfigEvent = true;
       config = event.config;
+      syncActiveVideoPlaybackProperties(true);
       applyOverlays(config);
       renderPublicSettings();
       updateControlStates();
@@ -286,7 +306,7 @@ function handleEvent(event: FrameEvent): void {
       paused = event.paused;
       if (showingVideo) {
         if (paused) video.pause();
-        else video.play().catch(() => undefined);
+        else video.play().catch(reportPlaybackBlocked);
       } else if (paused) {
         motionAnim?.pause();
       } else {
@@ -297,7 +317,7 @@ function handleEvent(event: FrameEvent): void {
       break;
     case 'hold':
       holding = event.holding;
-      if (showingVideo) video.loop = config.videoLoop || holding;
+      if (showingVideo) syncActiveVideoPlaybackProperties();
       setStatus(statusText());
       break;
     case 'log':

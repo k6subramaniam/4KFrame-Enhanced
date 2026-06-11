@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8"><title>RUNNING</title></head>
+  <body>
+    <canvas id="gl"></canvas>
+    <div id="video-bg"></div>
+    <video id="video" muted playsinline></video>
+    <div id="clock"></div>
+    <div id="caption"></div>
+    <div id="qr"><img alt=""></div>
+    <div id="status"></div>
+    <section id="public-controls">
+      <nav id="public-bottom-controller">
+        <button id="next" type="button" data-control="next">Next</button>
+      </nav>
+      <button id="public-controls-toggle" type="button">Controls</button>
+      <aside id="public-control-panel"><div id="public-settings"></div></aside>
+    </section>
+    <pre id="result"></pre>
+    <script type="module">
+      import { defaultConfig } from '@4kframe/shared';
+
+      const sent = [];
+      let activeSocket;
+
+      class FakeWebSocket {
+        static OPEN = 1;
+        readyState = FakeWebSocket.OPEN;
+        onopen = null;
+        onmessage = null;
+        onclose = null;
+        onerror = null;
+
+        constructor() {
+          activeSocket = this;
+          queueMicrotask(() => this.onopen?.({}));
+        }
+
+        send(message) {
+          sent.push(JSON.parse(message));
+        }
+
+        close() {}
+      }
+
+      globalThis.WebSocket = FakeWebSocket;
+
+      const video = document.getElementById('video');
+      let playCalls = 0;
+      let rejectNextPlay = false;
+      let mockSrc = '';
+      Object.defineProperty(video, 'src', {
+        configurable: true,
+        get: () => mockSrc,
+        set: (value) => { mockSrc = value; },
+      });
+      video.play = () => {
+        playCalls += 1;
+        if (rejectNextPlay) {
+          rejectNextPlay = false;
+          return Promise.reject(new DOMException('User activation required', 'NotAllowedError'));
+        }
+        return Promise.resolve();
+      };
+      video.pause = () => {};
+      video.load = () => {};
+
+      const emit = (event) => activeSocket.onmessage?.({ data: JSON.stringify(event) });
+
+      try {
+        await import('/src/main.ts');
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        emit({ type: 'config', config: { ...defaultConfig(), videoMuted: true, videoLoop: true } });
+        emit({ type: 'paused', paused: false });
+        emit({
+          type: 'show',
+          interactive: false,
+          items: [{
+            id: 'video-1',
+            kind: 'video',
+            width: 1920,
+            height: 1080,
+            file: 'sample.mp4',
+            preview: 'sample-preview.jpg',
+            thumb: 'sample-thumb.jpg',
+            createdAt: 0,
+            source: 'upload',
+          }],
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        rejectNextPlay = true;
+        emit({ type: 'config', config: { ...defaultConfig(), videoMuted: false, videoLoop: false } });
+        const propertiesUpdatedImmediately = video.muted === false && video.loop === false;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        document.getElementById('next').click();
+        const status = document.getElementById('status');
+        const passed = propertiesUpdatedImmediately
+          && playCalls === 2
+          && video.classList.contains('visible')
+          && video.src.endsWith('/photos/sample.mp4')
+          && !status.classList.contains('hidden')
+          && status.textContent.includes('Press Play to resume')
+          && sent.some((message) => message.type === 'next');
+
+        document.getElementById('result').textContent = JSON.stringify({
+          passed,
+          propertiesUpdatedImmediately,
+          muted: video.muted,
+          loop: video.loop,
+          playCalls,
+          visible: video.classList.contains('visible'),
+          src: video.src,
+          status: status.textContent,
+          sent,
+        });
+        document.title = passed ? 'PASS' : 'FAIL';
+      } catch (error) {
+        document.getElementById('result').textContent = String(error?.stack ?? error);
+        document.title = 'FAIL';
+      }
+    </script>
+  </body>
+</html>
