@@ -7,7 +7,7 @@
 
 import type { MediaItem } from '@4kframe/shared';
 import {
-  fetchItems, fetchData, castItem, deleteItem, upload, thumbUrl,
+  fetchItems, fetchCurrent, castItem, deleteItem, upload, thumbUrl,
   skipNext, skipPrev, getPlayback, setPaused, setHold, toggleEnabled,
   me, login, logout,
 } from './api.js';
@@ -197,8 +197,9 @@ async function refresh(): Promise<void> {
   items = await fetchItems();
   syncPeopleLabels();
   renderGrid();
-  const data = await fetchData();
-  await renderSettings(settingsRoot, data);
+  const current = await fetchCurrent();
+  const currentItem = items.find((item) => current.current.includes(item.file));
+  await renderSettings(settingsRoot, current.data, currentItem);
   setControlsOpen(controlsOpen);
   await syncPlayback();
 }

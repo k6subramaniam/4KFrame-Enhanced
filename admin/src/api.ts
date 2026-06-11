@@ -1,6 +1,6 @@
 /** Thin REST client for the admin PWA. */
 
-import type { ApiDataPayload, MediaItem } from '@4kframe/shared';
+import type { ApiDataPayload, CurrentResponse, MediaItem } from '@4kframe/shared';
 
 export async function fetchItems(): Promise<MediaItem[]> {
   const res = await fetch('/api/thumbs');
@@ -8,13 +8,103 @@ export async function fetchItems(): Promise<MediaItem[]> {
   return json.items;
 }
 
-export async function fetchData(): Promise<ApiDataPayload> {
+export async function fetchCurrent(): Promise<CurrentResponse> {
   const res = await fetch('/api/current');
-  const json = (await res.json()) as { data: ApiDataPayload };
-  return json.data;
+  return (await res.json()) as CurrentResponse;
+}
+
+export async function fetchData(): Promise<ApiDataPayload> {
+  return (await fetchCurrent()).data;
+}
+
+const STRING_PUBLIC_CONFIG_KEYS = new Set([
+  'fillMode',
+  'frameAspect',
+  'transition',
+  'motion',
+  'playbackMediaMode',
+  'smartFraming',
+  'showQr',
+]);
+
+let controlSocket: WebSocket | null = null;
+
+function getControlSocket(): WebSocket | null {
+  if (controlSocket && controlSocket.readyState <= WebSocket.OPEN) return controlSocket;
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  try {
+    const socket = new WebSocket(`${proto}://${location.host}/ws`);
+    controlSocket = socket;
+    socket.onerror = () => socket.close();
+    socket.onclose = () => {
+      if (controlSocket === socket) controlSocket = null;
+    };
+    return socket;
+  } catch {
+    controlSocket = null;
+    return null;
+  }
+}
+
+const CONTROL_SOCKET_TIMEOUT_MS = 1500;
+
+function publicConfigMessage(patch: Record<string, string>): string {
+  const publicPatch = Object.fromEntries(Object.entries(patch).map(([key, value]) => {
+    const numeric = Number(value);
+    return [key, Number.isFinite(numeric) && !STRING_PUBLIC_CONFIG_KEYS.has(key) ? numeric : value];
+  }));
+  return JSON.stringify({ type: 'publicConfig', patch: publicPatch });
+}
+
+async function sendPublicConfig(patch: Record<string, string>): Promise<boolean> {
+  const socket = getControlSocket();
+  if (!socket) return false;
+  const message = publicConfigMessage(patch);
+
+  if (socket.readyState === WebSocket.OPEN) {
+    try {
+      socket.send(message);
+      return true;
+    } catch {
+      socket.close();
+      return false;
+    }
+  }
+  if (socket.readyState !== WebSocket.CONNECTING) return false;
+
+  return await new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (sent: boolean): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      socket.removeEventListener('open', onOpen);
+      socket.removeEventListener('error', onFailure);
+      socket.removeEventListener('close', onFailure);
+      resolve(sent);
+    };
+    const onOpen = (): void => {
+      try {
+        socket.send(message);
+        finish(true);
+      } catch {
+        socket.close();
+        finish(false);
+      }
+    };
+    const onFailure = (): void => finish(false);
+    const timeout = window.setTimeout(() => {
+      socket.close();
+      finish(false);
+    }, CONTROL_SOCKET_TIMEOUT_MS);
+    socket.addEventListener('open', onOpen, { once: true });
+    socket.addEventListener('error', onFailure, { once: true });
+    socket.addEventListener('close', onFailure, { once: true });
+  });
 }
 
 export async function updateData(patch: Record<string, string>): Promise<void> {
+  if (await sendPublicConfig(patch)) return;
   const qs = new URLSearchParams(patch).toString();
   await fetch(`/api/data?${qs}`);
 }
