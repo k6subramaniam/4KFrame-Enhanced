@@ -3,10 +3,13 @@ import test from 'node:test';
 import {
   RESET_TO_SMART_PATCH,
   SHARED_SETTINGS_PANELS,
+  applySettingsSelection,
   activeScalingPreset,
   defaultConfig,
   scalingPresetPatch,
   panFromPixelDrag,
+  settingsPanelsForCapabilities,
+  settingsSelectionPatch,
   toApiData,
 } from './index.js';
 
@@ -63,4 +66,38 @@ test('pixel drag offsets convert to normalized pan values', () => {
     fillMode: 'cover',
     zoom: 2,
   }), { panX: 0.5, panY: -0.3333333333333333 });
+});
+
+test('Video Audio panel renders user-friendly sound choices and current state', () => {
+  const panel = SHARED_SETTINGS_PANELS.find((candidate) => candidate.id === 'video-audio');
+  assert.ok(panel);
+  assert.equal(panel.adminOnly, true);
+
+  const soundOnHtml = panel.render({ ...defaultConfig(), videoMuted: false });
+  assert.match(soundOnHtml, /Video Audio|Sound on/);
+  assert.match(soundOnHtml, /data-group="videoMuted"/);
+  assert.match(soundOnHtml, /data-value="false" class="active">Sound on/);
+  assert.match(soundOnHtml, /data-value="true" class="">Muted/);
+
+  const mutedHtml = panel.render(toApiData({ ...defaultConfig(), videoMuted: true }));
+  assert.match(mutedHtml, /data-value="true" class="active">Muted/);
+});
+
+test('selecting Sound on emits the existing videoMuted key with boolean false', async () => {
+  const emitted: unknown[] = [];
+  await applySettingsSelection({
+    getConfig: defaultConfig,
+    updateConfig: (patch) => { emitted.push(patch); },
+  }, 'videoMuted', 'false');
+
+  assert.deepEqual(emitted, [{ videoMuted: false }]);
+  assert.deepEqual(settingsSelectionPatch('videoMuted', 'true'), { videoMuted: true });
+});
+
+test('Video Audio is available to admins but excluded from public TV controls', () => {
+  const publicPanels = settingsPanelsForCapabilities(SHARED_SETTINGS_PANELS);
+  const adminPanels = settingsPanelsForCapabilities(SHARED_SETTINGS_PANELS, { showAdminOnlyControls: true });
+
+  assert.equal(publicPanels.some((panel) => panel.id === 'video-audio'), false);
+  assert.equal(adminPanels.some((panel) => panel.id === 'video-audio'), true);
 });
