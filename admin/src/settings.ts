@@ -8,6 +8,7 @@ import {
   settingsPanel,
   wireSharedSettings,
   type ApiDataPayload,
+  type MediaItem,
   type SettingsUiAdapter,
 } from '@4kframe/shared';
 import {
@@ -17,6 +18,7 @@ import {
   pollPickerSession,
   importPickerSession,
 } from './api.js';
+import { renderCropPreview, wireCropPreview } from './cropPreview.js';
 
 const SETTINGS_PANEL_STATE_KEY = '4kframe.settings.panels';
 const MOBILE_PANEL_QUERY = '(max-width: 700px)';
@@ -47,7 +49,7 @@ function isPanelOpen(id: string, state: PanelState): boolean {
   return !(mobile && MOBILE_DEFAULT_COLLAPSED.has(id));
 }
 
-export async function renderSettings(root: HTMLElement, data: ApiDataPayload): Promise<void> {
+export async function renderSettings(root: HTMLElement, data: ApiDataPayload, currentItem?: MediaItem): Promise<void> {
   const usedMB = Math.round(Number(data.storageUsed ?? 0) / 1e6);
   const freeMB = Math.round(Number(data.storageFree ?? 0) / 1e6);
   const total = usedMB + freeMB;
@@ -83,7 +85,9 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload): P
     zoomPan ? settingsPanel(
       'zoom-pan',
       zoomPan.title,
-      `${zoomPan.render(data)}
+      `${renderCropPreview(currentItem, data)}
+      <h3 class="panel-subheading">Manual crop controls</h3>
+      ${zoomPan.render(data)}
       ${motion ? `<h3 class="panel-subheading">Motion (Ken Burns)</h3>${motion.render(data)}` : ''}
       ${smartFraming ? `<h3 class="panel-subheading">Smart face framing</h3>${smartFraming.render(data)}` : ''}`,
       isOpen('zoom-pan'),
@@ -127,6 +131,7 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload): P
   });
 
   wireSharedSettings(root, adapter);
+  wireCropPreview(root, updateData);
   wirePickerImport(root);
 }
 

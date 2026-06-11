@@ -1,6 +1,6 @@
 /** Thin REST client for the admin PWA. */
 
-import type { ApiDataPayload, MediaItem } from '@4kframe/shared';
+import type { ApiDataPayload, CurrentResponse, MediaItem } from '@4kframe/shared';
 
 export async function fetchItems(): Promise<MediaItem[]> {
   const res = await fetch('/api/thumbs');
@@ -8,13 +8,58 @@ export async function fetchItems(): Promise<MediaItem[]> {
   return json.items;
 }
 
-export async function fetchData(): Promise<ApiDataPayload> {
+export async function fetchCurrent(): Promise<CurrentResponse> {
   const res = await fetch('/api/current');
-  const json = (await res.json()) as { data: ApiDataPayload };
-  return json.data;
+  return (await res.json()) as CurrentResponse;
+}
+
+export async function fetchData(): Promise<ApiDataPayload> {
+  return (await fetchCurrent()).data;
+}
+
+const STRING_PUBLIC_CONFIG_KEYS = new Set([
+  'fillMode',
+  'frameAspect',
+  'transition',
+  'motion',
+  'playbackMediaMode',
+  'smartFraming',
+  'showQr',
+]);
+
+let controlSocket: WebSocket | null = null;
+
+function getControlSocket(): WebSocket | null {
+  if (controlSocket && controlSocket.readyState <= WebSocket.OPEN) return controlSocket;
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  controlSocket = new WebSocket(`${proto}://${location.host}/ws`);
+  controlSocket.onerror = () => controlSocket?.close();
+  controlSocket.onclose = () => { controlSocket = null; };
+  return controlSocket;
+}
+
+function sendPublicConfig(patch: Record<string, string>): boolean {
+  const socket = getControlSocket();
+  const send = (): void => {
+    const publicPatch = Object.fromEntries(Object.entries(patch).map(([key, value]) => {
+      const numeric = Number(value);
+      return [key, Number.isFinite(numeric) && !STRING_PUBLIC_CONFIG_KEYS.has(key) ? numeric : value];
+    }));
+    socket?.send(JSON.stringify({ type: 'publicConfig', patch: publicPatch }));
+  };
+  if (socket?.readyState === WebSocket.OPEN) {
+    send();
+    return true;
+  }
+  if (socket?.readyState === WebSocket.CONNECTING) {
+    socket.addEventListener('open', send, { once: true });
+    return true;
+  }
+  return false;
 }
 
 export async function updateData(patch: Record<string, string>): Promise<void> {
+  if (sendPublicConfig(patch)) return;
   const qs = new URLSearchParams(patch).toString();
   await fetch(`/api/data?${qs}`);
 }
