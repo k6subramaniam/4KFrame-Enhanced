@@ -9,6 +9,7 @@ import {
   wireSharedSettings,
   type ApiDataPayload,
   type MediaItem,
+  type SettingsPatch,
   type SettingsUiAdapter,
 } from '@4kframe/shared';
 import {
@@ -57,9 +58,18 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload, cu
   const gp = await googleStatus().catch(() => ({ configured: false, connected: false }));
   const panelState = loadPanelState();
   const isOpen = (id: string) => isPanelOpen(id, panelState);
+  let syncCropPreview: (patch: SettingsPatch) => void = () => {};
+  const updateConfig = async (patch: SettingsPatch): Promise<void> => {
+    Object.assign(data, patch);
+    syncCropPreview(patch);
+    const serialized = Object.fromEntries(
+      Object.entries(patch).map(([key, value]) => [key, String(value)]),
+    );
+    await updateData(serialized);
+  };
   const adapter: SettingsUiAdapter = {
     getConfig: () => data,
-    updateConfig: updateData,
+    updateConfig,
     capabilities: {
       showAdminOnlyControls: true,
       showGooglePhotos: true,
@@ -131,7 +141,7 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload, cu
   });
 
   wireSharedSettings(root, adapter);
-  wireCropPreview(root, updateData);
+  syncCropPreview = wireCropPreview(root, updateConfig);
   wirePickerImport(root);
 }
 

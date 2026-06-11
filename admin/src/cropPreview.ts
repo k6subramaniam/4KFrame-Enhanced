@@ -22,6 +22,8 @@ function numeric(value: unknown, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+export type CropPreviewUpdater = (patch: CropPreviewConfig) => void;
+
 export function renderCropPreview(item: MediaItem | undefined, config: CropPreviewConfig): string {
   if (!item) {
     return '<div class="crop-preview-empty muted">Cast or play an item to preview its crop here.</div>';
@@ -35,7 +37,7 @@ export function renderCropPreview(item: MediaItem | undefined, config: CropPrevi
   const ratio = aspectRatio(safeAspect) ?? (16 / 9);
   return `<div class="crop-preview" data-crop-preview data-media-width="${item.width}" data-media-height="${item.height}" data-fill-mode="${fillMode}" data-zoom="${zoom}" data-pan-x="${panX}" data-pan-y="${panY}" style="--crop-aspect:${ratio}">
     <div class="crop-preview-frame" data-crop-frame tabindex="0" role="application" aria-label="Crop preview: drag to pan, use mouse wheel or zoom slider to zoom">
-      ${fillMode === 'blur' ? `<img class="crop-preview-bg" src="${thumbUrl(item)}" alt="" aria-hidden="true" />` : ''}
+      <img class="crop-preview-bg" src="${thumbUrl(item)}" alt="" aria-hidden="true"${fillMode === 'blur' ? '' : ' hidden'} />
       <img class="crop-preview-media" data-crop-media src="${thumbUrl(item)}" alt="Current media crop preview" />
       <div class="crop-preview-mask" aria-hidden="true"></div>
     </div>
@@ -43,11 +45,15 @@ export function renderCropPreview(item: MediaItem | undefined, config: CropPrevi
   </div>`;
 }
 
-export function wireCropPreview(root: HTMLElement, updateConfig: (patch: Record<string, string>) => void | Promise<void>): void {
+export function wireCropPreview(
+  root: HTMLElement,
+  updateConfig: (patch: Record<string, string>) => void | Promise<void>,
+): CropPreviewUpdater {
   const preview = root.querySelector<HTMLElement>('[data-crop-preview]');
   const frame = root.querySelector<HTMLElement>('[data-crop-frame]');
   const media = root.querySelector<HTMLElement>('[data-crop-media]');
-  if (!preview || !frame || !media) return;
+  if (!preview || !frame || !media) return () => {};
+  const background = preview.querySelector<HTMLElement>('.crop-preview-bg');
 
   let zoom = numeric(preview.dataset.zoom, 1);
   let panX = numeric(preview.dataset.panX, 0);
@@ -56,7 +62,7 @@ export function wireCropPreview(root: HTMLElement, updateConfig: (patch: Record<
     width: numeric(preview.dataset.mediaWidth, 1),
     height: numeric(preview.dataset.mediaHeight, 1),
   };
-  const fillMode = preview.dataset.fillMode ?? 'cover';
+  let fillMode = preview.dataset.fillMode ?? 'cover';
   const pointers = new Map<number, PointerEvent>();
   let dragStart: { x: number; y: number; panX: number; panY: number } | null = null;
   let pinchStart: { distance: number; zoom: number } | null = null;
@@ -67,9 +73,10 @@ export function wireCropPreview(root: HTMLElement, updateConfig: (patch: Record<
   };
 
   const applyTransform = (): void => {
-    const fitted = fittedPreviewSize(mediaSize, frameSize(), fillMode, zoom);
-    const overflowX = Math.max(0, fitted.width - frameSize().width);
-    const overflowY = Math.max(0, fitted.height - frameSize().height);
+    const size = frameSize();
+    const fitted = fittedPreviewSize(mediaSize, size, fillMode, zoom);
+    const overflowX = Math.max(0, fitted.width - size.width);
+    const overflowY = Math.max(0, fitted.height - size.height);
     const x = -(panX * overflowX) / 2;
     const y = -(panY * overflowY) / 2;
     media.style.width = `${fitted.width}px`;
@@ -77,11 +84,27 @@ export function wireCropPreview(root: HTMLElement, updateConfig: (patch: Record<
     media.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
   };
 
-  const patch = async (next: { zoom?: number; panX?: number; panY?: number }): Promise<void> => {
-    if (next.zoom !== undefined) zoom = clamp(next.zoom, MIN_ZOOM, MAX_ZOOM);
-    if (next.panX !== undefined) panX = clamp(next.panX, -1, 1);
-    if (next.panY !== undefined) panY = clamp(next.panY, -1, 1);
+  const syncConfig: CropPreviewUpdater = (next) => {
+    if (next.zoom !== undefined) zoom = clamp(numeric(next.zoom, 1), MIN_ZOOM, MAX_ZOOM);
+    if (next.panX !== undefined) panX = clamp(numeric(next.panX, 0), -1, 1);
+    if (next.panY !== undefined) panY = clamp(numeric(next.panY, 0), -1, 1);
+    if (next.fillMode !== undefined) fillMode = String(next.fillMode);
+    if (next.frameAspect !== undefined) {
+      const aspect = String(next.frameAspect);
+      const safeAspect = (FRAME_ASPECTS as readonly string[]).includes(aspect) ? aspect as FrameAspect : 'auto';
+      frame.style.setProperty('--crop-aspect', String(aspectRatio(safeAspect) ?? (16 / 9)));
+      preview.style.setProperty('--crop-aspect', String(aspectRatio(safeAspect) ?? (16 / 9)));
+    }
+    preview.dataset.fillMode = fillMode;
+    preview.dataset.zoom = String(zoom);
+    preview.dataset.panX = String(panX);
+    preview.dataset.panY = String(panY);
+    background?.toggleAttribute('hidden', fillMode !== 'blur');
     applyTransform();
+  };
+
+  const patch = async (next: { zoom?: number; panX?: number; panY?: number }): Promise<void> => {
+    syncConfig(next);
     await updateConfig(Object.fromEntries(
       Object.entries(next).map(([key, value]) => [key, String(value)]),
     ) as Record<string, string>);
@@ -134,5 +157,6 @@ export function wireCropPreview(root: HTMLElement, updateConfig: (patch: Record<
     void patch({ zoom: zoom * factor });
   }, { passive: false });
 
-  applyTransform();
+  syncConfig({});
+  return syncConfig;
 }

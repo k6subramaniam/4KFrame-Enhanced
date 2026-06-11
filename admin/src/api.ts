@@ -32,34 +32,79 @@ let controlSocket: WebSocket | null = null;
 function getControlSocket(): WebSocket | null {
   if (controlSocket && controlSocket.readyState <= WebSocket.OPEN) return controlSocket;
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  controlSocket = new WebSocket(`${proto}://${location.host}/ws`);
-  controlSocket.onerror = () => controlSocket?.close();
-  controlSocket.onclose = () => { controlSocket = null; };
-  return controlSocket;
+  try {
+    const socket = new WebSocket(`${proto}://${location.host}/ws`);
+    controlSocket = socket;
+    socket.onerror = () => socket.close();
+    socket.onclose = () => {
+      if (controlSocket === socket) controlSocket = null;
+    };
+    return socket;
+  } catch {
+    controlSocket = null;
+    return null;
+  }
 }
 
-function sendPublicConfig(patch: Record<string, string>): boolean {
+const CONTROL_SOCKET_TIMEOUT_MS = 1500;
+
+function publicConfigMessage(patch: Record<string, string>): string {
+  const publicPatch = Object.fromEntries(Object.entries(patch).map(([key, value]) => {
+    const numeric = Number(value);
+    return [key, Number.isFinite(numeric) && !STRING_PUBLIC_CONFIG_KEYS.has(key) ? numeric : value];
+  }));
+  return JSON.stringify({ type: 'publicConfig', patch: publicPatch });
+}
+
+async function sendPublicConfig(patch: Record<string, string>): Promise<boolean> {
   const socket = getControlSocket();
-  const send = (): void => {
-    const publicPatch = Object.fromEntries(Object.entries(patch).map(([key, value]) => {
-      const numeric = Number(value);
-      return [key, Number.isFinite(numeric) && !STRING_PUBLIC_CONFIG_KEYS.has(key) ? numeric : value];
-    }));
-    socket?.send(JSON.stringify({ type: 'publicConfig', patch: publicPatch }));
-  };
-  if (socket?.readyState === WebSocket.OPEN) {
-    send();
-    return true;
+  if (!socket) return false;
+  const message = publicConfigMessage(patch);
+
+  if (socket.readyState === WebSocket.OPEN) {
+    try {
+      socket.send(message);
+      return true;
+    } catch {
+      socket.close();
+      return false;
+    }
   }
-  if (socket?.readyState === WebSocket.CONNECTING) {
-    socket.addEventListener('open', send, { once: true });
-    return true;
-  }
-  return false;
+  if (socket.readyState !== WebSocket.CONNECTING) return false;
+
+  return await new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (sent: boolean): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      socket.removeEventListener('open', onOpen);
+      socket.removeEventListener('error', onFailure);
+      socket.removeEventListener('close', onFailure);
+      resolve(sent);
+    };
+    const onOpen = (): void => {
+      try {
+        socket.send(message);
+        finish(true);
+      } catch {
+        socket.close();
+        finish(false);
+      }
+    };
+    const onFailure = (): void => finish(false);
+    const timeout = window.setTimeout(() => {
+      socket.close();
+      finish(false);
+    }, CONTROL_SOCKET_TIMEOUT_MS);
+    socket.addEventListener('open', onOpen, { once: true });
+    socket.addEventListener('error', onFailure, { once: true });
+    socket.addEventListener('close', onFailure, { once: true });
+  });
 }
 
 export async function updateData(patch: Record<string, string>): Promise<void> {
-  if (sendPublicConfig(patch)) return;
+  if (await sendPublicConfig(patch)) return;
   const qs = new URLSearchParams(patch).toString();
   await fetch(`/api/data?${qs}`);
 }
