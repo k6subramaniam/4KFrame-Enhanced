@@ -82,8 +82,8 @@ export async function ingestImage(
     : mainName;
   const thumbName = sharp ? variantName(identity, await dimsFor(sharp, buf, THUMB_MAX)) : mainName;
 
-  const faces = await detectFacesInImageBuffer(faceInput);
-  const focusRegions = await detectFocusRegionsInImageBuffer(faceInput, faces);
+  const faces = await detectFacesInImageBuffer(buf);
+  const focusRegions = await detectFocusRegionsInImageBuffer(buf, faces);
 
   const item: MediaItem = {
     id: identity,
