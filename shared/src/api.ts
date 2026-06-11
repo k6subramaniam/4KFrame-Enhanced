@@ -26,6 +26,23 @@ export interface FaceMetadata {
   label?: string;
 }
 
+/** Generic, privacy-preserving subject metadata used by smart framing. */
+export type FocusRegionSource = 'face' | 'saliency' | 'object' | 'manual';
+
+export interface FocusRegion {
+  /**
+   * Subject box in either normalized 0..1 image coordinates or source pixel coordinates.
+   * Consumers normalize with the media dimensions so detectors can use their native output.
+   */
+  box: FaceBox;
+  /** Optional detector confidence in the 0..1 range. Higher confidence is preferred. */
+  confidence?: number;
+  /** Detector/source category. Manual regions are considered the highest priority. */
+  source: FocusRegionSource;
+  /** Optional detector label or app-owned human label. */
+  label?: string;
+}
+
 /** A single media item in the library. */
 export interface MediaItem {
   id: string;
@@ -52,6 +69,8 @@ export interface MediaItem {
    *  When Smart Face Match is enabled, includes embeddings and labels.
    *  Otherwise, contains only box coordinates. */
   faces?: FaceMetadata[];
+  /** Generic focus/subject regions detected locally on the image, or on the poster for videos. */
+  focusRegions?: FocusRegion[];
   /** True while a background H.264 transcode is in progress (video only). */
   transcoding?: boolean;
   /** Whether the item is included in automatic slideshow rotation (default true). */
