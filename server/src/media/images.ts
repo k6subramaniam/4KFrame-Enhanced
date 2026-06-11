@@ -14,7 +14,6 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { buildFilename, newIdentity, type MediaItem } from '@4kframe/shared';
 import { MEDIA_DIR } from '../env.js';
-import { detectFacesInImageBuffer } from './faceMatch.js';
 
 export const MAIN_MAX = 3840;
 export const PREVIEW_MAX = 858;
@@ -56,7 +55,6 @@ export async function ingestImage(
 
   let width = 0;
   let height = 0;
-  let faceInput = buf;
 
   if (sharp) {
     const img = sharp(buf, { failOn: 'none' }).rotate(); // respect EXIF orientation
@@ -64,7 +62,6 @@ export async function ingestImage(
     width = meta.width ?? 0;
     height = meta.height ?? 0;
 
-    faceInput = await img.jpeg({ quality: 92 }).toBuffer();
 
     await writeVariant(sharp, buf, identity, MAIN_MAX, 'main');
     await writeVariant(sharp, buf, identity, PREVIEW_MAX, 'preview');
@@ -83,8 +80,6 @@ export async function ingestImage(
     : mainName;
   const thumbName = sharp ? variantName(identity, await dimsFor(sharp, buf, THUMB_MAX)) : mainName;
 
-  const faces = await detectFacesInImageBuffer(faceInput);
-
   const item: MediaItem = {
     id: identity,
     kind: 'photo',
@@ -96,7 +91,6 @@ export async function ingestImage(
     createdAt: Date.now(),
     source,
     caption,
-    ...(faces ? { faces } : {}),
   };
   return { item };
 }
