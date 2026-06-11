@@ -619,6 +619,16 @@ function quickActionButtons(root: ParentNode): NodeListOf<HTMLButtonElement> {
   return root.querySelectorAll<HTMLButtonElement>('button[data-quick-action]');
 }
 
+function syncQuickActions(root: ParentNode): void {
+  quickActionButtons(root).forEach((button) => {
+    const action = button.dataset.quickAction;
+    if (!isQuickAction(action)) return;
+    const selected = quickActionSelected(action);
+    button.classList.toggle('is-selected', selected);
+    if (isQuickActionToggle(action)) button.setAttribute('aria-pressed', String(selected));
+  });
+}
+
 function wireQuickActions(root: ParentNode): void {
   quickActionButtons(root).forEach((button) => {
     button.addEventListener('click', () => {
