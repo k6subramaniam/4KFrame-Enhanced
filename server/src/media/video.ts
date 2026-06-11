@@ -14,9 +14,18 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { buildFilename, newIdentity, type MediaItem } from '@4kframe/shared';
+import {
+  buildFilename,
+  faceCenterToPan,
+  newIdentity,
+  type FaceMetadata,
+  type FocusRegion,
+  type FocusTimelineEntry,
+  type MediaItem,
+  type VideoCropKeyframe,
+} from '@4kframe/shared';
 import { MEDIA_DIR } from '../env.js';
-import { detectFacesInGeneratedVideoPosterImage } from './faceMatch.js';
+import { detectFacesInGeneratedVideoFrameImage, detectFacesInGeneratedVideoPosterImage } from './faceMatch.js';
 
 export type CommandRunner = (cmd: string, args: string[], input?: Buffer) => Promise<{ code: number; stdout: Buffer; stderr: string }>;
 
@@ -142,6 +151,8 @@ export async function ingestVideo(
   let durationSec = 0;
   let posterName: string | undefined;
   let transcoding = false;
+  let focusTimeline: FocusTimelineEntry[] | undefined;
+  let cropTimeline: VideoCropKeyframe[] | undefined;
 
   if (available) {
     const p = await probe(tmpPath);
@@ -155,6 +166,9 @@ export async function ingestVideo(
     height = p.height;
     durationSec = p.durationSec;
     posterName = await extractPoster(tmpPath, identity, width, height);
+    const focus = await buildVideoFocusMetadata(tmpPath, identity, width, height, durationSec);
+    focusTimeline = focus.focusTimeline;
+    cropTimeline = focus.cropTimeline;
     transcoding = needsTranscode(cleanExt, p);
   }
 
@@ -183,9 +197,131 @@ export async function ingestVideo(
     caption,
     ...(transcoding ? { transcoding: true } : {}),
     ...(faces ? { faces } : {}),
+    ...(focusTimeline ? { focusTimeline } : {}),
+    ...(cropTimeline ? { cropTimeline } : {}),
   };
   return { item };
 }
+
+const MAX_FOCUS_SAMPLES = 5;
+const MIN_SAMPLE_SEPARATION_SEC = 0.2;
+
+export function representativeVideoTimestamps(durationSec: number): number[] {
+  if (!Number.isFinite(durationSec) || durationSec <= 0) return [0.5];
+  if (durationSec <= 1) return [roundTime(Math.max(0, durationSec / 2))];
+
+  const inset = Math.min(0.5, durationSec / 4);
+  const candidates = durationSec < 3
+    ? [inset, durationSec / 2, Math.max(inset, durationSec - inset)]
+    : [inset, durationSec * 0.25, durationSec * 0.5, durationSec * 0.75, durationSec - inset];
+
+  const timestamps: number[] = [];
+  for (const candidate of candidates) {
+    const t = roundTime(clamp(candidate, 0, durationSec));
+    if (timestamps.every((existing) => Math.abs(existing - t) >= MIN_SAMPLE_SEPARATION_SEC)) timestamps.push(t);
+    if (timestamps.length >= MAX_FOCUS_SAMPLES) break;
+  }
+  return timestamps.length ? timestamps : [roundTime(Math.min(0.5, durationSec))];
+}
+
+async function buildVideoFocusMetadata(
+  videoPath: string,
+  identity: string,
+  width: number,
+  height: number,
+  durationSec: number,
+): Promise<{ focusTimeline?: FocusTimelineEntry[]; cropTimeline?: VideoCropKeyframe[] }> {
+  if (width <= 0 || height <= 0) return {};
+
+  const entries: FocusTimelineEntry[] = [];
+  const frameNames = await extractFocusFrames(videoPath, identity, width, height, representativeVideoTimestamps(durationSec));
+  try {
+    for (const frame of frameNames) {
+      const faces = await detectFacesInGeneratedVideoFrameImage(await fs.readFile(path.join(MEDIA_DIR, frame.name)));
+      if (faces?.length) entries.push({ timeSec: frame.timeSec, regions: facesToFocusRegions(faces) });
+    }
+  } finally {
+    await Promise.all(frameNames.map((frame) => fs.rm(path.join(MEDIA_DIR, frame.name)).catch(() => undefined)));
+  }
+
+  if (!entries.length) return {};
+  return { focusTimeline: entries, cropTimeline: smoothCropTimeline(entriesToCropKeyframes(entries, width, height)) };
+}
+
+async function extractFocusFrames(
+  videoPath: string,
+  identity: string,
+  width: number,
+  height: number,
+  timestamps: number[],
+): Promise<Array<{ timeSec: number; name: string }>> {
+  const frames: Array<{ timeSec: number; name: string }> = [];
+  for (let index = 0; index < timestamps.length; index += 1) {
+    const timeSec = timestamps[index];
+    const name = `focus.${index}.${buildFilename(identity, width || 0, height || 0, 'jpg')}`;
+    const out = path.join(MEDIA_DIR, name);
+    try {
+      const { code } = await run('ffmpeg', [
+        '-y',
+        '-ss', String(timeSec),
+        '-i', videoPath,
+        '-frames:v', '1',
+        '-q:v', '4',
+        out,
+      ]);
+      if (code === 0) frames.push({ timeSec, name });
+    } catch {
+      // A missed sample should not fail the whole ingest; the poster/transcode paths can continue.
+    }
+  }
+  return frames;
+}
+
+function facesToFocusRegions(faces: FaceMetadata[]): FocusRegion[] {
+  return faces.map((face) => ({
+    x: face.box.x,
+    y: face.box.y,
+    width: face.box.width,
+    height: face.box.height,
+    ...(face.label ? { label: face.label } : {}),
+  }));
+}
+
+function entriesToCropKeyframes(entries: FocusTimelineEntry[], width: number, height: number): VideoCropKeyframe[] {
+  const frameWidth = 16;
+  const frameHeight = 9;
+  const coverScale = Math.max(frameWidth / width, frameHeight / height);
+  const fittedWidth = width * coverScale;
+  const fittedHeight = height * coverScale;
+  return entries.map((entry) => {
+    const pan = faceCenterToPan({
+      item: { width, height, faces: entry.regions.map((region) => ({ box: region })) },
+      frameWidth,
+      frameHeight,
+      fittedWidth,
+      fittedHeight,
+    });
+    return { timeSec: entry.timeSec, panX: pan.panX, panY: pan.panY };
+  });
+}
+
+export function smoothCropTimeline(keyframes: VideoCropKeyframe[]): VideoCropKeyframe[] {
+  if (keyframes.length <= 1) return keyframes;
+
+  return keyframes.map((keyframe, index) => {
+    const prev = keyframes[Math.max(0, index - 1)];
+    const next = keyframes[Math.min(keyframes.length - 1, index + 1)];
+    return {
+      timeSec: keyframe.timeSec,
+      panX: roundPan(clamp((prev.panX + keyframe.panX * 2 + next.panX) / 4, -1, 1)),
+      panY: roundPan(clamp((prev.panY + keyframe.panY * 2 + next.panY) / 4, -1, 1)),
+    };
+  });
+}
+
+const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
+const roundTime = (v: number): number => Math.round(v * 1000) / 1000;
+const roundPan = (v: number): number => Math.round(v * 1000) / 1000;
 
 async function extractPoster(
   videoPath: string,

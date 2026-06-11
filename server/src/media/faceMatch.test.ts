@@ -59,7 +59,7 @@ test('face metadata is persisted when Smart Face Match is enabled', async (t) =>
   assert.deepEqual(persisted.items.find((persistedItem) => persistedItem.id === item.id)?.faces, [face]);
 });
 
-test('video face detection uses the generated poster frame instead of scanning the whole file', async (t) => {
+test('video face detection uses generated still frames instead of scanning the whole file', async (t) => {
   process.env.FRAME_ENABLE_FACE_MATCH = '1';
   const posterBytes = Buffer.from('poster-frame-bytes');
   const videoBytes = Buffer.from('source-video-bytes');
@@ -95,9 +95,13 @@ test('video face detection uses the generated poster frame instead of scanning t
 
   const { item } = await video.ingestVideo(videoBytes, 'mp4');
 
-  assert.equal(detectorInputs.length, 1);
-  assert.equal(detectorInputs[0].source, 'video-poster');
-  assert.deepEqual(detectorInputs[0].buffer, posterBytes);
-  assert.notDeepEqual(detectorInputs[0].buffer, videoBytes);
+  assert.ok(detectorInputs.length > 1);
+  const posterInput = detectorInputs.find((input) => input.source === 'video-poster');
+  assert.ok(posterInput);
+  assert.deepEqual(posterInput.buffer, posterBytes);
+  assert.ok(detectorInputs.some((input) => input.source === 'video-frame'));
+  assert.ok(detectorInputs.every((input) => !input.buffer.equals(videoBytes)));
   assert.deepEqual(item.faces, [face]);
+  assert.ok(item.focusTimeline?.length);
+  assert.ok(item.cropTimeline?.length);
 });

@@ -42,6 +42,7 @@ let paused = false;
 let holding = false;
 let receivedConfigEvent = false;
 let receivedPausedEvent = false;
+let videoCropAnimationFrame: number | undefined;
 
 /** Forward a control message to the backend (used to bridge Cast custom messages). */
 function sendControl(msg: ControlMessage): void {
@@ -143,12 +144,15 @@ function startMotion(): void {
 async function renderVideo(item: MediaItem): Promise<void> {
   showingVideo = true;
   lastVideoItem = item;
+  stopVideoCropAnimation();
   layoutVideo(item);
   video.muted = config.videoMuted;
   video.loop = config.videoLoop || holding;
   video.onerror = () => handleVideoError(item);
+  video.onloadedmetadata = () => layoutVideo(item);
   video.src = `/photos/${item.file}`;
   video.classList.add('visible');
+  startVideoCropAnimation(item);
   try { await video.play(); } catch { /* autoplay may require muted; already muted */ }
   setCaption([item], config);
 }
@@ -162,13 +166,6 @@ function handleVideoError(item: MediaItem): void {
   window.setTimeout(() => {
     if (lastVideoItem?.id === item.id && !paused) goNext();
   }, 2500);
-}
-
-/** Position the <video> into the aspect content rect and set its backdrop. */
-function effectiveVideoFit(fillMode: FillMode): 'cover' | 'contain' | 'stretch' {
-  // Blur mode keeps the sharp foreground video contained above the blurred backdrop.
-  if (fillMode === 'blur') return 'contain';
-  return fillMode;
 }
 
 function fittedMediaSize(
@@ -191,11 +188,37 @@ function hasManualVideoOverride(): boolean {
   return Math.abs(config.panX) > 0.001 || Math.abs(config.panY) > 0.001 || config.zoom > 1.001;
 }
 
-function smartVideoObjectPosition(item: MediaItem, r: { w: number; h: number }, fit: 'cover' | 'contain' | 'stretch'): { panX: number; panY: number } {
-  if (hasManualVideoOverride()) return { panX: config.panX, panY: config.panY };
-  if (!config.smartFraming || !item.faces?.length) return { panX: 0, panY: 0 };
+function interpolateVideoCrop(item: MediaItem, timeSec: number): { panX: number; panY: number } | null {
+  const timeline = item.cropTimeline?.filter((keyframe) => Number.isFinite(keyframe.timeSec));
+  if (!timeline?.length) return null;
+  const sorted = [...timeline].sort((a, b) => a.timeSec - b.timeSec);
+  if (timeSec <= sorted[0].timeSec) return sorted[0];
+  if (timeSec >= sorted[sorted.length - 1].timeSec) return sorted[sorted.length - 1];
 
-  const fitted = fittedMediaSize(item, r.w, r.h, fit, config.zoom);
+  for (let i = 1; i < sorted.length; i += 1) {
+    const previous = sorted[i - 1];
+    const next = sorted[i];
+    if (timeSec > next.timeSec) continue;
+    const span = Math.max(0.001, next.timeSec - previous.timeSec);
+    const t = clampN((timeSec - previous.timeSec) / span, 0, 1);
+    const eased = t * t * (3 - 2 * t);
+    return {
+      panX: previous.panX + (next.panX - previous.panX) * eased,
+      panY: previous.panY + (next.panY - previous.panY) * eased,
+    };
+  }
+  return sorted[sorted.length - 1];
+}
+
+function smartVideoPan(item: MediaItem, r: { w: number; h: number }, fitted: { w: number; h: number }): { panX: number; panY: number } {
+  if (hasManualVideoOverride()) return { panX: config.panX, panY: config.panY };
+  if (!config.smartFraming) return { panX: 0, panY: 0 };
+
+  const crop = interpolateVideoCrop(item, video.currentTime || 0);
+  if (crop) return crop;
+
+  if (!item.faces?.length) return { panX: 0, panY: 0 };
+
   return faceCenterToPan({
     item,
     frameWidth: r.w,
@@ -203,6 +226,28 @@ function smartVideoObjectPosition(item: MediaItem, r: { w: number; h: number }, 
     fittedWidth: fitted.w,
     fittedHeight: fitted.h,
   });
+}
+
+function shouldAnimateVideoCrop(item: MediaItem): boolean {
+  return showingVideo && lastVideoItem?.id === item.id && Boolean(config.smartFraming && !hasManualVideoOverride() && item.cropTimeline?.length);
+}
+
+function startVideoCropAnimation(item: MediaItem): void {
+  if (!shouldAnimateVideoCrop(item)) return;
+  const tick = () => {
+    if (!shouldAnimateVideoCrop(item)) {
+      videoCropAnimationFrame = undefined;
+      return;
+    }
+    layoutVideo(item);
+    videoCropAnimationFrame = window.requestAnimationFrame(tick);
+  };
+  videoCropAnimationFrame = window.requestAnimationFrame(tick);
+}
+
+function stopVideoCropAnimation(): void {
+  if (videoCropAnimationFrame !== undefined) window.cancelAnimationFrame(videoCropAnimationFrame);
+  videoCropAnimationFrame = undefined;
 }
 
 function layoutVideo(item: MediaItem): void {
@@ -236,7 +281,9 @@ function layoutVideo(item: MediaItem): void {
 function hideVideo(): void {
   showingVideo = false;
   lastVideoItem = null;
+  stopVideoCropAnimation();
   video.onerror = null;
+  video.onloadedmetadata = null;
   video.classList.remove('visible');
   videoBg.classList.remove('visible');
   video.pause();
@@ -248,7 +295,9 @@ function hideVideo(): void {
 async function rerender(): Promise<void> {
   stopMotion();
   if (showingVideo && lastVideoItem) {
+    stopVideoCropAnimation();
     layoutVideo(lastVideoItem);
+    startVideoCropAnimation(lastVideoItem);
     return;
   }
   if (lastItems) {
@@ -388,18 +437,6 @@ const CONTROL_DIM_TIMEOUT_MS = 2600;
 const CONTROL_HIDE_TIMEOUT_MS = 7600;
 let controlDimTimer: ReturnType<typeof window.setTimeout> | undefined;
 let controlHideTimer: ReturnType<typeof window.setTimeout> | undefined;
-
-type QuickAction =
-  | 'fill-cover'
-  | 'fill-contain'
-  | 'smart-crop'
-  | 'zoom-in'
-  | 'zoom-out'
-  | 'reset-view'
-  | 'pan-up'
-  | 'pan-down'
-  | 'pan-left'
-  | 'pan-right';
 
 const QUICK_ACTIONS = [
   'fill-cover',
@@ -630,10 +667,6 @@ function quickActionSelected(action: QuickAction): boolean {
   }
 }
 
-function isQuickActionToggle(action: QuickAction): boolean {
-  return action === 'fill-cover' || action === 'fill-contain' || action === 'smart-crop';
-}
-
 function quickActionButtons(root: ParentNode): NodeListOf<HTMLButtonElement> {
   return root.querySelectorAll<HTMLButtonElement>('button[data-quick-action]');
 }
@@ -642,20 +675,11 @@ function wireQuickActions(root: ParentNode): void {
   quickActionButtons(root).forEach((button) => {
     button.addEventListener('click', () => {
       const action = button.dataset.quickAction;
-      if (isQuickAction(action)) applyQuickAction(action);
+      if (isQuickAction(action)) {
+        registerPublicControlActivity();
+        applyQuickAction(action);
+      }
     });
-  });
-}
-
-function syncQuickActions(root: ParentNode): void {
-  quickActionButtons(root).forEach((button) => {
-    const action = button.dataset.quickAction;
-    if (!isQuickAction(action)) return;
-    const selected = quickActionSelected(action);
-    button.classList.toggle('is-selected', selected);
-    if (isQuickActionToggle(action)) {
-      button.setAttribute('aria-pressed', String(selected));
-    }
   });
 }
 
@@ -664,49 +688,6 @@ function updateQuickActionDisabledStates(root: ParentNode, configControlsReady: 
     const action = button.dataset.quickAction;
     button.disabled = isQuickAction(action) ? quickActionDisabled(action, configControlsReady) : !configControlsReady;
   });
-}
-
-function syncPublicControls(): void {
-  if (pauseControl) {
-    pauseControl.textContent = paused ? '▶' : '⏸';
-    pauseControl.setAttribute('aria-label', paused ? 'Resume slideshow' : 'Pause slideshow');
-    pauseControl.setAttribute('aria-pressed', String(paused));
-  }
-}
-
-function quickActionDisabled(action: QuickAction, configControlsReady: boolean): boolean {
-  if (!configControlsReady) return true;
-  switch (action) {
-    case 'zoom-in':
-      return config.zoom >= MAX_ZOOM - 0.001;
-    case 'zoom-out':
-      return config.zoom <= MIN_ZOOM + 0.001;
-    case 'reset-view':
-      return config.zoom <= MIN_ZOOM + 0.001 && Math.abs(config.panX) <= 0.001 && Math.abs(config.panY) <= 0.001;
-    case 'pan-up':
-      return config.panY <= -1 + 0.001;
-    case 'pan-down':
-      return config.panY >= 1 - 0.001;
-    case 'pan-left':
-      return config.panX <= -1 + 0.001;
-    case 'pan-right':
-      return config.panX >= 1 - 0.001;
-    default:
-      return false;
-  }
-}
-
-function quickActionSelected(action: QuickAction): boolean {
-  switch (action) {
-    case 'fill-cover':
-      return config.fillMode === 'cover';
-    case 'fill-contain':
-      return config.fillMode === 'contain';
-    case 'smart-crop':
-      return config.fillMode === 'cover' && config.smartFraming;
-    default:
-      return false;
-  }
 }
 
 function syncPublicControls(): void {
@@ -749,7 +730,7 @@ function syncPublicControls(): void {
 }
 
 function wirePublicControls(): void {
-  if (!publicControlsRoot) return;
+  if (!publicControlsRoot || !publicControls) return;
 
   controlsToggle?.addEventListener('click', () => {
     setControlsOpen(publicControls?.hidden ?? true);
@@ -774,16 +755,8 @@ function wirePublicControls(): void {
     });
   });
 
-  publicControls.querySelectorAll<HTMLButtonElement>('button[data-quick-action]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const action = button.dataset.quickAction as QuickAction | undefined;
-      if (action) applyQuickAction(action);
-    });
-  });
-
   wireQuickActions(publicControls);
 
-  publicControls.querySelectorAll<HTMLSelectElement>('select[data-config-key]').forEach((select) => {
   publicControlsRoot.querySelectorAll<HTMLSelectElement>('select[data-config-key]').forEach((select) => {
     select.addEventListener('change', () => {
       registerPublicControlActivity();

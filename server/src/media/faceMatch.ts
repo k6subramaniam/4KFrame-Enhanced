@@ -1,7 +1,7 @@
 import type { FaceMetadata } from '@4kframe/shared';
 import { faceMatchEnabled } from '../env.js';
 
-export type FaceDetectionSource = 'image' | 'video-poster';
+export type FaceDetectionSource = 'image' | 'video-poster' | 'video-frame';
 
 export interface FaceDetectionInput {
   buffer: Buffer;
@@ -35,6 +35,10 @@ export async function detectFacesInImageBuffer(buffer: Buffer): Promise<FaceMeta
 
 export async function detectFacesInGeneratedVideoPosterImage(buffer: Buffer): Promise<FaceMetadata[] | undefined> {
   return detectFaces({ buffer, source: 'video-poster' });
+}
+
+export async function detectFacesInGeneratedVideoFrameImage(buffer: Buffer): Promise<FaceMetadata[] | undefined> {
+  return detectFaces({ buffer, source: 'video-frame' });
 }
 
 async function detectFaces(input: FaceDetectionInput): Promise<FaceMetadata[] | undefined> {

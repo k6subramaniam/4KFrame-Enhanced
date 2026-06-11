@@ -26,6 +26,29 @@ export interface FaceMetadata {
   label?: string;
 }
 
+export interface FocusRegion extends FaceBox {
+  /** Optional confidence score from the local detector, when available. */
+  score?: number;
+  /** Optional app-owned label associated with this region. */
+  label?: string;
+}
+
+export interface FocusTimelineEntry {
+  /** Timestamp of the sampled video frame in seconds. */
+  timeSec: number;
+  /** Focus regions detected on this sampled frame, in source-video coordinates. */
+  regions: FocusRegion[];
+}
+
+export interface VideoCropKeyframe {
+  /** Timestamp this smoothed crop should be applied at, in seconds. */
+  timeSec: number;
+  /** Existing display pan coordinate, where -1..1 spans the available crop overflow. */
+  panX: number;
+  /** Existing display pan coordinate, where -1..1 spans the available crop overflow. */
+  panY: number;
+}
+
 /** A single media item in the library. */
 export interface MediaItem {
   id: string;
@@ -42,6 +65,10 @@ export interface MediaItem {
   poster?: string;
   /** Video duration in seconds, when applicable. */
   durationSec?: number;
+  /** Detected focus regions sampled across video duration for smart video framing. */
+  focusTimeline?: FocusTimelineEntry[];
+  /** Pre-smoothed crop path derived from `focusTimeline` for stable video pans. */
+  cropTimeline?: VideoCropKeyframe[];
   /** Epoch ms the item was added. */
   createdAt: number;
   /** Source of the item. */
