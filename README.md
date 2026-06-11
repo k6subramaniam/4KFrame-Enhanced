@@ -86,6 +86,17 @@ it the admin and your library are open to anyone with the URL. On a private LAN 
 - **sharp** (optional npm dependency) — image variant generation. Without it, originals
   are served as-is.
 
+### Smart Face Match (optional)
+Smart Face Match is disabled by default. Set **`FRAME_ENABLE_FACE_MATCH=1`** to run the
+CPU-only Tiny Face Detector as a background job after media enters the library. Set
+**`FRAME_FACE_MODEL_DIR`** to override the bundled `server/models/face` directory, and use
+**`FRAME_FACE_INPUT_SIZE`** to select a multiple of 32 from 128 through 608 (default **416**;
+smaller values reduce CPU use but can miss small faces).
+
+**Privacy:** face processing runs locally on the frame device. The feature computes and stores
+only normalized face bounding boxes for face-aware framing; it does not compute or store
+embeddings or labels, and no image or face data is sent to a biometric or cloud service.
+
 ## Google Photos
 
 Import is built on Google's **[Photo Picker API](https://developers.google.com/photos/picker)**.

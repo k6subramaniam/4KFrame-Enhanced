@@ -27,6 +27,7 @@ import {
 import { ingestImage } from '../media/images.js';
 import { ingestVideo } from '../media/video.js';
 import { enqueueTranscode } from '../media/transcode.js';
+import { enqueueFaceDetection } from '../media/faceJob.js';
 import {
   cast, next, previous, progress, getCurrent, refresh,
   setPaused, setHold, isPaused, isHolding,
@@ -279,6 +280,7 @@ async function ingestUpload(buf: Buffer, filename: string, mimetype?: string): P
     : await ingestImage(buf, 'upload');
   await addItem(item);
   enqueueTranscode(item);
+  enqueueFaceDetection(item);
   return item;
 }
 
