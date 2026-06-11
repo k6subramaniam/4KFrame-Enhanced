@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8"><title>RUNNING</title></head>
+  <body>
+    <canvas id="gl"></canvas>
+    <div id="video-bg"></div>
+    <video id="video"></video>
+    <div id="clock"></div>
+    <div id="caption"></div>
+    <div id="qr"><img alt=""></div>
+    <div id="status"></div>
+    <section id="public-controls">
+      <nav id="public-bottom-controller"></nav>
+      <button id="public-controls-toggle" type="button">Controls</button>
+      <aside id="public-control-panel">
+        <button id="public-zoom-in" type="button" data-quick-action="zoom-in">Zoom In</button>
+        <button id="public-zoom-out" type="button" data-quick-action="zoom-out">Zoom Out</button>
+        <button id="public-pan-up" type="button" data-quick-action="pan-up">Pan Up</button>
+        <button id="public-pan-down" type="button" data-quick-action="pan-down">Pan Down</button>
+        <button id="public-pan-left" type="button" data-quick-action="pan-left">Pan Left</button>
+        <button id="public-pan-right" type="button" data-quick-action="pan-right">Pan Right</button>
+        <button id="unknown-action" type="button" data-quick-action="not-an-action">Unknown</button>
+        <div id="public-settings"></div>
+      </aside>
+    </section>
+    <pre id="result"></pre>
+    <script type="module">
+      import { defaultConfig } from '@4kframe/shared';
+
+      const sent = [];
+      const initialConfig = { ...defaultConfig(), zoom: 1.4, panX: 0.2, panY: -0.3 };
+
+      class FakeWebSocket {
+        static OPEN = 1;
+        readyState = FakeWebSocket.OPEN;
+        onopen = null;
+        onmessage = null;
+        onclose = null;
+        onerror = null;
+
+        constructor() {
+          queueMicrotask(() => {
+            this.onopen?.({});
+            this.onmessage?.({ data: JSON.stringify({ type: 'config', config: initialConfig }) });
+          });
+        }
+
+        send(message) {
+          sent.push(JSON.parse(message));
+        }
+
+        close() {}
+      }
+
+      globalThis.WebSocket = FakeWebSocket;
+
+      try {
+        await import('/src/main.ts');
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        const actionIds = [
+          'public-zoom-in',
+          'public-zoom-out',
+          'public-pan-up',
+          'public-pan-down',
+          'public-pan-left',
+          'public-pan-right',
+        ];
+        actionIds.forEach((id) => document.getElementById(id).click());
+        const countBeforeUnknown = sent.length;
+        document.getElementById('unknown-action').click();
+
+        const expected = [
+          { type: 'publicConfig', patch: { zoom: 1.6 } },
+          { type: 'publicConfig', patch: { zoom: 1.2 } },
+          { type: 'publicConfig', patch: { panX: 0.2, panY: -0.4 } },
+          { type: 'publicConfig', patch: { panX: 0.2, panY: -0.19999999999999998 } },
+          { type: 'publicConfig', patch: { panX: 0.1, panY: -0.3 } },
+          { type: 'publicConfig', patch: { panX: 0.30000000000000004, panY: -0.3 } },
+        ];
+        const passed = JSON.stringify(sent) === JSON.stringify(expected)
+          && sent.length === countBeforeUnknown;
+        document.getElementById('result').textContent = JSON.stringify({ passed, sent, countBeforeUnknown });
+        document.title = passed ? 'PASS' : 'FAIL';
+      } catch (error) {
+        document.getElementById('result').textContent = String(error?.stack ?? error);
+        document.title = 'FAIL';
+      }
+    </script>
+  </body>
+</html>

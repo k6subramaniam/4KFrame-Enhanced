@@ -26,6 +26,7 @@ import {
 import { ingestImage } from '../media/images.js';
 import { ingestVideo } from '../media/video.js';
 import { enqueueTranscode } from '../media/transcode.js';
+import { enqueueFaceDetection } from '../media/faceJob.js';
 import { hub } from '../hub.js';
 import { refresh } from '../slideshow.js';
 
@@ -218,6 +219,7 @@ async function importPicked(m: PickedMediaItem): Promise<void> {
     : await ingestImage(buf, 'google-photos', filename);
   await addItem(item);
   enqueueTranscode(item);
+  enqueueFaceDetection(item);
 }
 
 /**

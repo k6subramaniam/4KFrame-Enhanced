@@ -22,7 +22,7 @@ import fastifyWebsocket from '@fastify/websocket';
 import {
   MEDIA_DIR, DISPLAY_DIST, ADMIN_DIST,
   HTTP_PORT, HTTPS_PORT, HOST, HTTPS_ENABLED,
-  detectLanAddress, detectLanIp,
+  detectLanAddress, detectLanIp, faceMatchEnabled,
 } from './env.js';
 import { initStore, getConfig, setConfig } from './store.js';
 import { registerApi } from './routes/api.js';
@@ -30,6 +30,7 @@ import { registerWs } from './ws.js';
 import { startSlideshow } from './slideshow.js';
 import { imageProcessingAvailable } from './media/images.js';
 import { videoProcessingAvailable } from './media/video.js';
+import { setFaceDetector } from './media/faceMatch.js';
 import { loadOrCreateTls, type TlsMaterial } from './tls.js';
 import * as auth from './auth.js';
 
@@ -126,6 +127,16 @@ async function main(): Promise<void> {
       }
     } else {
       httpApp.log.warn('HTTPS disabled — no certificate found and `openssl` unavailable to generate one.');
+    }
+  }
+
+  if (faceMatchEnabled()) {
+    try {
+      const { detectFacesLocal } = await import('./media/faceDetector.js');
+      setFaceDetector(detectFacesLocal);
+      httpApp.log.info('Smart Face Match initialized (local face boxes only).');
+    } catch (err) {
+      httpApp.log.warn(`Smart Face Match initialization failed: ${(err as Error).message}`);
     }
   }
 

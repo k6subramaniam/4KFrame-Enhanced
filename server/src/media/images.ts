@@ -57,7 +57,6 @@ export async function ingestImage(
 
   let width = 0;
   let height = 0;
-  let faceInput = buf;
 
   if (sharp) {
     const img = sharp(buf, { failOn: 'none' }).rotate(); // respect EXIF orientation
@@ -65,7 +64,6 @@ export async function ingestImage(
     width = meta.width ?? 0;
     height = meta.height ?? 0;
 
-    faceInput = await img.jpeg({ quality: 92 }).toBuffer();
 
     await writeVariant(sharp, buf, identity, MAIN_MAX, 'main');
     await writeVariant(sharp, buf, identity, PREVIEW_MAX, 'preview');
