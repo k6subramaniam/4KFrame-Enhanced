@@ -645,6 +645,18 @@ function wireQuickActions(root: ParentNode): void {
   });
 }
 
+function syncQuickActions(root: ParentNode): void {
+  quickActionButtons(root).forEach((button) => {
+    const action = button.dataset.quickAction;
+    if (!isQuickAction(action)) return;
+    const selected = quickActionSelected(action);
+    button.classList.toggle('is-selected', selected);
+    if (isQuickActionToggle(action)) {
+      button.setAttribute('aria-pressed', String(selected));
+    }
+  });
+}
+
 function updateQuickActionDisabledStates(root: ParentNode, configControlsReady: boolean): void {
   quickActionButtons(root).forEach((button) => {
     const action = button.dataset.quickAction;
@@ -710,13 +722,6 @@ function wirePublicControls(): void {
   });
 
   if (publicControls) {
-    publicControls.querySelectorAll<HTMLButtonElement>('button[data-quick-action]').forEach((button) => {
-      button.addEventListener('click', () => {
-        const action = button.dataset.quickAction as QuickAction | undefined;
-        if (action) applyQuickAction(action);
-      });
-    });
-
     wireQuickActions(publicControls);
   }
 
