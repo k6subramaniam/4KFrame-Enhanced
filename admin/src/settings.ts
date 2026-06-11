@@ -90,6 +90,7 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload, cu
   root.innerHTML = [
     renderSharedPanel('photo-period'),
     renderSharedPanel('playback-media'),
+    renderSharedPanel('video-audio'),
     renderSharedPanel('effects'),
     renderSharedPanel('scaling'),
     zoomPan ? settingsPanel(
