@@ -8,6 +8,7 @@ import {
   settingsPanel,
   wireSharedSettings,
   type ApiDataPayload,
+  type MediaItem,
   type SettingsUiAdapter,
 } from '@4kframe/shared';
 import {
@@ -41,13 +42,25 @@ function savePanelState(state: PanelState): void {
   }
 }
 
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char] ?? char));
+}
+
 function isPanelOpen(id: string, state: PanelState): boolean {
   if (typeof state[id] === 'boolean') return state[id];
   const mobile = window.matchMedia?.(MOBILE_PANEL_QUERY).matches ?? false;
   return !(mobile && MOBILE_DEFAULT_COLLAPSED.has(id));
 }
 
-export async function renderSettings(root: HTMLElement, data: ApiDataPayload): Promise<void> {
+export interface RenderSettingsOptions {
+  framingScope?: 'all' | 'item';
+  selectedItem?: MediaItem;
+  onFramingScopeChange?: (scope: 'all' | 'item') => void | Promise<void>;
+  updateFraming?: (patch: ApiDataPayload) => void | Promise<void>;
+  clearSelectedFraming?: () => void | Promise<void>;
+}
+
+export async function renderSettings(root: HTMLElement, data: ApiDataPayload, options: RenderSettingsOptions = {}): Promise<void> {
   const usedMB = Math.round(Number(data.storageUsed ?? 0) / 1e6);
   const freeMB = Math.round(Number(data.storageFree ?? 0) / 1e6);
   const total = usedMB + freeMB;
@@ -57,7 +70,7 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload): P
   const isOpen = (id: string) => isPanelOpen(id, panelState);
   const adapter: SettingsUiAdapter = {
     getConfig: () => data,
-    updateConfig: updateData,
+    updateConfig: options.updateFraming ?? updateData,
     capabilities: {
       showAdminOnlyControls: true,
       showGooglePhotos: true,
@@ -75,7 +88,24 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload): P
   const motion = sharedById.get('motion');
   const smartFraming = sharedById.get('smart-framing');
 
+  const selected = options.selectedItem;
+  const framingScope = options.framingScope ?? 'all';
+  const framingScopeMarkup = settingsPanel(
+    'framing-scope',
+    'Crop Scope',
+    `<div class="row seg" data-framing-scope>
+      <button data-value="all" class="${framingScope === 'all' ? 'active' : ''}">All items</button>
+      <button data-value="item" class="${framingScope === 'item' ? 'active' : ''}" ${selected ? '' : 'disabled'}>This item only</button>
+    </div>
+    <div class="muted" style="margin-top:.4rem">${selected
+      ? `Selected: ${escapeHtml(selected.file)}${selected.framing ? ' · has item-only crop' : ''}`
+      : 'Cast or select an item first to save crop, zoom, pan, aspect, and smart-framing changes only for that item.'}</div>
+    ${selected?.framing ? '<div class="row" style="margin-top:.5rem"><button type="button" id="clear-item-framing">Clear item-only crop</button></div>' : ''}`,
+    isOpen('framing-scope'),
+  );
+
   root.innerHTML = [
+    framingScopeMarkup,
     renderSharedPanel('photo-period'),
     renderSharedPanel('playback-media'),
     renderSharedPanel('effects'),
@@ -127,6 +157,15 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload): P
   });
 
   wireSharedSettings(root, adapter);
+  root.querySelectorAll<HTMLButtonElement>('[data-framing-scope] button').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const scope = btn.dataset.value === 'item' ? 'item' : 'all';
+      await options.onFramingScopeChange?.(scope);
+    });
+  });
+  root.querySelector<HTMLButtonElement>('#clear-item-framing')?.addEventListener('click', async () => {
+    await options.clearSelectedFraming?.();
+  });
   wirePickerImport(root);
 }
 

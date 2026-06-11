@@ -5,9 +5,9 @@
  * of photos and videos, the settings panel, and Google Cast sender wiring.
  */
 
-import type { MediaItem } from '@4kframe/shared';
+import type { ApiDataPayload, MediaFramingOverride, MediaItem } from '@4kframe/shared';
 import {
-  fetchItems, fetchData, castItem, deleteItem, upload, thumbUrl,
+  fetchItems, fetchData, castItem, deleteItem, updateItemFraming, clearItemFraming, upload, thumbUrl,
   skipNext, skipPrev, getPlayback, setPaused, setHold, toggleEnabled,
   me, login, logout,
 } from './api.js';
@@ -17,11 +17,14 @@ import { initCastSender, isCastReady, castControl, toggleCastSession } from './c
 type Mode = 'cast' | 'view' | 'delete';
 type PeopleFilter = 'all' | 'has-faces' | 'similar-faces' | 'labeled';
 type SortMode = 'date-desc' | 'date-asc' | 'filename-asc' | 'filename-desc';
+type FramingScope = 'all' | 'item';
 let mode: Mode = 'cast';
 let peopleFilter: PeopleFilter = 'all';
 let sortMode: SortMode = 'date-desc';
 let labelFilter = '';
 let items: MediaItem[] = [];
+let selectedFramingItemId = '';
+let framingScope: FramingScope = 'all';
 
 const grid = document.getElementById('grid') as HTMLElement;
 const hint = document.getElementById('hint') as HTMLElement;
@@ -63,6 +66,7 @@ function renderGrid(): void {
       (hasImageThumb ? `<img loading="lazy" src="${thumbUrl(item)}" alt="" />` : '<div class="ph">🎞️</div>') +
       (item.kind === 'video' ? '<span class="badge">▶ video</span>' : '') +
       (item.transcoding ? '<span class="badge badge-proc">⏳ processing</span>' : '') +
+      (item.framing ? '<span class="badge">↔ crop</span>' : '') +
       (item.faces?.length ? `<span class="badge badge-face">☺ ${item.faces.length}</span>` : '') +
       dur +
       `<button class="incl" title="${excluded ? 'Excluded — tap to include in slideshow' : 'Included — tap to exclude from slideshow'}">${excluded ? '🚫' : '✓'}</button>`;
@@ -180,6 +184,8 @@ async function syncPlayback(): Promise<void> {
 
 async function onTileClick(item: MediaItem): Promise<void> {
   if (mode === 'cast') {
+    selectedFramingItemId = item.id;
+    await refreshSettingsOnly();
     // Prefer a live Cast session (native Google Cast); fall back to the LAN REST flow.
     const sent = await castControl({ type: 'cast', id: item.id });
     if (!sent) await castItem(item.id);
@@ -198,9 +204,71 @@ async function refresh(): Promise<void> {
   syncPeopleLabels();
   renderGrid();
   const data = await fetchData();
-  await renderSettings(settingsRoot, data);
+  await renderSettingsWithScope(data);
   setControlsOpen(controlsOpen);
   await syncPlayback();
+}
+
+
+async function refreshSettingsOnly(): Promise<void> {
+  const data = await fetchData();
+  await renderSettingsWithScope(data);
+}
+
+function selectedFramingItem(): MediaItem | undefined {
+  return items.find((item) => item.id === selectedFramingItemId);
+}
+
+function framingKeys(patch: Record<string, unknown>): Partial<Record<keyof MediaFramingOverride, unknown>> {
+  const keys = new Set(['fillMode', 'frameAspect', 'zoom', 'panX', 'panY', 'smartFraming']);
+  return Object.fromEntries(Object.entries(patch).filter(([key]) => keys.has(key))) as Partial<Record<keyof MediaFramingOverride, unknown>>;
+}
+
+function coerceFramingPatch(patch: Record<string, unknown>): MediaFramingOverride {
+  const next: MediaFramingOverride = {};
+  for (const [key, raw] of Object.entries(framingKeys(patch))) {
+    if (key === 'zoom' || key === 'panX' || key === 'panY') {
+      const parsed = Number(raw);
+      if (Number.isFinite(parsed)) Object.assign(next, { [key]: parsed });
+    } else if (key === 'smartFraming') {
+      Object.assign(next, { smartFraming: raw === true || raw === 'true' || raw === '1' });
+    } else {
+      Object.assign(next, { [key]: String(raw) });
+    }
+  }
+  return next;
+}
+
+async function updateFramingScoped(patch: ApiDataPayload): Promise<void> {
+  const framingPatch = framingKeys(patch);
+  const selected = selectedFramingItem();
+  if (framingScope === 'item' && selected && Object.keys(framingPatch).length > 0) {
+    const updated = await updateItemFraming(selected.id, coerceFramingPatch(patch));
+    items = items.map((item) => item.id === updated.id ? updated : item);
+    renderGrid();
+  } else {
+    await fetch(`/api/data?${new URLSearchParams(patch).toString()}`);
+  }
+}
+
+async function renderSettingsWithScope(data: ApiDataPayload): Promise<void> {
+  await renderSettings(settingsRoot, data, {
+    framingScope,
+    selectedItem: selectedFramingItem(),
+    onFramingScopeChange: async (scope) => {
+      framingScope = scope;
+      await refreshSettingsOnly();
+    },
+    updateFraming: updateFramingScoped,
+    clearSelectedFraming: async () => {
+      const selected = selectedFramingItem();
+      if (!selected) return;
+      const updated = await clearItemFraming(selected.id);
+      items = items.map((item) => item.id === updated.id ? updated : item);
+      renderGrid();
+      await refreshSettingsOnly();
+    },
+  });
 }
 
 function setMode(next: Mode): void {
