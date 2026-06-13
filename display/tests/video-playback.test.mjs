@@ -1,17 +1,23 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
-import { transform } from 'esbuild';
+import ts from 'typescript';
 
 const sourceUrl = new URL('../src/videoPlayback.ts', import.meta.url);
 const source = await readFile(sourceUrl, 'utf8');
-const { code } = await transform(source, { loader: 'ts', format: 'esm', target: 'es2022' });
+const { outputText: code } = ts.transpileModule(source, {
+  compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+});
 const { syncVideoPlaybackProperties } = await import(`data:text/javascript,${encodeURIComponent(code)}`);
+const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 } }).outputText;
+const { seekActiveVideo, syncVideoPlaybackProperties } = await import(`data:text/javascript,${encodeURIComponent(code)}`);
 
 test('synchronizes muted and loop properties immediately without restarting unchanged playback', () => {
   let playCalls = 0;
   const video = {
     muted: true,
+    defaultMuted: true,
+    volume: 0,
     loop: true,
     play: () => {
       playCalls += 1;
@@ -27,8 +33,38 @@ test('synchronizes muted and loop properties immediately without restarting unch
   });
 
   assert.equal(video.muted, true);
+  assert.equal(video.defaultMuted, true);
+  assert.equal(video.volume, 1);
   assert.equal(video.loop, false);
   assert.equal(playCalls, 0);
+});
+
+test('seeks active metadata-ready videos by 5 and 15 seconds with boundary clamping', () => {
+  const video = { currentTime: 10, duration: 20, readyState: 1 };
+  assert.equal(seekActiveVideo(video, 5, true), true);
+  assert.equal(video.currentTime, 15);
+  assert.equal(seekActiveVideo(video, 15, true), true);
+  assert.equal(video.currentTime, 20);
+  assert.equal(seekActiveVideo(video, -5, true), true);
+  assert.equal(video.currentTime, 15);
+  assert.equal(seekActiveVideo(video, -15, true), true);
+  assert.equal(video.currentTime, 0);
+  video.currentTime = 2;
+  seekActiveVideo(video, -5, true);
+  assert.equal(video.currentTime, 0);
+});
+
+test('ignores seek for non-video, unloaded, or non-finite media state', () => {
+  for (const video of [
+    { currentTime: 10, duration: 20, readyState: 1, active: false },
+    { currentTime: 10, duration: 20, readyState: 0, active: true },
+    { currentTime: 10, duration: Infinity, readyState: 1, active: true },
+    { currentTime: NaN, duration: 20, readyState: 1, active: true },
+  ]) {
+    const before = video.currentTime;
+    assert.equal(seekActiveVideo(video, 5, video.active), false);
+    assert.equal(Object.is(video.currentTime, before), true);
+  }
 });
 
 test('restarts after unmuting and reports playback rejection without changing preferences', async () => {
@@ -36,6 +72,8 @@ test('restarts after unmuting and reports playback rejection without changing pr
   const reported = [];
   const video = {
     muted: true,
+    defaultMuted: true,
+    volume: 0,
     loop: true,
     play: () => Promise.reject(rejection),
   };
@@ -49,6 +87,49 @@ test('restarts after unmuting and reports playback rejection without changing pr
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(video.muted, false);
+  assert.equal(video.defaultMuted, false);
+  assert.equal(video.volume, 1);
   assert.equal(video.loop, false);
   assert.deepEqual(reported, [rejection]);
+});
+
+test('prepares initial audible playback with an explicit nonzero volume', () => {
+  const video = {
+    muted: true,
+    defaultMuted: true,
+    volume: 0,
+    loop: false,
+    play: () => Promise.resolve(),
+  };
+
+  syncVideoPlaybackProperties(video, {
+    muted: false,
+    loop: false,
+    onPlaybackRejected: assert.fail,
+  });
+
+  assert.equal(video.muted, false);
+  assert.equal(video.defaultMuted, false);
+  assert.equal(video.volume, 1);
+});
+
+test('prepares initial muted autoplay while retaining volume for later unmute', () => {
+  const video = {
+    muted: false,
+    defaultMuted: false,
+    volume: 0,
+    loop: false,
+    play: () => Promise.resolve(),
+  };
+
+  syncVideoPlaybackProperties(video, {
+    muted: true,
+    loop: true,
+    onPlaybackRejected: assert.fail,
+  });
+
+  assert.equal(video.muted, true);
+  assert.equal(video.defaultMuted, true);
+  assert.equal(video.volume, 1);
+  assert.equal(video.loop, true);
 });

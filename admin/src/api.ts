@@ -1,6 +1,6 @@
 /** Thin REST client for the admin PWA. */
 
-import type { ApiDataPayload, CurrentResponse, MediaItem } from '@4kframe/shared';
+import type { ApiDataPayload, CurrentResponse, DisplayPlaybackState, MediaItem, MediaKind } from '@4kframe/shared';
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
@@ -112,6 +112,25 @@ async function sendPublicConfig(patch: Record<string, string>): Promise<boolean>
   });
 }
 
+export async function sendControl(message: ControlMessage): Promise<boolean> {
+  const socket = getControlSocket();
+  if (!socket) return false;
+  const payload = JSON.stringify(message);
+  if (socket.readyState === WebSocket.OPEN) {
+    socket.send(payload);
+    return true;
+  }
+  if (socket.readyState !== WebSocket.CONNECTING) return false;
+  return await new Promise<boolean>((resolve) => {
+    const timeout = window.setTimeout(() => resolve(false), CONTROL_SOCKET_TIMEOUT_MS);
+    socket.addEventListener('open', () => {
+      window.clearTimeout(timeout);
+      socket.send(payload);
+      resolve(true);
+    }, { once: true });
+  });
+}
+
 export async function updateData(patch: Record<string, string>): Promise<void> {
   if (await sendPublicConfig(patch)) return;
   const qs = new URLSearchParams(patch).toString();
@@ -167,6 +186,9 @@ export async function skipPrev(): Promise<void> { await fetch('/api/previous'); 
 export interface Playback {
   paused: boolean;
   holding: boolean;
+  itemId: string | null;
+  kind: MediaKind | null;
+  display: DisplayPlaybackState | null;
 }
 export async function getPlayback(): Promise<Playback> {
   const res = await fetch('/api/playback');
@@ -177,6 +199,9 @@ export async function setPaused(paused: boolean): Promise<void> {
 }
 export async function setHold(holding: boolean): Promise<void> {
   await fetch(holding ? '/api/hold' : '/api/unhold');
+}
+export async function seekBy(deltaSec: number): Promise<void> {
+  await fetch(`/api/seek?delta=${encodeURIComponent(deltaSec)}`);
 }
 
 /** Include/exclude an item from rotation; returns the new enabled state. */

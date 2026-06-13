@@ -41,6 +41,7 @@ import { hub } from '../hub.js';
 import * as gphotos from '../integrations/googlePhotos.js';
 import { computeStorage } from '../storage.js';
 import * as auth from '../auth.js';
+import { getDisplayPlayback } from '../displayPlayback.js';
 
 const VIDEO_EXT = new Set(['mp4', 'webm', 'mov', 'm4v', 'mkv']);
 const MAX_BULK_IDS = 500;
@@ -100,7 +101,25 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
   app.get('/api/previous', async () => { previous(); return { ok: true }; });
 
   // --- Playback state (pause auto-advance / hold-loop the current item) ---
-  app.get('/api/playback', async () => ({ paused: isPaused(), holding: isHolding() }));
+  app.get('/api/playback', async () => {
+    const item = getCurrent()[0] ?? null;
+    return {
+      paused: isPaused(),
+      holding: isHolding(),
+      itemId: item?.id ?? null,
+      kind: item?.kind ?? null,
+      display: getDisplayPlayback(item?.id ?? null),
+    };
+  });
+  app.get('/api/seek', async (req, reply) => {
+    const item = getCurrent()[0];
+    const deltaSec = Number((req.query as { delta?: unknown }).delta);
+    if (!item || item.kind !== 'video' || !Number.isFinite(deltaSec) || deltaSec === 0) {
+      return reply.code(400).send({ error: 'active video and non-zero seek delta required' });
+    }
+    hub.emitEvent({ type: 'seek', itemId: item.id, deltaSec: Math.max(-300, Math.min(300, deltaSec)) });
+    return { ok: true };
+  });
   app.get('/api/pause', async () => { setPaused(true); return { ok: true }; });
   app.get('/api/resume', async () => { setPaused(false); return { ok: true }; });
   app.get('/api/hold', async () => { setHold(true); return { ok: true }; });

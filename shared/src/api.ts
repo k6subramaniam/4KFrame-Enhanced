@@ -100,6 +100,13 @@ export interface QueueState {
   ids: string[];
   index: number;
   active: boolean;
+/** Transient playback details reported by a connected display for the active video. */
+export interface DisplayPlaybackState {
+  itemId: string;
+  currentTime: number;
+  duration: number;
+  seekable: boolean;
+  observedAt: number;
 }
 
 // --- WebSocket protocol (`/ws`) ---
@@ -109,8 +116,10 @@ export type ControlMessage =
   | { type: 'progress' }
   | { type: 'next' }
   | { type: 'previous' }
+  | { type: 'seek'; offsetSec: SeekOffsetSec }
   | { type: 'pause' }
   | { type: 'resume' }
+  | { type: 'playbackState'; itemId: string; currentTime: number; duration: number; seekable: boolean }
   | { type: 'cast'; id: string }
   | { type: 'playSequence'; ids: string[] }
   | { type: 'clearQueue' }
@@ -136,14 +145,26 @@ export type ControlMessage =
 /** Events the server pushes to displays and controllers. */
 export type FrameEvent =
   | { type: 'show'; items: MediaItem[]; interactive: boolean }
+  | { type: 'seek'; offsetSec: SeekOffsetSec }
   | { type: 'config'; config: FrameConfig }
   | { type: 'library'; items: MediaItem[] }
   | { type: 'paused'; paused: boolean }
   | { type: 'hold'; holding: boolean }
   | { type: 'queue'; queue: QueueState }
+  | { type: 'seek'; itemId: string; deltaSec: number }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; message: string };
 
 export type WsMessage = ControlMessage | FrameEvent;
+
+/** Deliberately small seek allowlist exposed by frame controls. */
+export const SEEK_OFFSETS_SEC = [-15, -5, 5, 15] as const;
+export type SeekOffsetSec = typeof SEEK_OFFSETS_SEC[number];
+
+export function isSeekOffsetSec(value: unknown): value is SeekOffsetSec {
+  return typeof value === 'number'
+    && Number.isFinite(value)
+    && (SEEK_OFFSETS_SEC as readonly number[]).includes(value);
+}
 
 /**
  * Custom Google Cast namespace. The companion sender posts {@link ControlMessage}s on

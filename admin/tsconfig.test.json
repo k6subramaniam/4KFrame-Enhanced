@@ -1,0 +1,24 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "./dist-test",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "noEmit": false
+  },
+  "include": ["src/api.ts", "src/playbackState.ts", "tests/**/*.ts"]
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": false,
+    "outDir": "./dist-test",
+    "rootDir": "./src",
+    "types": ["node"]
+  },
+  "include": ["src/cropTapGesture.ts", "src/cropTapGesture.test.ts"],
+  "exclude": []
+}
