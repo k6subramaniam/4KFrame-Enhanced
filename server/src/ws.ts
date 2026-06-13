@@ -25,7 +25,7 @@ import {
 } from '@4kframe/shared';
 import { hub } from './hub.js';
 import { getConfig, setConfig } from './store.js';
-import { cast, next, previous, progress, getCurrent, refresh, setPaused } from './slideshow.js';
+import { cast, next, previous, progress, getCurrent, refresh, seekCurrentVideo, setPaused } from './slideshow.js';
 import * as auth from './auth.js';
 
 type PublicConfigPatch = Partial<Pick<FrameConfig,
@@ -194,7 +194,9 @@ export async function registerWs(app: FastifyInstance): Promise<void> {
         case 'next': next(); break;
         case 'previous': previous(); break;
         case 'seek':
-          if (isSeekOffsetSec(msg.offsetSec)) hub.emitEvent({ type: 'seek', offsetSec: msg.offsetSec });
+          if (isSeekOffsetSec(msg.offsetSec) && seekCurrentVideo(msg.offsetSec)) {
+            hub.emitEvent({ type: 'seek', offsetSec: msg.offsetSec });
+          }
           break;
         case 'pause': setPaused(true); break;
         case 'resume': setPaused(false); break;

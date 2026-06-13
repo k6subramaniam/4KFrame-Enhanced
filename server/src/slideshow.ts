@@ -26,6 +26,8 @@ let current: MediaItem[] = [];
 let timer: NodeJS.Timeout | undefined;
 let paused = false;
 let holding = false;
+let slotElapsedMs = 0;
+let slotStartedAtMs = 0;
 
 function clearTimer(): void {
   if (timer) clearTimeout(timer);
@@ -102,7 +104,8 @@ function schedule(): void {
   if (paused || holding) return; // hold on the current item
   const ms = durationMs(current);
   if (ms <= 0) return; // paused via photoPeriod = 0
-  timer = setTimeout(() => advance(1, false), ms);
+  slotStartedAtMs = Date.now();
+  timer = setTimeout(() => advance(1, false), Math.max(0, ms - slotElapsedMs));
 }
 
 /** Pause/resume automatic progression (manual next/previous still work). */
@@ -138,8 +141,22 @@ export function isHolding(): boolean {
 }
 
 function show(interactive: boolean): void {
+  slotElapsedMs = 0;
   hub.emitEvent({ type: 'show', items: current, interactive });
   schedule();
+}
+
+/** Keep automatic progression aligned when the active video's playback position changes. */
+export function seekCurrentVideo(offsetSec: number): boolean {
+  const video = current.find((item) => item.kind === 'video');
+  if (!video?.durationSec) return false;
+
+  if (!paused && !holding && timer) {
+    slotElapsedMs += Date.now() - slotStartedAtMs;
+  }
+  slotElapsedMs = Math.min(video.durationSec * 1000, Math.max(0, slotElapsedMs + offsetSec * 1000));
+  schedule();
+  return true;
 }
 
 /** Advance by `delta` steps within the rotation (e.g. +1 next, -1 previous). */

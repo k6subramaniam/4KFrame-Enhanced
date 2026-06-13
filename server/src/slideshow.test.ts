@@ -7,10 +7,11 @@ import type { MediaItem } from '@4kframe/shared';
 
 process.env.FRAME_DATA_DIR = await mkdtemp(path.join(tmpdir(), '4kframe-slideshow-test-'));
 
-const [store, slideshow, shared] = await Promise.all([
+const [store, slideshow, shared, { hub: slideshowHub }] = await Promise.all([
   import('./store.js'),
   import('./slideshow.js'),
   import('@4kframe/shared'),
+  import('./hub.js'),
 ]);
 
 await store.initStore();
@@ -164,4 +165,34 @@ test('playbackMediaMode photos with only videos leaves no current item', async (
   assert.deepEqual(slideshow.getCurrent(), []);
   assert.doesNotThrow(() => slideshow.previous());
   assert.deepEqual(slideshow.getCurrent(), []);
+});
+
+test('seeking a video reschedules automatic progression from the new playback position', async (t) => {
+  t.after(() => slideshow.setPaused(true));
+  const shortVideo = { ...video('video-a', 1920, 1080), durationSec: 0.08 };
+  await resetStore(
+    [shortVideo, photo('photo-a', 1600, 900)],
+    { photoPeriod: 0.01, playbackMediaMode: 'both' },
+  );
+
+  const advanced = new Promise<string[]>((resolve) => {
+    const off = slideshowHub.onEvent((event) => {
+      if (event.type !== 'show') return;
+      off();
+      resolve(event.items.map((item) => item.id));
+    });
+  });
+  assert.equal(slideshow.seekCurrentVideo(5), true);
+  assert.deepEqual(await advanced, ['photo-a']);
+});
+
+test('seeking does not change a photo slot timer', async (t) => {
+  t.after(() => slideshow.setPaused(true));
+  await resetStore(
+    [photo('photo-a', 1600, 900), video('video-a', 1920, 1080)],
+    { photoPeriod: 0.05, playbackMediaMode: 'both' },
+  );
+
+  assert.equal(slideshow.seekCurrentVideo(5), false);
+  assert.deepEqual(slideshow.getCurrent().map((item) => item.id), ['photo-a']);
 });
