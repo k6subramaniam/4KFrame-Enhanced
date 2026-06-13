@@ -31,6 +31,13 @@ const photo = (id: string): MediaItem => ({
   source: 'upload',
 });
 
+const video = (id: string): MediaItem => ({
+  ...photo(id),
+  kind: 'video',
+  file: `${id}.mp4`,
+  durationSec: 60,
+});
+
 let seeded = false;
 
 async function seedStore(): Promise<void> {
@@ -268,6 +275,9 @@ test('authenticated seek commands are validated, forwarded, and do not change sl
     await app.close();
   });
   await waitForCollected(messages, 2);
+  if (!store.getItem('video')) await store.addItem(video('video'));
+  await slideshow.cast('video');
+  await waitForCollected(messages, 3);
   const before = slideshow.getCurrent().map((item) => item.id);
 
   for (const offsetSec of [-5, 5, -15, 15]) {
@@ -295,6 +305,8 @@ test('unauthenticated display receivers can forward validated Cast seek commands
     await app.close();
   });
   await waitForCollected(messages, 2);
+  await slideshow.cast('video');
+  await waitForCollected(messages, 3);
   const beforeCount = messages.length;
   ws.send(JSON.stringify({ type: 'seek', offsetSec: 5 }));
   const collected = await waitForCollected(messages, beforeCount + 1);

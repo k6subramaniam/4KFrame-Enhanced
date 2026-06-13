@@ -186,14 +186,17 @@ function wireDirectionalButton(
   navigatePhoto: () => Promise<void>,
 ): void {
   if (!button) return;
-  const run = (offset: SeekOffsetSec): void => {
+  const run = async (offset: SeekOffsetSec): Promise<void> => {
+    const current = await fetchCurrent();
+    activeItem = items.find((item) => current.current.includes(item.file));
+    updatePlaybackLabels();
     const action = directionalPlaybackAction(activeItem?.kind, offset);
     if (action.type === 'seek') seek(offset).catch(() => {});
     else navigatePhoto().catch(() => {});
   };
   const recognizer = createMultiActivationRecognizer(
-    () => run(singleOffset),
-    () => run(doubleOffset),
+    () => { run(singleOffset).catch(() => {}); },
+    () => { run(doubleOffset).catch(() => {}); },
   );
   button.addEventListener('click', recognizer.activate);
 }
