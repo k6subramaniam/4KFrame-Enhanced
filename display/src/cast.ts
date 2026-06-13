@@ -13,7 +13,7 @@
  * point it at the deployed display URL (see `packaging/cast/`).
  */
 
-import { CAST_NAMESPACE, type ControlMessage } from '@4kframe/shared';
+import { CAST_NAMESPACE, isSeekOffsetSec, type ControlMessage } from '@4kframe/shared';
 
 interface CafCustomEvent {
   data: unknown;
@@ -57,7 +57,7 @@ export function initCastReceiver(forward: (msg: ControlMessage) => void): void {
 }
 
 /** Validate an untrusted Cast payload into a known {@link ControlMessage}. */
-function parseControl(data: unknown): ControlMessage | null {
+export function parseControl(data: unknown): ControlMessage | null {
   const raw = typeof data === 'string' ? safeParse(data) : data;
   if (!raw || typeof raw !== 'object') return null;
   const type = (raw as { type?: unknown }).type;
@@ -68,6 +68,10 @@ function parseControl(data: unknown): ControlMessage | null {
     case 'pause':
     case 'resume':
       return { type };
+    case 'seek': {
+      const offsetSec = (raw as { offsetSec?: unknown }).offsetSec;
+      return isSeekOffsetSec(offsetSec) ? { type, offsetSec } : null;
+    }
     case 'cast': {
       const id = (raw as { id?: unknown }).id;
       return typeof id === 'string' ? { type, id } : null;

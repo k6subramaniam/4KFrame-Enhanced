@@ -155,14 +155,12 @@
           <button id="controls-close" type="button" aria-label="Close controls">✕</button>
         </div>
         <div id="settings"></div>
-        <div id="playback">
-          <p class="playback-description muted">Skip / pause / loop the frame</p>
-          <div class="playback-controls" role="group" aria-label="Frame playback controls">
-            <button id="pb-prev" type="button" aria-label="Show previous media" title="Show previous media">⏮</button>
-            <button id="pb-play" type="button" aria-label="Pause media playback" title="Pause media playback">⏸</button>
-            <button id="pb-next" type="button" aria-label="Show next media" title="Show next media">⏭</button>
-            <button id="pb-loop" type="button" aria-label="Loop current media" aria-pressed="false" title="Loop current media">🔁</button>
-          </div>
+        <div id="playback" class="row">
+          <button id="pb-prev" title="Previous photo" aria-label="Previous photo">⏮</button>
+          <button id="pb-play" title="Play / Pause">⏸</button>
+          <button id="pb-next" title="Next photo" aria-label="Next photo">⏭</button>
+          <button id="pb-loop" title="Loop the current item">🔁</button>
+          <span class="muted" style="margin-left:.25rem">Skip / pause / loop the frame</span>
         </div>
       </section>
       <section class="panel" id="people-panel">
