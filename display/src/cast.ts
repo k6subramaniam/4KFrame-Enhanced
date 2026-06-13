@@ -72,6 +72,12 @@ function parseControl(data: unknown): ControlMessage | null {
       const id = (raw as { id?: unknown }).id;
       return typeof id === 'string' ? { type, id } : null;
     }
+    case 'playSequence': {
+      const ids = (raw as { ids?: unknown }).ids;
+      return Array.isArray(ids) && ids.every((id) => typeof id === 'string') ? { type, ids } : null;
+    }
+    case 'clearQueue':
+      return { type };
     case 'config':
     case 'publicConfig': {
       const patch = (raw as { patch?: unknown }).patch;

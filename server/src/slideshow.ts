@@ -26,6 +26,27 @@ let current: MediaItem[] = [];
 let timer: NodeJS.Timeout | undefined;
 let paused = false;
 let holding = false;
+let queueIds: string[] = [];
+let queueIndex = -1;
+
+function queueState() {
+  return { ids: [...queueIds], index: queueIndex, active: queueIds.length > 0 };
+}
+
+function emitQueue(): void {
+  hub.emitEvent({ type: 'queue', queue: queueState() });
+}
+
+export function getQueueState() {
+  return queueState();
+}
+
+export function clearQueue(): void {
+  const hadQueue = queueIds.length > 0 || queueIndex >= 0;
+  queueIds = [];
+  queueIndex = -1;
+  if (hadQueue) emitQueue();
+}
 
 function clearTimer(): void {
   if (timer) clearTimeout(timer);
@@ -144,6 +165,33 @@ function show(interactive: boolean): void {
 
 /** Advance by `delta` steps within the rotation (e.g. +1 next, -1 previous). */
 export function advance(delta: number, interactive: boolean): void {
+  if (queueIds.length) {
+    const nextIndex = Math.min(queueIds.length - 1, Math.max(0, queueIndex + delta));
+    if (nextIndex === queueIndex) {
+      clearTimer(); // A transient queue stops on its final selected item.
+      return;
+    }
+    queueIndex = nextIndex;
+    const item = getItem(queueIds[queueIndex]);
+    if (!item) {
+      queueIds.splice(queueIndex, 1);
+      if (!queueIds.length) {
+        queueIndex = -1;
+        emitQueue();
+        current = [];
+        clearTimer();
+        return;
+      }
+      queueIndex = Math.min(queueIndex, queueIds.length - 1);
+      emitQueue();
+      advance(0, interactive);
+      return;
+    }
+    current = [item];
+    emitQueue();
+    show(interactive);
+    return;
+  }
   const items = rotation();
   if (items.length === 0) {
     current = [];
@@ -175,10 +223,23 @@ export function previous(): void {
 export async function cast(id: string): Promise<boolean> {
   const item = getItem(id);
   if (!item) return false;
+  clearQueue();
   current = [item];
   const rot = rotation();
   const idx = rot.findIndex((r) => r.id === id);
   if (idx >= 0) pointer = idx; // continue rotation from here when not held
+  show(true);
+  return true;
+}
+
+/** Start a transient ordered queue. Missing ids reject the entire request. */
+export function playSequence(ids: string[]): boolean {
+  const resolved = ids.map((id) => getItem(id));
+  if (!ids.length || resolved.some((item) => !item)) return false;
+  queueIds = [...ids];
+  queueIndex = 0;
+  current = [resolved[0]!];
+  emitQueue();
   show(true);
   return true;
 }
@@ -189,6 +250,7 @@ export function getCurrent(): MediaItem[] {
 
 /** Initialise the engine and start automatic progression. */
 export function startSlideshow(): void {
+  clearQueue();
   clearTimer();
   pointer = 0;
   current = rotation().length ? selectAt(0) : [];
@@ -197,6 +259,19 @@ export function startSlideshow(): void {
 
 /** Re-evaluate timing after a config or library change. */
 export function refresh(): void {
+  if (queueIds.length) {
+    queueIds = queueIds.filter((id) => Boolean(getItem(id)));
+    if (!queueIds.length) {
+      queueIndex = -1;
+      emitQueue();
+    } else {
+      queueIndex = Math.min(queueIndex, queueIds.length - 1);
+      current = [getItem(queueIds[queueIndex])!];
+      emitQueue();
+      schedule();
+      return;
+    }
+  }
   if (rotation().length === 0) {
     current = [];
     clearTimer();

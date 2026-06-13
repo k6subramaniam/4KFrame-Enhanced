@@ -10,6 +10,7 @@ import {
   fetchItems, fetchCurrent, castItem, deleteItem, upload, thumbUrl,
   skipNext, skipPrev, getPlayback, setPaused, setHold, toggleEnabled,
   me, login, logout,
+  setItemsEnabled, deleteItems, playSequence,
 } from './api.js';
 import { renderSettings } from './settings.js';
 import { initCastSender, isCastReady, castControl, toggleCastSession } from './cast-sender.js';
@@ -22,6 +23,8 @@ let peopleFilter: PeopleFilter = 'all';
 let sortMode: SortMode = 'date-desc';
 let labelFilter = '';
 let items: MediaItem[] = [];
+const selectedMediaIds = new Set<string>();
+let selectionMode = false;
 
 const grid = document.getElementById('grid') as HTMLElement;
 const hint = document.getElementById('hint') as HTMLElement;
@@ -35,6 +38,8 @@ const peopleFilterSelect = document.getElementById('people-filter') as HTMLSelec
 const labelFilterSelect = document.getElementById('label-filter') as HTMLSelectElement | null;
 const sortSelect = document.getElementById('media-sort') as HTMLSelectElement | null;
 const peopleSummary = document.getElementById('people-summary') as HTMLElement | null;
+const bulkToolbar = document.getElementById('bulk-toolbar') as HTMLElement | null;
+const selectionCount = document.getElementById('selection-count') as HTMLElement | null;
 
 const HINTS: Record<Mode, string> = {
   cast: 'Cast mode: click a photo to show it on the frame.',
@@ -54,7 +59,12 @@ function renderGrid(): void {
   for (const item of visibleItems) {
     const tile = document.createElement('div');
     const excluded = item.enabled === false;
-    tile.className = `tile ${mode}${excluded ? ' excluded' : ''}`;
+    const selected = selectedMediaIds.has(item.id);
+    tile.className = `tile ${mode}${excluded ? ' excluded' : ''}${selected ? ' selected' : ''}`;
+    tile.tabIndex = 0;
+    tile.setAttribute('role', 'option');
+    tile.setAttribute('aria-selected', String(selected));
+    tile.setAttribute('aria-label', `${selected ? 'Selected' : 'Not selected'}: ${item.file}`);
     // Videos only have an image thumb once a poster exists; otherwise show a placeholder.
     const hasImageThumb = item.kind === 'photo' || !!item.poster;
     const dur = item.kind === 'video' && item.durationSec
@@ -65,8 +75,19 @@ function renderGrid(): void {
       (item.transcoding ? '<span class="badge badge-proc">⏳ processing</span>' : '') +
       (item.faces?.length ? `<span class="badge badge-face">☺ ${item.faces.length}</span>` : '') +
       dur +
-      `<button class="incl" title="${excluded ? 'Excluded — tap to include in slideshow' : 'Included — tap to exclude from slideshow'}">${excluded ? '🚫' : '✓'}</button>`;
-    tile.addEventListener('click', () => onTileClick(item));
+      `<button class="select-control" type="button" aria-label="${selected ? 'Deselect' : 'Select'} ${escapeHtml(item.file)}">${selected ? '✓' : ''}</button>` +
+      `<button class="incl" title="${excluded ? 'Not a Favorite — tap to add to automatic playback' : 'Favorite — participates in automatic playback'}" aria-label="${excluded ? 'Add to Favorites' : 'Remove from Favorites'}">${excluded ? '☆' : '★'}</button>`;
+    tile.addEventListener('click', () => selectionMode ? toggleSelection(item.id) : onTileClick(item));
+    tile.addEventListener('keydown', (event) => {
+      if (event.key === ' ' || event.key === 'Enter') {
+        event.preventDefault();
+        toggleSelection(item.id);
+      }
+    });
+    tile.querySelector('.select-control')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleSelection(item.id);
+    });
     tile.querySelector('.incl')?.addEventListener('click', async (e) => {
       e.stopPropagation();
       await toggleEnabled(item.id);
@@ -74,6 +95,24 @@ function renderGrid(): void {
     });
     grid.appendChild(tile);
   }
+  renderBulkToolbar();
+}
+
+function toggleSelection(id: string): void {
+  selectionMode = true;
+  if (selectedMediaIds.has(id)) selectedMediaIds.delete(id);
+  else selectedMediaIds.add(id);
+  if (!selectedMediaIds.size) selectionMode = false;
+  renderGrid();
+}
+
+function renderBulkToolbar(): void {
+  if (!bulkToolbar || !selectionCount) return;
+  selectionCount.textContent = `${selectedMediaIds.size} selected`;
+  bulkToolbar.classList.toggle('active', selectionMode);
+  bulkToolbar.querySelectorAll<HTMLButtonElement>('[data-requires-selection]').forEach((button) => {
+    button.disabled = selectedMediaIds.size === 0;
+  });
 }
 
 const filenameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
@@ -195,6 +234,9 @@ async function onTileClick(item: MediaItem): Promise<void> {
 
 async function refresh(): Promise<void> {
   items = await fetchItems();
+  const existing = new Set(items.map((item) => item.id));
+  for (const id of selectedMediaIds) if (!existing.has(id)) selectedMediaIds.delete(id);
+  if (!selectedMediaIds.size) selectionMode = false;
   syncPeopleLabels();
   renderGrid();
   const current = await fetchCurrent();
@@ -202,6 +244,37 @@ async function refresh(): Promise<void> {
   await renderSettings(settingsRoot, current.data, currentItem);
   setControlsOpen(controlsOpen);
   await syncPlayback();
+}
+
+function wireBulkActions(): void {
+  const visibleIds = () => sortItems(filterPeople(items)).map((item) => item.id);
+  document.getElementById('select-visible')?.addEventListener('click', () => {
+    selectionMode = true;
+    for (const id of visibleIds()) selectedMediaIds.add(id);
+    renderGrid();
+  });
+  document.getElementById('clear-selection')?.addEventListener('click', () => {
+    selectedMediaIds.clear(); selectionMode = false; renderGrid();
+  });
+  const run = async (action: () => Promise<void>, successClears = false): Promise<void> => {
+    try {
+      await action();
+      if (successClears) selectedMediaIds.clear();
+      await refresh();
+    } catch (error) {
+      alert((error as Error).message);
+    }
+  };
+  document.getElementById('bulk-delete')?.addEventListener('click', () => {
+    const ids = [...selectedMediaIds];
+    if (ids.length && confirm(`Delete ${ids.length} selected item(s) permanently?`)) void run(() => deleteItems(ids), true);
+  });
+  document.getElementById('bulk-favorite')?.addEventListener('click', () => void run(() => setItemsEnabled([...selectedMediaIds], true)));
+  document.getElementById('bulk-unfavorite')?.addEventListener('click', () => void run(() => setItemsEnabled([...selectedMediaIds], false)));
+  document.getElementById('bulk-play')?.addEventListener('click', () => void run(async () => {
+    const ids = [...selectedMediaIds];
+    if (!await castControl({ type: 'playSequence', ids })) await playSequence(ids);
+  }));
 }
 
 function setMode(next: Mode): void {
@@ -308,6 +381,7 @@ async function start(): Promise<void> {
     wirePlayback();
     wireControlSheet();
     wirePeopleFilters();
+    wireBulkActions();
     setMode('cast');
   }
   await refresh();

@@ -24,7 +24,7 @@ import {
 } from '@4kframe/shared';
 import { hub } from './hub.js';
 import { getConfig, setConfig } from './store.js';
-import { cast, next, previous, progress, getCurrent, refresh, setPaused } from './slideshow.js';
+import { cast, next, previous, progress, getCurrent, refresh, setPaused, playSequence, clearQueue } from './slideshow.js';
 import * as auth from './auth.js';
 
 type PublicConfigPatch = Partial<Pick<FrameConfig,
@@ -42,7 +42,7 @@ type PublicConfigPatch = Partial<Pick<FrameConfig,
   | 'showQr'
 >>;
 
-const ADMIN_CONTROL_TYPES = new Set<ControlMessage['type']>(['progress', 'cast', 'config']);
+const ADMIN_CONTROL_TYPES = new Set<ControlMessage['type']>(['progress', 'cast', 'playSequence', 'clearQueue', 'config']);
 // These display-local controls remain public so unauthenticated display receivers can
 // keep working when the admin password gates the admin UI and management APIs.
 const PUBLIC_DISPLAY_CONTROL_TYPES = new Set<ControlMessage['type']>(['next', 'previous', 'pause', 'resume', 'publicConfig']);
@@ -195,6 +195,12 @@ export async function registerWs(app: FastifyInstance): Promise<void> {
         case 'pause': setPaused(true); break;
         case 'resume': setPaused(false); break;
         case 'cast': await cast(msg.id); break;
+        case 'playSequence':
+          if (Array.isArray(msg.ids) && msg.ids.length <= 500 && msg.ids.every((id) => typeof id === 'string')) {
+            playSequence([...new Set(msg.ids)]);
+          }
+          break;
+        case 'clearQueue': clearQueue(); break;
         case 'config':
           await applyConfigPatch(msg.patch as Partial<FrameConfig>);
           break;

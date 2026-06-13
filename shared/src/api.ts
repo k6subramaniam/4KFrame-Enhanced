@@ -88,6 +88,20 @@ export interface ThumbsResponse {
   items: MediaItem[];
 }
 
+export interface MediaIdsPayload {
+  ids: string[];
+}
+
+export interface SetItemsEnabledPayload extends MediaIdsPayload {
+  enabled: boolean;
+}
+
+export interface QueueState {
+  ids: string[];
+  index: number;
+  active: boolean;
+}
+
 // --- WebSocket protocol (`/ws`) ---
 
 /** Commands a controller (admin / cast sender / display remote) sends to the server. */
@@ -98,6 +112,8 @@ export type ControlMessage =
   | { type: 'pause' }
   | { type: 'resume' }
   | { type: 'cast'; id: string }
+  | { type: 'playSequence'; ids: string[] }
+  | { type: 'clearQueue' }
   | { type: 'config'; patch: Partial<FrameConfig> | ApiDataPayload }
   | {
       type: 'publicConfig';
@@ -124,6 +140,7 @@ export type FrameEvent =
   | { type: 'library'; items: MediaItem[] }
   | { type: 'paused'; paused: boolean }
   | { type: 'hold'; holding: boolean }
+  | { type: 'queue'; queue: QueueState }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; message: string };
 
 export type WsMessage = ControlMessage | FrameEvent;
