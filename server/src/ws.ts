@@ -48,9 +48,8 @@ const ADMIN_CONTROL_TYPES = new Set<ControlMessage['type']>(['progress', 'cast',
 // These display-local controls remain public so unauthenticated display receivers can
 // keep working when the admin password gates the admin UI and management APIs.
 const PUBLIC_DISPLAY_CONTROL_TYPES = new Set<ControlMessage['type']>([
-  'next', 'previous', 'pause', 'resume', 'publicConfig', 'playbackState',
+  'next', 'previous', 'pause', 'resume', 'seek', 'publicConfig', 'playbackState',
 ]);
-const PUBLIC_DISPLAY_CONTROL_TYPES = new Set<ControlMessage['type']>(['next', 'previous', 'pause', 'resume', 'seek', 'publicConfig']);
 const PUBLIC_CONFIG_KEYS = new Set([
   'photoPeriod',
   'transitionPeriod',
