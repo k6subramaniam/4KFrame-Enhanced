@@ -5,15 +5,17 @@
  * of photos and videos, the settings panel, and Google Cast sender wiring.
  */
 
-import type { MediaItem } from '@4kframe/shared';
+import type { MediaItem, SeekOffsetSec } from '@4kframe/shared';
 import {
   fetchItems, fetchCurrent, castItem, deleteItem, upload, thumbUrl,
-  skipNext, skipPrev, getPlayback, setPaused, setHold, toggleEnabled,
+  skipNext, skipPrev, getPlayback, setPaused, setHold, seekBy, toggleEnabled,
   me, login, logout,
   patchMediaTransforms,
+  setItemsEnabled, deleteItems, playSequence,
 } from './api.js';
 import { renderSettings } from './settings.js';
 import { initCastSender, isCastReady, castControl, toggleCastSession } from './cast-sender.js';
+import { playbackNavigationState, VIDEO_SEEK_SECONDS } from './playbackState.js';
 
 type Mode = 'cast' | 'view' | 'delete';
 type PeopleFilter = 'all' | 'has-faces' | 'similar-faces' | 'labeled';
@@ -25,6 +27,9 @@ let labelFilter = '';
 let items: MediaItem[] = [];
 let selectionMode = false;
 const selectedIds = new Set<string>();
+const selectedMediaIds = new Set<string>();
+let selectionMode = false;
+let activeItem: MediaItem | undefined;
 
 const grid = document.getElementById('grid') as HTMLElement;
 const hint = document.getElementById('hint') as HTMLElement;
@@ -38,6 +43,8 @@ const peopleFilterSelect = document.getElementById('people-filter') as HTMLSelec
 const labelFilterSelect = document.getElementById('label-filter') as HTMLSelectElement | null;
 const sortSelect = document.getElementById('media-sort') as HTMLSelectElement | null;
 const peopleSummary = document.getElementById('people-summary') as HTMLElement | null;
+const bulkToolbar = document.getElementById('bulk-toolbar') as HTMLElement | null;
+const selectionCount = document.getElementById('selection-count') as HTMLElement | null;
 
 const HINTS: Record<Mode, string> = {
   cast: 'Cast mode: click a photo to show it on the frame.',
@@ -58,6 +65,12 @@ function renderGrid(): void {
     const tile = document.createElement('div');
     const excluded = item.enabled === false;
     tile.className = `tile ${mode}${excluded ? ' excluded' : ''}${selectedIds.has(item.id) ? ' selected' : ''}`;
+    const selected = selectedMediaIds.has(item.id);
+    tile.className = `tile ${mode}${excluded ? ' excluded' : ''}${selected ? ' selected' : ''}`;
+    tile.tabIndex = 0;
+    tile.setAttribute('role', 'option');
+    tile.setAttribute('aria-selected', String(selected));
+    tile.setAttribute('aria-label', `${selected ? 'Selected' : 'Not selected'}: ${item.file}`);
     // Videos only have an image thumb once a poster exists; otherwise show a placeholder.
     const hasImageThumb = item.kind === 'photo' || !!item.poster;
     const dur = item.kind === 'video' && item.durationSec
@@ -70,8 +83,19 @@ function renderGrid(): void {
       ((item.rotation || item.flipHorizontal || item.flipVertical)
         ? `<span class="badge badge-transform">${item.rotation ?? 0}°${item.flipHorizontal ? ' ↔' : ''}${item.flipVertical ? ' ↕' : ''}</span>` : '') +
       dur +
-      `<button class="incl" title="${excluded ? 'Excluded — tap to include in slideshow' : 'Included — tap to exclude from slideshow'}">${excluded ? '🚫' : '✓'}</button>`;
-    tile.addEventListener('click', () => onTileClick(item));
+      `<button class="select-control" type="button" aria-label="${selected ? 'Deselect' : 'Select'} ${escapeHtml(item.file)}">${selected ? '✓' : ''}</button>` +
+      `<button class="incl" title="${excluded ? 'Not a Favorite — tap to add to automatic playback' : 'Favorite — participates in automatic playback'}" aria-label="${excluded ? 'Add to Favorites' : 'Remove from Favorites'}">${excluded ? '☆' : '★'}</button>`;
+    tile.addEventListener('click', () => selectionMode ? toggleSelection(item.id) : onTileClick(item));
+    tile.addEventListener('keydown', (event) => {
+      if (event.key === ' ' || event.key === 'Enter') {
+        event.preventDefault();
+        toggleSelection(item.id);
+      }
+    });
+    tile.querySelector('.select-control')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleSelection(item.id);
+    });
     tile.querySelector('.incl')?.addEventListener('click', async (e) => {
       e.stopPropagation();
       await toggleEnabled(item.id);
@@ -79,6 +103,24 @@ function renderGrid(): void {
     });
     grid.appendChild(tile);
   }
+  renderBulkToolbar();
+}
+
+function toggleSelection(id: string): void {
+  selectionMode = true;
+  if (selectedMediaIds.has(id)) selectedMediaIds.delete(id);
+  else selectedMediaIds.add(id);
+  if (!selectedMediaIds.size) selectionMode = false;
+  renderGrid();
+}
+
+function renderBulkToolbar(): void {
+  if (!bulkToolbar || !selectionCount) return;
+  selectionCount.textContent = `${selectedMediaIds.size} selected`;
+  bulkToolbar.classList.toggle('active', selectionMode);
+  bulkToolbar.querySelectorAll<HTMLButtonElement>('[data-requires-selection]').forEach((button) => {
+    button.disabled = selectedMediaIds.size === 0;
+  });
 }
 
 const filenameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
@@ -162,8 +204,10 @@ function wirePeopleFilters(): void {
 
 function wirePlayback(): void {
   const byId = (id: string) => document.getElementById(id) as HTMLButtonElement | null;
-  byId('pb-prev')?.addEventListener('click', () => { skipPrev().catch(() => {}); });
-  byId('pb-next')?.addEventListener('click', () => { skipNext().catch(() => {}); });
+  byId('pb-prev')?.addEventListener('click', () => navigatePlayback(-1));
+  byId('pb-next')?.addEventListener('click', () => navigatePlayback(1));
+  wireDirectionalButton(byId('pb-prev'), -5, -15, skipPrev);
+  wireDirectionalButton(byId('pb-next'), 5, 15, skipNext);
   byId('pb-play')?.addEventListener('click', async () => {
     const p = await getPlayback().catch(() => null);
     await setPaused(!(p?.paused)).catch(() => {});
@@ -176,11 +220,79 @@ function wirePlayback(): void {
   });
 }
 
+async function navigatePlayback(direction: -1 | 1): Promise<void> {
+  const playback = await getPlayback().catch(() => null);
+  const state = playback ? playbackNavigationState(playback) : null;
+  if (state?.action === 'video-seek') {
+    await seekBy(direction * VIDEO_SEEK_SECONDS).catch(() => {});
+  } else {
+    await (direction < 0 ? skipPrev() : skipNext()).catch(() => {});
+  }
+  await syncPlayback();
+}
+
 async function syncPlayback(): Promise<void> {
-  const p = await getPlayback().catch(() => ({ paused: false, holding: false }));
+  const p = await getPlayback().catch(() => ({
+    paused: false, holding: false, itemId: null, kind: null, display: null,
+  }));
   const play = document.getElementById('pb-play');
   if (play) { play.textContent = p.paused ? '▶' : '⏸'; play.classList.toggle('active', p.paused); }
   document.getElementById('pb-loop')?.classList.toggle('active', p.holding);
+  const nav = playbackNavigationState(p);
+  const previous = document.getElementById('pb-prev') as HTMLButtonElement | null;
+  const next = document.getElementById('pb-next') as HTMLButtonElement | null;
+  if (previous) {
+    previous.title = nav.previousLabel;
+    previous.setAttribute('aria-label', nav.previousLabel);
+    previous.disabled = nav.previousDisabled;
+  }
+  if (next) {
+    next.title = nav.nextLabel;
+    next.setAttribute('aria-label', nav.nextLabel);
+    next.disabled = nav.nextDisabled;
+async function seek(offsetSec: SeekOffsetSec): Promise<void> {
+  const message = { type: 'seek' as const, offsetSec };
+  if (await castControl(message)) return;
+  await sendControl(message);
+}
+
+function wireDirectionalButton(
+  button: HTMLButtonElement | null,
+  singleOffset: SeekOffsetSec,
+  doubleOffset: SeekOffsetSec,
+  navigatePhoto: () => Promise<void>,
+): void {
+  if (!button) return;
+  const run = (offset: SeekOffsetSec): void => {
+    const action = directionalPlaybackAction(activeItem?.kind, offset);
+    if (action.type === 'seek') seek(offset).catch(() => {});
+    else navigatePhoto().catch(() => {});
+  };
+  const recognizer = createMultiActivationRecognizer(
+    () => run(singleOffset),
+    () => run(doubleOffset),
+  );
+  button.addEventListener('click', recognizer.activate);
+}
+
+async function syncPlayback(): Promise<void> {
+  const p = await getPlayback().catch(() => ({ paused: false, holding: false }));
+  const play = document.getElementById('pb-play') as HTMLButtonElement | null;
+  if (play) {
+    const action = p.paused ? 'Resume media playback' : 'Pause media playback';
+    play.textContent = p.paused ? '▶' : '⏸';
+    play.classList.toggle('active', p.paused);
+    play.setAttribute('aria-label', action);
+    play.title = action;
+  }
+  const loop = document.getElementById('pb-loop') as HTMLButtonElement | null;
+  if (loop) {
+    const action = p.holding ? 'Stop looping current media' : 'Loop current media';
+    loop.classList.toggle('active', p.holding);
+    loop.setAttribute('aria-pressed', String(p.holding));
+    loop.setAttribute('aria-label', action);
+    loop.title = action;
+  }
 }
 
 async function onTileClick(item: MediaItem): Promise<void> {
@@ -245,13 +357,59 @@ function wireMediaTransforms(): void {
 
 async function refresh(): Promise<void> {
   items = await fetchItems();
+  const existing = new Set(items.map((item) => item.id));
+  for (const id of selectedMediaIds) if (!existing.has(id)) selectedMediaIds.delete(id);
+  if (!selectedMediaIds.size) selectionMode = false;
   syncPeopleLabels();
   renderGrid();
   const current = await fetchCurrent();
-  const currentItem = items.find((item) => current.current.includes(item.file));
-  await renderSettings(settingsRoot, current.data, currentItem);
+  activeItem = items.find((item) => current.current.includes(item.file));
+  await renderSettings(settingsRoot, current.data, activeItem);
+  updatePlaybackLabels();
   setControlsOpen(controlsOpen);
   await syncPlayback();
+}
+
+function wireBulkActions(): void {
+  const visibleIds = () => sortItems(filterPeople(items)).map((item) => item.id);
+  document.getElementById('select-visible')?.addEventListener('click', () => {
+    selectionMode = true;
+    for (const id of visibleIds()) selectedMediaIds.add(id);
+    renderGrid();
+  });
+  document.getElementById('clear-selection')?.addEventListener('click', () => {
+    selectedMediaIds.clear(); selectionMode = false; renderGrid();
+  });
+  const run = async (action: () => Promise<void>, successClears = false): Promise<void> => {
+    try {
+      await action();
+      if (successClears) selectedMediaIds.clear();
+      await refresh();
+    } catch (error) {
+      alert((error as Error).message);
+    }
+  };
+  document.getElementById('bulk-delete')?.addEventListener('click', () => {
+    const ids = [...selectedMediaIds];
+    if (ids.length && confirm(`Delete ${ids.length} selected item(s) permanently?`)) void run(() => deleteItems(ids), true);
+  });
+  document.getElementById('bulk-favorite')?.addEventListener('click', () => void run(() => setItemsEnabled([...selectedMediaIds], true)));
+  document.getElementById('bulk-unfavorite')?.addEventListener('click', () => void run(() => setItemsEnabled([...selectedMediaIds], false)));
+  document.getElementById('bulk-play')?.addEventListener('click', () => void run(async () => {
+    const ids = [...selectedMediaIds];
+    if (!await castControl({ type: 'playSequence', ids })) await playSequence(ids);
+  }));
+function updatePlaybackLabels(): void {
+  const videoActive = activeItem?.kind === 'video';
+  const labels = [
+    ['pb-prev', videoActive ? 'Seek backward 5 seconds; activate twice for 15 seconds' : 'Previous photo'],
+    ['pb-next', videoActive ? 'Seek forward 5 seconds; activate twice for 15 seconds' : 'Next photo'],
+  ] as const;
+  for (const [id, label] of labels) {
+    const button = document.getElementById(id);
+    button?.setAttribute('title', label);
+    button?.setAttribute('aria-label', label);
+  }
 }
 
 function setMode(next: Mode): void {
@@ -359,6 +517,7 @@ async function start(): Promise<void> {
     wireControlSheet();
     wirePeopleFilters();
     wireMediaTransforms();
+    wireBulkActions();
     setMode('cast');
   }
   await refresh();

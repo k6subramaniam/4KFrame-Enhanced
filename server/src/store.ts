@@ -121,6 +121,24 @@ export async function patchItemTransforms(ids: string[], patch: Partial<DisplayT
   for (const item of selected as MediaItem[]) Object.assign(item, patch);
   await flush();
   return selected as MediaItem[];
+/** Atomically update the Favorite/automatic-playback flag for existing items. */
+export async function setItemsEnabled(ids: string[], enabled: boolean): Promise<MediaItem[]> {
+  const wanted = new Set(ids);
+  const updated = db().items.filter((item) => wanted.has(item.id));
+  for (const item of updated) item.enabled = enabled;
+  await flush();
+  return updated;
+}
+
+/** Atomically remove multiple records and their play-order entries. */
+export async function removeItems(ids: string[]): Promise<MediaItem[]> {
+  const d = db();
+  const wanted = new Set(ids);
+  const removed = d.items.filter((item) => wanted.has(item.id));
+  d.items = d.items.filter((item) => !wanted.has(item.id));
+  d.order = d.order.filter((id) => !wanted.has(id));
+  await flush();
+  return removed;
 }
 
 export async function removeItem(id: string): Promise<MediaItem | undefined> {

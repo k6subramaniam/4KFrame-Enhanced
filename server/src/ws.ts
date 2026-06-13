@@ -12,6 +12,7 @@ import {
   FRAME_ASPECTS,
   MOTION_MODES,
   PLAYBACK_MEDIA_MODES,
+  isSeekOffsetSec,
   TRANSITIONS,
   type ControlMessage,
   type FillMode,
@@ -25,8 +26,9 @@ import {
 } from '@4kframe/shared';
 import { hub } from './hub.js';
 import { getConfig, setConfig } from './store.js';
-import { cast, next, previous, progress, getCurrent, refresh, setPaused } from './slideshow.js';
+import { cast, next, previous, progress, getCurrent, refresh, setPaused, playSequence, clearQueue } from './slideshow.js';
 import * as auth from './auth.js';
+import { clearDisplayPlayback, reportDisplayPlayback } from './displayPlayback.js';
 
 type PublicConfigPatch = Partial<Pick<FrameConfig,
   | 'photoPeriod'
@@ -46,10 +48,12 @@ type PublicConfigPatch = Partial<Pick<FrameConfig,
   | 'screenFlipVertical'
 >>;
 
-const ADMIN_CONTROL_TYPES = new Set<ControlMessage['type']>(['progress', 'cast', 'config']);
+const ADMIN_CONTROL_TYPES = new Set<ControlMessage['type']>(['progress', 'cast', 'playSequence', 'clearQueue', 'config']);
 // These display-local controls remain public so unauthenticated display receivers can
 // keep working when the admin password gates the admin UI and management APIs.
-const PUBLIC_DISPLAY_CONTROL_TYPES = new Set<ControlMessage['type']>(['next', 'previous', 'pause', 'resume', 'publicConfig']);
+const PUBLIC_DISPLAY_CONTROL_TYPES = new Set<ControlMessage['type']>([
+  'next', 'previous', 'pause', 'resume', 'seek', 'publicConfig', 'playbackState',
+]);
 const PUBLIC_CONFIG_KEYS = new Set([
   'photoPeriod',
   'transitionPeriod',
@@ -212,9 +216,39 @@ export async function registerWs(app: FastifyInstance): Promise<void> {
         case 'progress': progress(); break;
         case 'next': next(); break;
         case 'previous': previous(); break;
+        case 'seek':
+          if (isSeekOffsetSec(msg.offsetSec)) hub.emitEvent({ type: 'seek', offsetSec: msg.offsetSec });
+          break;
         case 'pause': setPaused(true); break;
         case 'resume': setPaused(false); break;
+        case 'playbackState': {
+          const current = getCurrent()[0];
+          const currentTime = Number(msg.currentTime);
+          const duration = Number(msg.duration);
+          if (
+            current?.kind !== 'video'
+            || current.id !== msg.itemId
+            || !Number.isFinite(currentTime)
+            || !Number.isFinite(duration)
+            || currentTime < 0
+            || duration < 0
+            || typeof msg.seekable !== 'boolean'
+          ) break;
+          reportDisplayPlayback(socket, {
+            itemId: msg.itemId,
+            currentTime,
+            duration,
+            seekable: msg.seekable,
+          });
+          break;
+        }
         case 'cast': await cast(msg.id); break;
+        case 'playSequence':
+          if (Array.isArray(msg.ids) && msg.ids.length <= 500 && msg.ids.every((id) => typeof id === 'string')) {
+            playSequence([...new Set(msg.ids)]);
+          }
+          break;
+        case 'clearQueue': clearQueue(); break;
         case 'config':
           await applyConfigPatch(msg.patch as Partial<FrameConfig>);
           break;
@@ -227,6 +261,9 @@ export async function registerWs(app: FastifyInstance): Promise<void> {
       }
     });
 
-    socket.on('close', off);
+    socket.on('close', () => {
+      off();
+      clearDisplayPlayback(socket);
+    });
   });
 }

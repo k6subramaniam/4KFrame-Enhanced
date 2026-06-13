@@ -259,3 +259,44 @@ test('authenticated admins can use admin-only /ws controls', async (t) => {
   assert.equal(collected[4]?.type, 'show');
   assert.deepEqual(collected[4]?.type === 'show' ? collected[4].items.map((item) => item.id) : [], ['first']);
 });
+
+test('authenticated seek commands are validated, forwarded, and do not change slideshow position', async (t) => {
+  const app = await buildApp();
+  const { ws, messages } = await connectWs(app, `frame_auth=${encodeURIComponent(auth.issueToken())}`);
+  t.after(async () => {
+    ws.terminate();
+    await app.close();
+  });
+  await waitForCollected(messages, 2);
+  const before = slideshow.getCurrent().map((item) => item.id);
+
+  for (const offsetSec of [-5, 5, -15, 15]) {
+    const beforeCount = messages.length;
+    ws.send(JSON.stringify({ type: 'seek', offsetSec }));
+    const collected = await waitForCollected(messages, beforeCount + 1);
+    assert.deepEqual(collected.at(-1), { type: 'seek', offsetSec });
+    assert.deepEqual(slideshow.getCurrent().map((item) => item.id), before);
+  }
+
+  const beforeCount = messages.length;
+  for (const offsetSec of [undefined, null, '5', 0, 20, Number.POSITIVE_INFINITY]) {
+    ws.send(JSON.stringify({ type: 'seek', offsetSec }));
+  }
+  const collected = await waitForCollected(messages, beforeCount + 1);
+  assert.equal(collected.length, beforeCount);
+  assert.deepEqual(slideshow.getCurrent().map((item) => item.id), before);
+});
+
+test('unauthenticated display receivers can forward validated Cast seek commands', async (t) => {
+  const app = await buildApp();
+  const { ws, messages } = await connectWs(app);
+  t.after(async () => {
+    ws.terminate();
+    await app.close();
+  });
+  await waitForCollected(messages, 2);
+  const beforeCount = messages.length;
+  ws.send(JSON.stringify({ type: 'seek', offsetSec: 5 }));
+  const collected = await waitForCollected(messages, beforeCount + 1);
+  assert.deepEqual(collected.at(-1), { type: 'seek', offsetSec: 5 });
+});
