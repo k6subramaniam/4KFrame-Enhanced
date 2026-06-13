@@ -24,7 +24,7 @@ import { GLRenderer } from './gl.js';
 import { compose, contentRect } from './compositor.js';
 import { applyOverlays, setCaption, setStatus } from './overlays.js';
 import { initCastReceiver } from './cast.js';
-import { syncVideoPlaybackProperties } from './videoPlayback.js';
+import { seekActiveVideo, syncVideoPlaybackProperties } from './videoPlayback.js';
 
 const canvas = document.getElementById('gl') as HTMLCanvasElement;
 const video = document.getElementById('video') as HTMLVideoElement;
@@ -159,7 +159,9 @@ function startMotion(): void {
 
 function reportPlaybackBlocked(error: unknown): void {
   console.error('Video playback was blocked.', error);
-  setStatus('Video playback was blocked. Press Play to resume.');
+  setStatus(config.videoMuted
+    ? 'Video playback was blocked. Press Play to resume.'
+    : 'Video sound was blocked by the receiver. Press Play to resume with audio.');
 }
 
 /** Keep the active video element aligned with persisted playback settings. */
@@ -315,6 +317,9 @@ function handleEvent(event: FrameEvent): void {
       break;
     case 'show':
       renderItems(event.items, event.interactive).catch((err) => console.error(err));
+      break;
+    case 'seek':
+      seekActiveVideo(video, event.offsetSec, showingVideo);
       break;
     case 'library':
       // No-op for the display; the server drives what is shown.
@@ -912,5 +917,5 @@ renderPublicSettings();
 wirePublicControls();
 updateControlStates();
 wireRemote();
-initCastReceiver(sendControl);
+initCastReceiver(video, sendControl);
 connect();

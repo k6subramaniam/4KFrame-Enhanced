@@ -5,7 +5,7 @@
  * of photos and videos, the settings panel, and Google Cast sender wiring.
  */
 
-import type { MediaItem } from '@4kframe/shared';
+import type { MediaItem, SeekOffsetSec } from '@4kframe/shared';
 import {
   fetchItems, fetchCurrent, castItem, deleteItem, upload, thumbUrl,
   skipNext, skipPrev, getPlayback, setPaused, setHold, seekBy, toggleEnabled,
@@ -23,6 +23,7 @@ let peopleFilter: PeopleFilter = 'all';
 let sortMode: SortMode = 'date-desc';
 let labelFilter = '';
 let items: MediaItem[] = [];
+let activeItem: MediaItem | undefined;
 
 const grid = document.getElementById('grid') as HTMLElement;
 const hint = document.getElementById('hint') as HTMLElement;
@@ -160,6 +161,8 @@ function wirePlayback(): void {
   const byId = (id: string) => document.getElementById(id) as HTMLButtonElement | null;
   byId('pb-prev')?.addEventListener('click', () => navigatePlayback(-1));
   byId('pb-next')?.addEventListener('click', () => navigatePlayback(1));
+  wireDirectionalButton(byId('pb-prev'), -5, -15, skipPrev);
+  wireDirectionalButton(byId('pb-next'), 5, 15, skipNext);
   byId('pb-play')?.addEventListener('click', async () => {
     const p = await getPlayback().catch(() => null);
     await setPaused(!(p?.paused)).catch(() => {});
@@ -202,6 +205,48 @@ async function syncPlayback(): Promise<void> {
     next.title = nav.nextLabel;
     next.setAttribute('aria-label', nav.nextLabel);
     next.disabled = nav.nextDisabled;
+async function seek(offsetSec: SeekOffsetSec): Promise<void> {
+  const message = { type: 'seek' as const, offsetSec };
+  if (await castControl(message)) return;
+  await sendControl(message);
+}
+
+function wireDirectionalButton(
+  button: HTMLButtonElement | null,
+  singleOffset: SeekOffsetSec,
+  doubleOffset: SeekOffsetSec,
+  navigatePhoto: () => Promise<void>,
+): void {
+  if (!button) return;
+  const run = (offset: SeekOffsetSec): void => {
+    const action = directionalPlaybackAction(activeItem?.kind, offset);
+    if (action.type === 'seek') seek(offset).catch(() => {});
+    else navigatePhoto().catch(() => {});
+  };
+  const recognizer = createMultiActivationRecognizer(
+    () => run(singleOffset),
+    () => run(doubleOffset),
+  );
+  button.addEventListener('click', recognizer.activate);
+}
+
+async function syncPlayback(): Promise<void> {
+  const p = await getPlayback().catch(() => ({ paused: false, holding: false }));
+  const play = document.getElementById('pb-play') as HTMLButtonElement | null;
+  if (play) {
+    const action = p.paused ? 'Resume media playback' : 'Pause media playback';
+    play.textContent = p.paused ? '▶' : '⏸';
+    play.classList.toggle('active', p.paused);
+    play.setAttribute('aria-label', action);
+    play.title = action;
+  }
+  const loop = document.getElementById('pb-loop') as HTMLButtonElement | null;
+  if (loop) {
+    const action = p.holding ? 'Stop looping current media' : 'Loop current media';
+    loop.classList.toggle('active', p.holding);
+    loop.setAttribute('aria-pressed', String(p.holding));
+    loop.setAttribute('aria-label', action);
+    loop.title = action;
   }
 }
 
@@ -225,10 +270,24 @@ async function refresh(): Promise<void> {
   syncPeopleLabels();
   renderGrid();
   const current = await fetchCurrent();
-  const currentItem = items.find((item) => current.current.includes(item.file));
-  await renderSettings(settingsRoot, current.data, currentItem);
+  activeItem = items.find((item) => current.current.includes(item.file));
+  await renderSettings(settingsRoot, current.data, activeItem);
+  updatePlaybackLabels();
   setControlsOpen(controlsOpen);
   await syncPlayback();
+}
+
+function updatePlaybackLabels(): void {
+  const videoActive = activeItem?.kind === 'video';
+  const labels = [
+    ['pb-prev', videoActive ? 'Seek backward 5 seconds; activate twice for 15 seconds' : 'Previous photo'],
+    ['pb-next', videoActive ? 'Seek forward 5 seconds; activate twice for 15 seconds' : 'Next photo'],
+  ] as const;
+  for (const [id, label] of labels) {
+    const button = document.getElementById(id);
+    button?.setAttribute('title', label);
+    button?.setAttribute('aria-label', label);
+  }
 }
 
 function setMode(next: Mode): void {

@@ -12,6 +12,7 @@ import {
   FRAME_ASPECTS,
   MOTION_MODES,
   PLAYBACK_MEDIA_MODES,
+  isSeekOffsetSec,
   TRANSITIONS,
   type ControlMessage,
   type FillMode,
@@ -49,6 +50,7 @@ const ADMIN_CONTROL_TYPES = new Set<ControlMessage['type']>(['progress', 'cast',
 const PUBLIC_DISPLAY_CONTROL_TYPES = new Set<ControlMessage['type']>([
   'next', 'previous', 'pause', 'resume', 'publicConfig', 'playbackState',
 ]);
+const PUBLIC_DISPLAY_CONTROL_TYPES = new Set<ControlMessage['type']>(['next', 'previous', 'pause', 'resume', 'seek', 'publicConfig']);
 const PUBLIC_CONFIG_KEYS = new Set([
   'photoPeriod',
   'transitionPeriod',
@@ -195,6 +197,9 @@ export async function registerWs(app: FastifyInstance): Promise<void> {
         case 'progress': progress(); break;
         case 'next': next(); break;
         case 'previous': previous(); break;
+        case 'seek':
+          if (isSeekOffsetSec(msg.offsetSec)) hub.emitEvent({ type: 'seek', offsetSec: msg.offsetSec });
+          break;
         case 'pause': setPaused(true); break;
         case 'resume': setPaused(false); break;
         case 'playbackState': {
