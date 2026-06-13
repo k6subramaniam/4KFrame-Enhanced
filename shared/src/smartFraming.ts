@@ -1,7 +1,8 @@
 import type { FaceBox, FaceMetadata, FocusRegion, MediaItem } from './api.js';
+import { normalizeTransform, transformPoint } from './transforms.js';
 
 export interface SmartFramingInput {
-  item: Pick<MediaItem, 'width' | 'height' | 'faces' | 'focusRegions'>;
+  item: Pick<MediaItem, 'width' | 'height' | 'faces' | 'focusRegions' | 'rotation' | 'flipHorizontal' | 'flipVertical'>;
   /** Destination frame width in pixels. */
   frameWidth: number;
   /** Destination frame height in pixels. */
@@ -125,8 +126,9 @@ export function focusRegionCenter(item: Pick<MediaItem, 'width' | 'height' | 'fa
  * fully covered with no exposed background.
  */
 export function faceCenterToPan(input: SmartFramingInput): SmartFramingPan {
-  const center = focusRegionCenter(input.item);
-  if (!center) return { panX: 0, panY: 0 };
+  const sourceCenter = focusRegionCenter(input.item);
+  if (!sourceCenter) return { panX: 0, panY: 0 };
+  const center = transformPoint(sourceCenter, normalizeTransform(input.item));
 
   const overflowX = Math.max(0, input.fittedWidth - input.frameWidth);
   const overflowY = Math.max(0, input.fittedHeight - input.frameHeight);

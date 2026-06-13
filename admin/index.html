@@ -35,6 +35,9 @@
       #bulk-toolbar button:disabled { opacity:.45; cursor:not-allowed; }
       #bulk-delete { color:#ff8b8b; }
       .tile.excluded img, .tile.excluded .ph { opacity:.3; filter:grayscale(1); }
+      .tile.selected { outline:3px solid var(--accent); outline-offset:1px; }
+      .tile .badge-transform { top:auto; bottom:2rem; left:.4rem; }
+      #media-transform-tools { margin:.75rem 0; }
       #control-sheet-header { display:none; }
       #controls-toggle { display:none; }
       #controls-backdrop { display:none; }
@@ -200,6 +203,13 @@
         </div>
       </section>
       <p class="muted" id="hint">Cast mode: click a photo to show it on the frame.</p>
+      <div id="media-transform-tools" class="row" role="toolbar" aria-label="Media orientation controls">
+        <button id="media-select" type="button" aria-label="Toggle media selection mode">Select</button>
+        <button id="media-rotate-left" type="button" aria-label="Rotate selected media left 90 degrees">↶ Rotate left</button>
+        <button id="media-rotate-right" type="button" aria-label="Rotate selected media right 90 degrees">↷ Rotate right</button>
+        <button id="media-flip-horizontal" type="button" aria-label="Flip selected media horizontally">↔ Flip horizontal</button>
+        <button id="media-flip-vertical" type="button" aria-label="Flip selected media vertically">↕ Flip vertical</button>
+        <span id="media-selection-count" class="muted">Current item</span>
       <div id="bulk-toolbar" role="toolbar" aria-label="Selected media actions">
         <span id="selection-count" aria-live="polite">0 selected</span>
         <button id="select-visible" type="button">Select all visible</button>

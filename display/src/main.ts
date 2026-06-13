@@ -19,6 +19,8 @@ import {
   renderSharedSettings,
   type MediaItem,
   type SettingsPatch,
+  normalizeTransform,
+  orientedDimensions,
 } from '@4kframe/shared';
 import { GLRenderer } from './gl.js';
 import { compose, contentRect } from './compositor.js';
@@ -30,6 +32,7 @@ const canvas = document.getElementById('gl') as HTMLCanvasElement;
 const video = document.getElementById('video') as HTMLVideoElement;
 const videoBg = document.getElementById('video-bg') as HTMLElement;
 const renderer = new GLRenderer(canvas);
+const app = document.getElementById('app') as HTMLElement;
 
 let config: FrameConfig = defaultConfig();
 let prevFrame: HTMLCanvasElement | null = null;
@@ -72,6 +75,7 @@ function screenPixels(): { w: number; h: number } {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   let w = Math.round(window.innerWidth * dpr);
   let h = Math.round(window.innerHeight * dpr);
+  if (config.screenRotation === 90 || config.screenRotation === 270) [w, h] = [h, w];
   const longest = Math.max(w, h);
   const maxEdge = 3840;
   if (longest > maxEdge) {
@@ -80,6 +84,23 @@ function screenPixels(): { w: number; h: number } {
     h = Math.round(h * s);
   }
   return { w: Math.max(1, w), h: Math.max(1, h) };
+}
+
+function logicalViewport(): { w: number; h: number } {
+  return config.screenRotation === 90 || config.screenRotation === 270
+    ? { w: window.innerHeight, h: window.innerWidth }
+    : { w: window.innerWidth, h: window.innerHeight };
+}
+
+function applyScreenTransform(): void {
+  const quarterTurn = config.screenRotation === 90 || config.screenRotation === 270;
+  app.style.inset = 'auto';
+  app.style.left = '50%';
+  app.style.top = '50%';
+  app.style.width = quarterTurn ? '100vh' : '100vw';
+  app.style.height = quarterTurn ? '100vw' : '100vh';
+  app.style.transformOrigin = 'center';
+  app.style.transform = `translate(-50%, -50%) rotate(${config.screenRotation}deg) scale(${config.screenFlipHorizontal ? -1 : 1}, ${config.screenFlipVertical ? -1 : 1})`;
 }
 
 function composeCurrent(items: MediaItem[]): Promise<HTMLCanvasElement> {
@@ -220,10 +241,11 @@ function fittedMediaSize(
   const safeZoom = Math.max(1, Number.isFinite(zoom) ? zoom : 1);
   if (fillMode === 'stretch') return { w: frameW * safeZoom, h: frameH * safeZoom };
   const fit = fillMode === 'cover' ? 'cover' : 'contain';
+  const source = orientedDimensions(item.width, item.height, item.rotation ?? 0);
   const base = fit === 'cover'
-    ? Math.max(frameW / item.width, frameH / item.height)
-    : Math.min(frameW / item.width, frameH / item.height);
-  return { w: item.width * base * safeZoom, h: item.height * base * safeZoom };
+    ? Math.max(frameW / source.width, frameH / source.height)
+    : Math.min(frameW / source.width, frameH / source.height);
+  return { w: source.width * base * safeZoom, h: source.height * base * safeZoom };
 }
 
 function hasManualVideoOverride(): boolean {
@@ -245,7 +267,8 @@ function smartVideoObjectPosition(item: MediaItem, r: { w: number; h: number }, 
 }
 
 function layoutVideo(item: MediaItem): void {
-  const r = contentRect(window.innerWidth, window.innerHeight, config.frameAspect);
+  const viewport = logicalViewport();
+  const r = contentRect(viewport.w, viewport.h, config.frameAspect);
   const fillMode = effectiveVideoFit(config.fillMode);
   const zoom = clampN(config.zoom, MIN_ZOOM, MAX_ZOOM);
   const fitted = fittedMediaSize(item, r.w, r.h, fillMode, zoom);
@@ -255,13 +278,16 @@ function layoutVideo(item: MediaItem): void {
   const dx = r.x + (r.w - fitted.w) / 2 - (clampN(pan.panX, -1, 1) * overflowX) / 2;
   const dy = r.y + (r.h - fitted.h) / 2 - (clampN(pan.panY, -1, 1) * overflowY) / 2;
 
-  video.style.left = `${dx}px`;
-  video.style.top = `${dy}px`;
-  video.style.width = `${fitted.w}px`;
-  video.style.height = `${fitted.h}px`;
+  const transform = normalizeTransform(item);
+  const quarterTurn = transform.rotation === 90 || transform.rotation === 270;
+  video.style.left = `${dx + fitted.w / 2}px`;
+  video.style.top = `${dy + fitted.h / 2}px`;
+  video.style.width = `${quarterTurn ? fitted.h : fitted.w}px`;
+  video.style.height = `${quarterTurn ? fitted.w : fitted.h}px`;
+  video.style.transform = `translate(-50%, -50%) rotate(${transform.rotation}deg) scale(${transform.flipHorizontal ? -1 : 1}, ${transform.flipVertical ? -1 : 1})`;
   video.style.objectFit = 'fill';
   video.style.objectPosition = '50% 50%';
-  video.style.clipPath = `inset(${Math.max(0, r.y - dy)}px ${Math.max(0, dx + fitted.w - (r.x + r.w))}px ${Math.max(0, dy + fitted.h - (r.y + r.h))}px ${Math.max(0, r.x - dx)}px)`;
+  video.style.clipPath = '';
 
   // Opaque backdrop hides the stale photo behind any bars; blurred poster in blur mode.
   videoBg.classList.add('visible');
@@ -309,6 +335,7 @@ function handleEvent(event: FrameEvent): void {
     case 'config':
       receivedConfigEvent = true;
       config = event.config;
+      applyScreenTransform();
       syncActiveVideoPlaybackProperties(true);
       applyOverlays(config);
       renderPublicSettings();
@@ -911,8 +938,16 @@ function connect(): void {
 let resizeTimer: ReturnType<typeof setTimeout> | undefined;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => rerender().catch((err) => console.error(err)), 150);
+  resizeTimer = setTimeout(() => {
+    applyScreenTransform();
+    rerender().catch((err) => console.error(err));
+  }, 150);
 });
+window.addEventListener('orientationchange', () => {
+  applyScreenTransform();
+  rerender().catch((err) => console.error(err));
+});
+applyScreenTransform();
 renderPublicSettings();
 wirePublicControls();
 updateControlStates();

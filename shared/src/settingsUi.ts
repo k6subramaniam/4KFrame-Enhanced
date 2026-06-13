@@ -204,6 +204,28 @@ function effectValue(config: SettingsConfigSource): string {
 
 export const SHARED_SETTINGS_PANELS: SettingsPanelMetadata[] = [
   {
+    id: 'screen-orientation',
+    title: 'Screen Orientation',
+    render: (config) => {
+      const rotation = numeric(config, 'screenRotation', 0);
+      const flipHorizontal = bool(config, 'screenFlipHorizontal', false);
+      const flipVertical = bool(config, 'screenFlipVertical', false);
+      return `${segmentButtons('screenRotation', [0, 90, 180, 270].map((value) => ({
+        label: `${value}°`, value: String(value), active: value === rotation,
+      })))}
+      <h3 class="panel-subheading">Screen flips</h3>
+      ${segmentButtons('screenFlipHorizontal', [
+        { label: 'Horizontal off', value: 'false', active: !flipHorizontal },
+        { label: 'Horizontal on', value: 'true', active: flipHorizontal },
+      ])}
+      ${segmentButtons('screenFlipVertical', [
+        { label: 'Vertical off', value: 'false', active: !flipVertical },
+        { label: 'Vertical on', value: 'true', active: flipVertical },
+      ])}
+      <div class="muted" style="margin-top:.4rem">Applied to the complete screen after media fitting, including captions, QR overlays, and controls.</div>`;
+    },
+  },
+  {
     id: 'playback-media',
     title: 'Playback Media',
     render: (config) => {
@@ -361,7 +383,8 @@ export function settingsPanelsForCapabilities(
 
 export function settingsSelectionPatch(key: string, value: string): SettingsPatch {
   if (key === 'effect') return { transitionPeriod: value };
-  if (key === 'videoMuted') return { videoMuted: value === 'true' };
+  if (['videoMuted', 'screenFlipHorizontal', 'screenFlipVertical'].includes(key)) return { [key]: value === 'true' };
+  if (key === 'screenRotation') return { screenRotation: Number(value) as FrameConfig['screenRotation'] };
   return { [key]: value };
 }
 

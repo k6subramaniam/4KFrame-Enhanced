@@ -11,6 +11,7 @@
  *   photoPeriod, frameFill, transition, frameWidth, storageUsed, showQr,
  *   checkPeriod, transitionPeriod, current[]
  */
+import { isQuarterTurn, type QuarterTurn } from './transforms.js';
 
 /** Transition timing presets exposed in the admin "Effects" control. */
 export const EFFECT_PRESETS = {
@@ -127,6 +128,10 @@ export interface FrameConfig {
   frameHeight: number;
   showInfo: boolean;
   showQr: boolean;
+  /** Applied after media fitting/cropping to the complete presentation layer. */
+  screenRotation: QuarterTurn;
+  screenFlipHorizontal: boolean;
+  screenFlipVertical: boolean;
 
   // --- Enhanced: video ---
   videoMuted: boolean;
@@ -166,6 +171,9 @@ export function defaultConfig(): FrameConfig {
     frameHeight: 2160,
     showInfo: true,
     showQr: true,
+    screenRotation: 0,
+    screenFlipHorizontal: false,
+    screenFlipVertical: false,
     videoMuted: false,
     videoLoop: true,
     googlePhotos: {
@@ -203,6 +211,9 @@ export function toApiData(c: FrameConfig): ApiDataPayload {
     frameHeight: String(c.frameHeight),
     showInfo: String(c.showInfo),
     showQr: String(c.showQr),
+    screenRotation: String(c.screenRotation),
+    screenFlipHorizontal: String(c.screenFlipHorizontal),
+    screenFlipVertical: String(c.screenFlipVertical),
     videoMuted: String(c.videoMuted),
     videoLoop: String(c.videoLoop),
     lanAddress: c.lanAddress,
@@ -263,6 +274,11 @@ export function fromApiData(current: FrameConfig, patch: ApiDataPayload): FrameC
     frameHeight: num(patch.frameHeight, current.frameHeight),
     showInfo: truthy(patch.showInfo, current.showInfo),
     showQr: truthy(patch.showQr, current.showQr),
+    screenRotation: isQuarterTurn(num(patch.screenRotation, current.screenRotation))
+      ? num(patch.screenRotation, current.screenRotation) as QuarterTurn
+      : current.screenRotation,
+    screenFlipHorizontal: truthy(patch.screenFlipHorizontal, current.screenFlipHorizontal),
+    screenFlipVertical: truthy(patch.screenFlipVertical, current.screenFlipVertical),
     videoMuted: truthy(patch.videoMuted, current.videoMuted),
     videoLoop: truthy(patch.videoLoop, current.videoLoop),
     lanAddress: patch.lanAddress ?? current.lanAddress,

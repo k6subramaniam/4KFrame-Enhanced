@@ -14,6 +14,24 @@ test('defaultConfig uses both photos and videos for playback', () => {
   assert.equal(defaultConfig().playbackMediaMode, 'both');
 });
 
+test('screen transforms default safely and round-trip with validation', () => {
+  const base = defaultConfig();
+  assert.deepEqual(
+    [base.screenRotation, base.screenFlipHorizontal, base.screenFlipVertical],
+    [0, false, false],
+  );
+  const transformed = fromApiData(base, {
+    screenRotation: '270',
+    screenFlipHorizontal: 'true',
+    screenFlipVertical: 'true',
+  });
+  assert.equal(transformed.screenRotation, 270);
+  assert.equal(transformed.screenFlipHorizontal, true);
+  assert.equal(transformed.screenFlipVertical, true);
+  assert.equal(fromApiData(transformed, { screenRotation: '45' }).screenRotation, 270);
+  assert.equal(toApiData(transformed).screenRotation, '270');
+});
+
 test('defaultConfig enables video sound for normal TV playback', () => {
   assert.equal(defaultConfig().videoMuted, false);
 });

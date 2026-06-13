@@ -16,7 +16,10 @@
  *                cropped) — the premium digital-frame look.
  */
 
-import { aspectRatio, faceCenterToPan, type FillMode, type FrameAspect, type MediaItem } from '@4kframe/shared';
+import {
+  aspectRatio, faceCenterToPan, normalizeTransform, orientedDimensions,
+  type DisplayTransform, type FillMode, type FrameAspect, type MediaItem,
+} from '@4kframe/shared';
 
 export interface ComposeOptions {
   /** Screen size in device pixels. */
@@ -77,26 +80,20 @@ interface Transform {
   zoom: number;
   panX: number;
   panY: number;
+  rotation: DisplayTransform['rotation'];
+  flipHorizontal: boolean;
+  flipVertical: boolean;
 }
 
-function drawCover(ctx: CanvasRenderingContext2D, img: HTMLImageElement, r: Rect): void {
-  drawTransformed(ctx, img, r, { fit: 'cover', zoom: 1, panX: 0, panY: 0 });
-}
-
-function fittedSize(img: HTMLImageElement, r: Rect, t: Pick<Transform, 'fit' | 'zoom'>): { w: number; h: number } {
-  if (t.fit === 'stretch') return { w: r.w * t.zoom, h: r.h * t.zoom };
-  const base = t.fit === 'cover'
-    ? Math.max(r.w / img.width, r.h / img.height)
-    : Math.min(r.w / img.width, r.h / img.height);
-  const scale = base * t.zoom;
-  return { w: img.width * scale, h: img.height * scale };
+function sourceSize(img: HTMLImageElement, t: Pick<Transform, 'rotation'>): { width: number; height: number } {
+  return orientedDimensions(img.width, img.height, t.rotation);
 }
 
 function smartTransform(item: MediaItem, img: HTMLImageElement, r: Rect, t: Transform, enabled: boolean): Transform {
   const hasManualOverride = Math.abs(t.panX) > 0.001 || Math.abs(t.panY) > 0.001 || t.zoom > 1.001;
   if (!enabled || hasManualOverride || !item.faces?.length) return t;
 
-  const fitted = fittedSize(img, r, t);
+  const fitted = fittedSizeForDimensions(sourceSize(img, t), r, t);
   const smart = faceCenterToPan({
     item,
     frameWidth: r.w,
@@ -112,7 +109,7 @@ function smartTransform(item: MediaItem, img: HTMLImageElement, r: Rect, t: Tran
  * Pan moves the image within whatever overflows the rect (no effect when it fits exactly).
  */
 function drawTransformed(ctx: CanvasRenderingContext2D, img: HTMLImageElement, r: Rect, t: Transform): void {
-  const fitted = fittedSize(img, r, t);
+  const fitted = fittedSizeForDimensions(sourceSize(img, t), r, t);
   const dw = fitted.w;
   const dh = fitted.h;
   const overflowX = Math.max(0, dw - r.w);
@@ -123,17 +120,42 @@ function drawTransformed(ctx: CanvasRenderingContext2D, img: HTMLImageElement, r
   ctx.beginPath();
   ctx.rect(r.x, r.y, r.w, r.h);
   ctx.clip();
-  ctx.drawImage(img, dx, dy, dw, dh);
+  ctx.translate(dx + dw / 2, dy + dh / 2);
+  ctx.rotate((t.rotation * Math.PI) / 180);
+  ctx.scale(t.flipHorizontal ? -1 : 1, t.flipVertical ? -1 : 1);
+  const quarterTurn = t.rotation === 90 || t.rotation === 270;
+  ctx.drawImage(img, -((quarterTurn ? dh : dw) / 2), -((quarterTurn ? dw : dh) / 2), quarterTurn ? dh : dw, quarterTurn ? dw : dh);
   ctx.restore();
 }
 
+function fittedSizeForDimensions(
+  source: { width: number; height: number },
+  r: Rect,
+  t: Pick<Transform, 'fit' | 'zoom'>,
+): { w: number; h: number } {
+  if (t.fit === 'stretch') return { w: r.w * t.zoom, h: r.h * t.zoom };
+  const base = t.fit === 'cover'
+    ? Math.max(r.w / source.width, r.h / source.height)
+    : Math.min(r.w / source.width, r.h / source.height);
+  return { w: source.width * base * t.zoom, h: source.height * base * t.zoom };
+}
+
+function mediaTransform(item: MediaItem, fit: Transform['fit'], zoom: number, panX: number, panY: number): Transform {
+  return { fit, zoom, panX, panY, ...normalizeTransform(item) };
+}
+
 /** Fill the whole canvas with a blurred, screen-covering copy of the image. */
-function drawBlurredBackground(ctx: CanvasRenderingContext2D, img: HTMLImageElement, w: number, h: number): void {
+function drawBlurredBackground(ctx: CanvasRenderingContext2D, img: HTMLImageElement, item: MediaItem, w: number, h: number): void {
   const radius = Math.max(8, Math.round(Math.max(w, h) / 40));
   ctx.save();
   ctx.filter = `blur(${radius}px)`;
   // Overscan so the blur doesn't reveal transparent edges.
-  drawCover(ctx, img, { x: -radius * 2, y: -radius * 2, w: w + radius * 4, h: h + radius * 4 });
+  drawTransformed(
+    ctx,
+    img,
+    { x: -radius * 2, y: -radius * 2, w: w + radius * 4, h: h + radius * 4 },
+    mediaTransform(item, 'cover', 1, 0, 0),
+  );
   ctx.restore();
   ctx.fillStyle = 'rgba(0,0,0,0.28)';
   ctx.fillRect(0, 0, w, h);
@@ -166,19 +188,19 @@ export async function compose(items: MediaItem[], opts: ComposeOptions): Promise
   if (valid.length === 0) return canvas;
 
   // Blurred-fill: a blurred copy of the primary image covers the entire screen first.
-  if (opts.fillMode === 'blur') drawBlurredBackground(ctx, valid[0].img, canvas.width, canvas.height);
+  if (opts.fillMode === 'blur') drawBlurredBackground(ctx, valid[0].img, valid[0].item, canvas.width, canvas.height);
 
   const rect = contentRect(canvas.width, canvas.height, opts.aspect);
 
   if (valid.length >= 2) {
     // Dual layout: split the content rect along its longer axis (side-by-side or stacked).
     const [a, b] = splitRect(rect);
-    drawTransformed(ctx, valid[0].img, a, smartTransform(valid[0].item, valid[0].img, a, { fit: 'cover', zoom: 1, panX: 0, panY: 0 }, opts.smartFraming));
-    drawTransformed(ctx, valid[1].img, b, smartTransform(valid[1].item, valid[1].img, b, { fit: 'cover', zoom: 1, panX: 0, panY: 0 }, opts.smartFraming));
+    drawTransformed(ctx, valid[0].img, a, smartTransform(valid[0].item, valid[0].img, a, mediaTransform(valid[0].item, 'cover', 1, 0, 0), opts.smartFraming));
+    drawTransformed(ctx, valid[1].img, b, smartTransform(valid[1].item, valid[1].img, b, mediaTransform(valid[1].item, 'cover', 1, 0, 0), opts.smartFraming));
   } else {
     // blur shows the sharp image "contained" over the blurred background; others use their mode.
     const fit = opts.fillMode === 'blur' ? 'contain' : opts.fillMode;
-    const transform = smartTransform(valid[0].item, valid[0].img, rect, { fit, zoom: opts.zoom, panX: opts.panX, panY: opts.panY }, opts.smartFraming);
+    const transform = smartTransform(valid[0].item, valid[0].img, rect, mediaTransform(valid[0].item, fit, opts.zoom, opts.panX, opts.panY), opts.smartFraming);
     drawTransformed(ctx, valid[0].img, rect, transform);
   }
   return canvas;

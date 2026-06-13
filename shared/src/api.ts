@@ -10,6 +10,7 @@
 
 import type { ApiDataPayload, FrameConfig } from './config.js';
 import type { MediaKind } from './filename.js';
+import type { QuarterTurn } from './transforms.js';
 
 export interface FaceBox {
   x: number;
@@ -75,6 +76,10 @@ export interface MediaItem {
   transcoding?: boolean;
   /** Whether the item is included in automatic slideshow rotation (default true). */
   enabled?: boolean;
+  /** Persisted display transform. Flips are applied before clockwise rotation. */
+  rotation?: QuarterTurn;
+  flipHorizontal?: boolean;
+  flipVertical?: boolean;
 }
 
 /** Response of `/api/current` — the active item(s) plus the loose config payload. */
@@ -139,6 +144,9 @@ export type ControlMessage =
         | 'playbackMediaMode'
         | 'smartFraming'
         | 'showQr'
+        | 'screenRotation'
+        | 'screenFlipHorizontal'
+        | 'screenFlipVertical'
       >> | ApiDataPayload;
     };
 

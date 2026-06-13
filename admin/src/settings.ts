@@ -92,6 +92,7 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload, cu
     renderSharedPanel('playback-media'),
     renderSharedPanel('video-audio'),
     renderSharedPanel('effects'),
+    renderSharedPanel('screen-orientation'),
     renderSharedPanel('scaling'),
     zoomPan ? settingsPanel(
       'zoom-pan',

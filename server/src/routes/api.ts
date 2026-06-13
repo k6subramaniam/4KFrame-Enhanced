@@ -14,6 +14,8 @@ import {
   type CurrentResponse,
   type MediaIdsPayload,
   type MediaItem,
+  isQuarterTurn,
+  type DisplayTransform,
   type SetItemsEnabledPayload,
 } from '@4kframe/shared';
 import { MEDIA_DIR, DATA_DIR } from '../env.js';
@@ -24,6 +26,7 @@ import {
   getItem,
   addItem,
   updateItem,
+  patchItemTransforms,
   removeItem,
   removeItems,
   setItemsEnabled,
@@ -136,6 +139,35 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
     return { ok: true, enabled };
   });
 
+  app.patch('/api/media/transforms', async (req, reply) => {
+    const body = req.body as { ids?: unknown; transform?: Record<string, unknown> } | undefined;
+    if (!body || !Array.isArray(body.ids) || body.ids.length === 0 || body.ids.some((id) => typeof id !== 'string')) {
+      return reply.code(400).send({ error: 'ids must be a non-empty string array' });
+    }
+    const transform = body.transform;
+    if (!transform || typeof transform !== 'object' || Array.isArray(transform)) {
+      return reply.code(400).send({ error: 'transform is required' });
+    }
+    const allowed = new Set(['rotation', 'flipHorizontal', 'flipVertical']);
+    if (Object.keys(transform).length === 0 || Object.keys(transform).some((key) => !allowed.has(key))) {
+      return reply.code(400).send({ error: 'invalid transform fields' });
+    }
+    const patch: Partial<DisplayTransform> = {};
+    if ('rotation' in transform) {
+      if (!isQuarterTurn(transform.rotation)) return reply.code(400).send({ error: 'rotation must be 0, 90, 180, or 270' });
+      patch.rotation = transform.rotation;
+    }
+    for (const key of ['flipHorizontal', 'flipVertical'] as const) {
+      if (key in transform) {
+        if (typeof transform[key] !== 'boolean') return reply.code(400).send({ error: `${key} must be boolean` });
+        patch[key] = transform[key];
+      }
+    }
+    const updated = await patchItemTransforms(body.ids as string[], patch);
+    if (!updated) return reply.code(404).send({ error: 'unknown media id' });
+    refresh();
+    hub.emitEvent({ type: 'library', items: listItems() });
+    return { ok: true, items: updated };
   app.post('/api/items/enabled', async (req, reply) => {
     const ids = mediaIds(req.body);
     const enabled = (req.body as Partial<SetItemsEnabledPayload> | null)?.enabled;
