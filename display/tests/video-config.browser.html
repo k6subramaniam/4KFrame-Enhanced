@@ -4,7 +4,7 @@
   <body>
     <canvas id="gl"></canvas>
     <div id="video-bg"></div>
-    <video id="video" muted playsinline></video>
+    <video id="video" autoplay playsinline></video>
     <div id="clock"></div>
     <div id="caption"></div>
     <div id="qr"><img alt=""></div>
@@ -90,25 +90,36 @@
         });
         await new Promise((resolve) => setTimeout(resolve, 0));
 
+        const initialMutedPlayback = video.muted === true
+          && video.defaultMuted === true
+          && video.volume === 1
+          && playCalls === 1;
         rejectNextPlay = true;
         emit({ type: 'config', config: { ...defaultConfig(), videoMuted: false, videoLoop: false } });
-        const propertiesUpdatedImmediately = video.muted === false && video.loop === false;
+        const propertiesUpdatedImmediately = video.muted === false
+          && video.defaultMuted === false
+          && video.volume === 1
+          && video.loop === false;
         await new Promise((resolve) => setTimeout(resolve, 0));
 
         document.getElementById('next').click();
         const status = document.getElementById('status');
-        const passed = propertiesUpdatedImmediately
+        const passed = initialMutedPlayback
+          && propertiesUpdatedImmediately
           && playCalls === 2
           && video.classList.contains('visible')
           && video.src.endsWith('/photos/sample.mp4')
           && !status.classList.contains('hidden')
-          && status.textContent.includes('Press Play to resume')
+          && status.textContent.includes('blocked by the receiver')
           && sent.some((message) => message.type === 'next');
 
         document.getElementById('result').textContent = JSON.stringify({
           passed,
+          initialMutedPlayback,
           propertiesUpdatedImmediately,
           muted: video.muted,
+          defaultMuted: video.defaultMuted,
+          volume: video.volume,
           loop: video.loop,
           playCalls,
           visible: video.classList.contains('visible'),
