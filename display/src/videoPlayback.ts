@@ -8,7 +8,6 @@ export interface VideoPlaybackSyncOptions {
 type VideoPlaybackElement = Pick<HTMLVideoElement, 'muted' | 'defaultMuted' | 'volume' | 'loop' | 'play'>;
 
 export const AUDIBLE_VIDEO_VOLUME = 1;
-type VideoPlaybackElement = Pick<HTMLVideoElement, 'muted' | 'loop' | 'play'>;
 type SeekableVideoElement = Pick<HTMLVideoElement, 'currentTime' | 'duration' | 'readyState'>;
 
 /** Apply playback preferences immediately and restart an active video after unmuting when requested. */

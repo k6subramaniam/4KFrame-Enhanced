@@ -8,8 +8,6 @@ const source = await readFile(sourceUrl, 'utf8');
 const { outputText: code } = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
 });
-const { syncVideoPlaybackProperties } = await import(`data:text/javascript,${encodeURIComponent(code)}`);
-const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 } }).outputText;
 const { seekActiveVideo, syncVideoPlaybackProperties } = await import(`data:text/javascript,${encodeURIComponent(code)}`);
 
 test('synchronizes muted and loop properties immediately without restarting unchanged playback', () => {
