@@ -1,6 +1,6 @@
 /** Thin REST client for the admin PWA. */
 
-import type { ApiDataPayload, CurrentResponse, MediaItem } from '@4kframe/shared';
+import type { ApiDataPayload, ControlMessage, CurrentResponse, MediaItem } from '@4kframe/shared';
 
 export async function fetchItems(): Promise<MediaItem[]> {
   const res = await fetch('/api/thumbs');
@@ -100,6 +100,25 @@ async function sendPublicConfig(patch: Record<string, string>): Promise<boolean>
     socket.addEventListener('open', onOpen, { once: true });
     socket.addEventListener('error', onFailure, { once: true });
     socket.addEventListener('close', onFailure, { once: true });
+  });
+}
+
+export async function sendControl(message: ControlMessage): Promise<boolean> {
+  const socket = getControlSocket();
+  if (!socket) return false;
+  const payload = JSON.stringify(message);
+  if (socket.readyState === WebSocket.OPEN) {
+    socket.send(payload);
+    return true;
+  }
+  if (socket.readyState !== WebSocket.CONNECTING) return false;
+  return await new Promise<boolean>((resolve) => {
+    const timeout = window.setTimeout(() => resolve(false), CONTROL_SOCKET_TIMEOUT_MS);
+    socket.addEventListener('open', () => {
+      window.clearTimeout(timeout);
+      socket.send(payload);
+      resolve(true);
+    }, { once: true });
   });
 }
 

@@ -5,14 +5,15 @@
  * of photos and videos, the settings panel, and Google Cast sender wiring.
  */
 
-import type { MediaItem } from '@4kframe/shared';
+import type { MediaItem, SeekOffsetSec } from '@4kframe/shared';
 import {
   fetchItems, fetchCurrent, castItem, deleteItem, upload, thumbUrl,
-  skipNext, skipPrev, getPlayback, setPaused, setHold, toggleEnabled,
+  skipNext, skipPrev, getPlayback, setPaused, setHold, toggleEnabled, sendControl,
   me, login, logout,
 } from './api.js';
 import { renderSettings } from './settings.js';
 import { initCastSender, isCastReady, castControl, toggleCastSession } from './cast-sender.js';
+import { createMultiActivationRecognizer, directionalPlaybackAction } from './multiActivation.js';
 
 type Mode = 'cast' | 'view' | 'delete';
 type PeopleFilter = 'all' | 'has-faces' | 'similar-faces' | 'labeled';
@@ -22,6 +23,7 @@ let peopleFilter: PeopleFilter = 'all';
 let sortMode: SortMode = 'date-desc';
 let labelFilter = '';
 let items: MediaItem[] = [];
+let activeItem: MediaItem | undefined;
 
 const grid = document.getElementById('grid') as HTMLElement;
 const hint = document.getElementById('hint') as HTMLElement;
@@ -157,8 +159,8 @@ function wirePeopleFilters(): void {
 
 function wirePlayback(): void {
   const byId = (id: string) => document.getElementById(id) as HTMLButtonElement | null;
-  byId('pb-prev')?.addEventListener('click', () => { skipPrev().catch(() => {}); });
-  byId('pb-next')?.addEventListener('click', () => { skipNext().catch(() => {}); });
+  wireDirectionalButton(byId('pb-prev'), -5, -15, skipPrev);
+  wireDirectionalButton(byId('pb-next'), 5, 15, skipNext);
   byId('pb-play')?.addEventListener('click', async () => {
     const p = await getPlayback().catch(() => null);
     await setPaused(!(p?.paused)).catch(() => {});
@@ -171,11 +173,49 @@ function wirePlayback(): void {
   });
 }
 
+async function seek(offsetSec: SeekOffsetSec): Promise<void> {
+  const message = { type: 'seek' as const, offsetSec };
+  if (await castControl(message)) return;
+  await sendControl(message);
+}
+
+function wireDirectionalButton(
+  button: HTMLButtonElement | null,
+  singleOffset: SeekOffsetSec,
+  doubleOffset: SeekOffsetSec,
+  navigatePhoto: () => Promise<void>,
+): void {
+  if (!button) return;
+  const run = (offset: SeekOffsetSec): void => {
+    const action = directionalPlaybackAction(activeItem?.kind, offset);
+    if (action.type === 'seek') seek(offset).catch(() => {});
+    else navigatePhoto().catch(() => {});
+  };
+  const recognizer = createMultiActivationRecognizer(
+    () => run(singleOffset),
+    () => run(doubleOffset),
+  );
+  button.addEventListener('click', recognizer.activate);
+}
+
 async function syncPlayback(): Promise<void> {
   const p = await getPlayback().catch(() => ({ paused: false, holding: false }));
-  const play = document.getElementById('pb-play');
-  if (play) { play.textContent = p.paused ? '▶' : '⏸'; play.classList.toggle('active', p.paused); }
-  document.getElementById('pb-loop')?.classList.toggle('active', p.holding);
+  const play = document.getElementById('pb-play') as HTMLButtonElement | null;
+  if (play) {
+    const action = p.paused ? 'Resume media playback' : 'Pause media playback';
+    play.textContent = p.paused ? '▶' : '⏸';
+    play.classList.toggle('active', p.paused);
+    play.setAttribute('aria-label', action);
+    play.title = action;
+  }
+  const loop = document.getElementById('pb-loop') as HTMLButtonElement | null;
+  if (loop) {
+    const action = p.holding ? 'Stop looping current media' : 'Loop current media';
+    loop.classList.toggle('active', p.holding);
+    loop.setAttribute('aria-pressed', String(p.holding));
+    loop.setAttribute('aria-label', action);
+    loop.title = action;
+  }
 }
 
 async function onTileClick(item: MediaItem): Promise<void> {
@@ -198,10 +238,24 @@ async function refresh(): Promise<void> {
   syncPeopleLabels();
   renderGrid();
   const current = await fetchCurrent();
-  const currentItem = items.find((item) => current.current.includes(item.file));
-  await renderSettings(settingsRoot, current.data, currentItem);
+  activeItem = items.find((item) => current.current.includes(item.file));
+  await renderSettings(settingsRoot, current.data, activeItem);
+  updatePlaybackLabels();
   setControlsOpen(controlsOpen);
   await syncPlayback();
+}
+
+function updatePlaybackLabels(): void {
+  const videoActive = activeItem?.kind === 'video';
+  const labels = [
+    ['pb-prev', videoActive ? 'Seek backward 5 seconds; activate twice for 15 seconds' : 'Previous photo'],
+    ['pb-next', videoActive ? 'Seek forward 5 seconds; activate twice for 15 seconds' : 'Next photo'],
+  ] as const;
+  for (const [id, label] of labels) {
+    const button = document.getElementById(id);
+    button?.setAttribute('title', label);
+    button?.setAttribute('aria-label', label);
+  }
 }
 
 function setMode(next: Mode): void {
