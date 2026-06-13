@@ -6,6 +6,7 @@
     "dev": "vite",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "preview": "vite preview",
+    "test": "rm -rf dist-test && tsc -p tsconfig.test.json && node --test dist-test/cropTapGesture.test.js && rm -rf dist-test",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
