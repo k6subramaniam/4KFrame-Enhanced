@@ -364,6 +364,14 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
 }
 
 // --- helpers ---
+    const updated = await patchItemTransforms(body.ids as string[], patch);
+    if (!updated) return reply.code(404).send({ error: 'unknown media id' });
+    refresh();
+    hub.emitEvent({ type: 'library', items: listItems() });
+    return { ok: true, items: updated };
+  });
+
+  app.post('/api/items/enabled', async (req, reply) => {
 
 /** Ingest one uploaded file (image or video), store it, and queue any transcode. */
 async function ingestUpload(buf: Buffer, filename: string, mimetype?: string): Promise<MediaItem> {
