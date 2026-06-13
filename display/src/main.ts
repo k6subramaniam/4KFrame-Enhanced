@@ -45,6 +45,7 @@ let receivedConfigEvent = false;
 let receivedPausedEvent = false;
 let lastPlaybackReportAt = 0;
 const PLAYBACK_REPORT_INTERVAL_MS = 1_000;
+const PLAYBACK_HEARTBEAT_INTERVAL_MS = 2_000;
 
 /** Forward a control message to the backend (used to bridge Cast custom messages). */
 function sendControl(msg: ControlMessage): void {
@@ -354,6 +355,10 @@ video.addEventListener('loadedmetadata', () => reportVideoPlayback(true));
 video.addEventListener('durationchange', () => reportVideoPlayback(true));
 video.addEventListener('timeupdate', () => reportVideoPlayback());
 video.addEventListener('seeked', () => reportVideoPlayback(true));
+// `timeupdate` stops while paused, but the server intentionally expires playback
+// reports after five seconds. Keep the active video's transient state fresh so
+// Admin controls continue to seek rather than falling back to slideshow navigation.
+window.setInterval(() => reportVideoPlayback(), PLAYBACK_HEARTBEAT_INTERVAL_MS);
 
 /**
  * TV remote / keyboard control. D-pad and OK on TV browsers arrive as arrow + Enter keys;
@@ -890,6 +895,7 @@ function connect(): void {
   socket = ws;
   ws.onopen = () => {
     setStatus('');
+    reportVideoPlayback(true);
   };
   ws.onmessage = (ev) => {
     try { handleEvent(JSON.parse(ev.data) as FrameEvent); } catch { /* ignore */ }
