@@ -1,4 +1,15 @@
 {
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "./dist-test",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "noEmit": false
+  },
+  "include": ["src/api.ts", "src/playbackState.ts", "tests/**/*.ts"]
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "module": "NodeNext",

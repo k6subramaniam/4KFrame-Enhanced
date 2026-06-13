@@ -7,7 +7,7 @@
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test tests/*.test.mjs"
+    "test": "rm -rf dist-test && tsc -p tsconfig.test.json && node --test dist-test/tests/*.test.js"
   },
   "dependencies": {
     "@4kframe/shared": "*"

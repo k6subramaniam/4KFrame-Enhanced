@@ -43,12 +43,28 @@ let paused = false;
 let holding = false;
 let receivedConfigEvent = false;
 let receivedPausedEvent = false;
+let lastPlaybackReportAt = 0;
+const PLAYBACK_REPORT_INTERVAL_MS = 1_000;
 
 /** Forward a control message to the backend (used to bridge Cast custom messages). */
 function sendControl(msg: ControlMessage): void {
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify(msg));
   }
+}
+
+function reportVideoPlayback(force = false): void {
+  if (!showingVideo || !lastVideoItem) return;
+  const now = Date.now();
+  if (!force && now - lastPlaybackReportAt < PLAYBACK_REPORT_INTERVAL_MS) return;
+  lastPlaybackReportAt = now;
+  sendControl({
+    type: 'playbackState',
+    itemId: lastVideoItem.id,
+    currentTime: Number.isFinite(video.currentTime) ? video.currentTime : 0,
+    duration: Number.isFinite(video.duration) ? video.duration : 0,
+    seekable: video.seekable.length > 0 && Number.isFinite(video.duration) && video.duration > 0,
+  });
 }
 
 /** This display's render size in device pixels, capped to bound texture memory. */
@@ -165,6 +181,7 @@ async function renderVideo(item: MediaItem): Promise<void> {
   syncActiveVideoPlaybackProperties();
   video.onerror = () => handleVideoError(item);
   video.src = `/photos/${item.file}`;
+  lastPlaybackReportAt = 0;
   video.classList.add('visible');
   try {
     await video.play();
@@ -172,6 +189,7 @@ async function renderVideo(item: MediaItem): Promise<void> {
     reportPlaybackBlocked(error);
   }
   setCaption([item], config);
+  reportVideoPlayback(true);
 }
 
 /** A video that can't be decoded (bad/unsupported file) shouldn't freeze the frame on black. */
@@ -325,11 +343,22 @@ function handleEvent(event: FrameEvent): void {
       if (showingVideo) syncActiveVideoPlaybackProperties();
       setStatus(statusText());
       break;
+    case 'seek':
+      if (showingVideo && lastVideoItem?.id === event.itemId && Number.isFinite(video.duration)) {
+        video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + event.deltaSec));
+        reportVideoPlayback(true);
+      }
+      break;
     case 'log':
       if (event.level === 'error') console.error(event.message);
       break;
   }
 }
+
+video.addEventListener('loadedmetadata', () => reportVideoPlayback(true));
+video.addEventListener('durationchange', () => reportVideoPlayback(true));
+video.addEventListener('timeupdate', () => reportVideoPlayback());
+video.addEventListener('seeked', () => reportVideoPlayback(true));
 
 /**
  * TV remote / keyboard control. D-pad and OK on TV browsers arrive as arrow + Enter keys;
