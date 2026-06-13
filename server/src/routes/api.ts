@@ -169,6 +169,7 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
     hub.emitEvent({ type: 'library', items: listItems() });
     return { ok: true, items: updated };
   });
+sed -i "171i\\  });\\n" server/src/routes/api.ts
 
   app.post('/api/items/enabled', async (req, reply) => {
     const ids = mediaIds(req.body);
