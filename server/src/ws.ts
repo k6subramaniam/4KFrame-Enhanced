@@ -12,6 +12,7 @@ import {
   FRAME_ASPECTS,
   MOTION_MODES,
   PLAYBACK_MEDIA_MODES,
+  isSeekOffsetSec,
   TRANSITIONS,
   type ControlMessage,
   type FillMode,
@@ -45,7 +46,7 @@ type PublicConfigPatch = Partial<Pick<FrameConfig,
 const ADMIN_CONTROL_TYPES = new Set<ControlMessage['type']>(['progress', 'cast', 'config']);
 // These display-local controls remain public so unauthenticated display receivers can
 // keep working when the admin password gates the admin UI and management APIs.
-const PUBLIC_DISPLAY_CONTROL_TYPES = new Set<ControlMessage['type']>(['next', 'previous', 'pause', 'resume', 'publicConfig']);
+const PUBLIC_DISPLAY_CONTROL_TYPES = new Set<ControlMessage['type']>(['next', 'previous', 'pause', 'resume', 'seek', 'publicConfig']);
 const PUBLIC_CONFIG_KEYS = new Set([
   'photoPeriod',
   'transitionPeriod',
@@ -192,6 +193,9 @@ export async function registerWs(app: FastifyInstance): Promise<void> {
         case 'progress': progress(); break;
         case 'next': next(); break;
         case 'previous': previous(); break;
+        case 'seek':
+          if (isSeekOffsetSec(msg.offsetSec)) hub.emitEvent({ type: 'seek', offsetSec: msg.offsetSec });
+          break;
         case 'pause': setPaused(true); break;
         case 'resume': setPaused(false); break;
         case 'cast': await cast(msg.id); break;

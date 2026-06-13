@@ -24,7 +24,7 @@ import { GLRenderer } from './gl.js';
 import { compose, contentRect } from './compositor.js';
 import { applyOverlays, setCaption, setStatus } from './overlays.js';
 import { initCastReceiver } from './cast.js';
-import { syncVideoPlaybackProperties } from './videoPlayback.js';
+import { seekActiveVideo, syncVideoPlaybackProperties } from './videoPlayback.js';
 
 const canvas = document.getElementById('gl') as HTMLCanvasElement;
 const video = document.getElementById('video') as HTMLVideoElement;
@@ -297,6 +297,9 @@ function handleEvent(event: FrameEvent): void {
       break;
     case 'show':
       renderItems(event.items, event.interactive).catch((err) => console.error(err));
+      break;
+    case 'seek':
+      seekActiveVideo(video, event.offsetSec, showingVideo);
       break;
     case 'library':
       // No-op for the display; the server drives what is shown.
