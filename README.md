@@ -200,3 +200,10 @@ personal/non-commercial use, mirroring the original.
 ## License
 
 MIT
+# Ordered playback queues
+
+Bulk “Play selected in sequence” creates a transient ordered queue. The frame stops on
+the final selected item rather than wrapping. Previous/next are bounded by the queue,
+and pause/hold apply normally. Starting normal library playback or casting an unrelated
+item clears the queue. `MediaItem.enabled` is the persisted **Favorite** flag; Favorites
+are the items eligible for automatic playback.

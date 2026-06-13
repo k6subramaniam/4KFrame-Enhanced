@@ -88,6 +88,18 @@ export interface ThumbsResponse {
   items: MediaItem[];
 }
 
+export interface MediaIdsPayload {
+  ids: string[];
+}
+
+export interface SetItemsEnabledPayload extends MediaIdsPayload {
+  enabled: boolean;
+}
+
+export interface QueueState {
+  ids: string[];
+  index: number;
+  active: boolean;
 /** Transient playback details reported by a connected display for the active video. */
 export interface DisplayPlaybackState {
   itemId: string;
@@ -109,6 +121,8 @@ export type ControlMessage =
   | { type: 'resume' }
   | { type: 'playbackState'; itemId: string; currentTime: number; duration: number; seekable: boolean }
   | { type: 'cast'; id: string }
+  | { type: 'playSequence'; ids: string[] }
+  | { type: 'clearQueue' }
   | { type: 'config'; patch: Partial<FrameConfig> | ApiDataPayload }
   | {
       type: 'publicConfig';
@@ -136,6 +150,7 @@ export type FrameEvent =
   | { type: 'library'; items: MediaItem[] }
   | { type: 'paused'; paused: boolean }
   | { type: 'hold'; holding: boolean }
+  | { type: 'queue'; queue: QueueState }
   | { type: 'seek'; itemId: string; deltaSec: number }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; message: string };
 

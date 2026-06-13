@@ -12,7 +12,9 @@ import {
   toApiData,
   type ApiDataPayload,
   type CurrentResponse,
+  type MediaIdsPayload,
   type MediaItem,
+  type SetItemsEnabledPayload,
 } from '@4kframe/shared';
 import { MEDIA_DIR, DATA_DIR } from '../env.js';
 import {
@@ -23,6 +25,8 @@ import {
   addItem,
   updateItem,
   removeItem,
+  removeItems,
+  setItemsEnabled,
 } from '../store.js';
 import { ingestImage } from '../media/images.js';
 import { ingestVideo } from '../media/video.js';
@@ -31,6 +35,7 @@ import { enqueueFaceDetection } from '../media/faceJob.js';
 import {
   cast, next, previous, progress, getCurrent, refresh,
   setPaused, setHold, isPaused, isHolding,
+  playSequence,
 } from '../slideshow.js';
 import { hub } from '../hub.js';
 import * as gphotos from '../integrations/googlePhotos.js';
@@ -39,6 +44,14 @@ import * as auth from '../auth.js';
 import { getDisplayPlayback } from '../displayPlayback.js';
 
 const VIDEO_EXT = new Set(['mp4', 'webm', 'mov', 'm4v', 'mkv']);
+const MAX_BULK_IDS = 500;
+
+function mediaIds(body: unknown): string[] | null {
+  const ids = (body as Partial<MediaIdsPayload> | null)?.ids;
+  if (!Array.isArray(ids) || ids.length < 1 || ids.length > MAX_BULK_IDS) return null;
+  if (ids.some((id) => typeof id !== 'string' || id.length < 1 || id.length > 256)) return null;
+  return [...new Set(ids)];
+}
 
 /** Scratch dir for in-progress chunked uploads. */
 const UPLOADS_DIR = path.join(DATA_DIR, '.uploads');
@@ -121,6 +134,39 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
     refresh();
     hub.emitEvent({ type: 'library', items: listItems() });
     return { ok: true, enabled };
+  });
+
+  app.post('/api/items/enabled', async (req, reply) => {
+    const ids = mediaIds(req.body);
+    const enabled = (req.body as Partial<SetItemsEnabledPayload> | null)?.enabled;
+    if (!ids || typeof enabled !== 'boolean') return reply.code(400).send({ error: 'invalid media ids or enabled flag' });
+    const missing = ids.filter((id) => !getItem(id));
+    if (missing.length) return reply.code(404).send({ error: 'media not found', missing });
+    await setItemsEnabled(ids, enabled);
+    refresh();
+    hub.emitEvent({ type: 'library', items: listItems() });
+    return { ok: true, updated: ids };
+  });
+
+  app.delete('/api/items', async (req, reply) => {
+    const ids = mediaIds(req.body);
+    if (!ids) return reply.code(400).send({ error: 'invalid media ids' });
+    const missing = ids.filter((id) => !getItem(id));
+    if (missing.length) return reply.code(404).send({ error: 'media not found', missing });
+    const removed = await removeItems(ids);
+    const failures = await deleteAssetsForItems(removed);
+    refresh();
+    hub.emitEvent({ type: 'library', items: listItems() });
+    if (failures.length) return reply.code(207).send({ ok: false, deleted: ids, failures });
+    return { ok: true, deleted: ids, failures: [] };
+  });
+
+  app.post('/api/play-sequence', async (req, reply) => {
+    const ids = mediaIds(req.body);
+    if (!ids) return reply.code(400).send({ error: 'invalid media ids' });
+    const missing = ids.filter((id) => !getItem(id));
+    if (missing.length || !playSequence(ids)) return reply.code(404).send({ error: 'media not found', missing });
+    return { ok: true, ids };
   });
 
   app.get('/api/current', async (): Promise<CurrentResponse> => {
@@ -327,6 +373,21 @@ async function deleteAssets(item: MediaItem): Promise<void> {
   await Promise.all(
     [...names].map((n) => fs.rm(path.join(MEDIA_DIR, n)).catch(() => undefined)),
   );
+}
+
+async function deleteAssetsForItems(items: MediaItem[]): Promise<{ id: string; asset: string; error: string }[]> {
+  const failures: { id: string; asset: string; error: string }[] = [];
+  await Promise.all(items.flatMap((item) => {
+    const names = new Set([item.file, item.preview, item.thumb, item.poster].filter(Boolean) as string[]);
+    return [...names].map(async (asset) => {
+      try {
+        await fs.rm(path.join(MEDIA_DIR, asset), { force: true });
+      } catch (error) {
+        failures.push({ id: item.id, asset, error: (error as Error).message });
+      }
+    });
+  }));
+  return failures;
 }
 
 function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {

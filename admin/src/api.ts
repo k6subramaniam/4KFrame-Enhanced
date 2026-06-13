@@ -2,6 +2,15 @@
 
 import type { ApiDataPayload, CurrentResponse, DisplayPlaybackState, MediaItem, MediaKind } from '@4kframe/shared';
 
+async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, init);
+  const body = await res.json().catch(() => ({})) as { error?: string; failures?: unknown[] };
+  if (!res.ok || body.failures?.length) {
+    throw new Error(body.error ?? `Request failed (${res.status})${body.failures?.length ? `: ${body.failures.length} asset operation(s) failed` : ''}`);
+  }
+  return body as T;
+}
+
 export async function fetchItems(): Promise<MediaItem[]> {
   const res = await fetch('/api/thumbs');
   const json = (await res.json()) as { items: MediaItem[] };
@@ -134,6 +143,24 @@ export async function castItem(id: string): Promise<void> {
 
 export async function deleteItem(id: string): Promise<void> {
   await fetch(`/api/delete/${id}`);
+}
+
+export async function setItemsEnabled(ids: string[], enabled: boolean): Promise<void> {
+  await requestJson('/api/items/enabled', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids, enabled }),
+  });
+}
+
+export async function deleteItems(ids: string[]): Promise<void> {
+  await requestJson('/api/items', {
+    method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }),
+  });
+}
+
+export async function playSequence(ids: string[]): Promise<void> {
+  await requestJson('/api/play-sequence', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }),
+  });
 }
 
 export interface AuthState { required: boolean; authed: boolean; }

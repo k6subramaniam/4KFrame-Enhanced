@@ -165,3 +165,52 @@ test('playbackMediaMode photos with only videos leaves no current item', async (
   assert.doesNotThrow(() => slideshow.previous());
   assert.deepEqual(slideshow.getCurrent(), []);
 });
+
+test('ordered queue follows submitted order and stops at both boundaries', async () => {
+  await resetStore(
+    [photo('a', 1600, 900), photo('b', 1600, 900), photo('c', 1600, 900)],
+    { playbackMediaMode: 'both' },
+  );
+  assert.equal(slideshow.playSequence(['c', 'a', 'b']), true);
+  assert.deepEqual(slideshow.getCurrent().map((item) => item.id), ['c']);
+  slideshow.previous();
+  assert.deepEqual(slideshow.getCurrent().map((item) => item.id), ['c']);
+  slideshow.next();
+  assert.deepEqual(slideshow.getCurrent().map((item) => item.id), ['a']);
+  slideshow.next();
+  assert.deepEqual(slideshow.getCurrent().map((item) => item.id), ['b']);
+  slideshow.next();
+  assert.deepEqual(slideshow.getCurrent().map((item) => item.id), ['b']);
+  assert.equal(slideshow.getQueueState().active, true);
+});
+
+test('ordered queue rejects missing ids without replacing playback', async () => {
+  await resetStore([photo('a', 1600, 900)], { playbackMediaMode: 'both' });
+  assert.equal(slideshow.playSequence(['a', 'missing']), false);
+  assert.deepEqual(slideshow.getCurrent().map((item) => item.id), ['a']);
+  assert.equal(slideshow.getQueueState().active, false);
+});
+
+test('refresh removes deleted queue entries and preserves the remaining order', async () => {
+  await resetStore(
+    [photo('a', 1600, 900), photo('b', 1600, 900), photo('c', 1600, 900)],
+    { playbackMediaMode: 'both' },
+  );
+  slideshow.playSequence(['a', 'b', 'c']);
+  await store.removeItem('b');
+  slideshow.refresh();
+  assert.deepEqual(slideshow.getQueueState().ids, ['a', 'c']);
+  slideshow.next();
+  assert.deepEqual(slideshow.getCurrent().map((item) => item.id), ['c']);
+});
+
+test('casting an unrelated item clears the transient queue', async () => {
+  await resetStore(
+    [photo('a', 1600, 900), photo('b', 1600, 900)],
+    { playbackMediaMode: 'both' },
+  );
+  slideshow.playSequence(['a']);
+  assert.equal(await slideshow.cast('b'), true);
+  assert.equal(slideshow.getQueueState().active, false);
+  assert.deepEqual(slideshow.getCurrent().map((item) => item.id), ['b']);
+});
