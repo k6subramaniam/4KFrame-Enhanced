@@ -371,8 +371,7 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
     return { ok: true, items: updated };
   });
 
-  app.post('/api/items/enabled', 
-  async (req, reply) => {
+  app.post('/api/items/enabled', async (req, reply) => {
 
 /** Ingest one uploaded file (image or video), store it, and queue any transcode. */
 async function ingestUpload(buf: Buffer, filename: string, mimetype?: string): Promise<MediaItem> {
