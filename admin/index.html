@@ -27,6 +27,9 @@
       .tile .badge.dur { top:auto; bottom:.4rem; right:.4rem; left:auto; font-variant-numeric:tabular-nums; }
       .tile .incl { position:absolute; top:.35rem; right:.35rem; width:1.5rem; height:1.5rem; padding:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.6); border:1px solid var(--line); border-radius:.4rem; color:#fff; cursor:pointer; font-size:.8rem; }
       .tile.excluded img, .tile.excluded .ph { opacity:.3; filter:grayscale(1); }
+      .tile.selected { outline:3px solid var(--accent); outline-offset:1px; }
+      .tile .badge-transform { top:auto; bottom:2rem; left:.4rem; }
+      #media-transform-tools { margin:.75rem 0; }
       #control-sheet-header { display:none; }
       #controls-toggle { display:none; }
       #controls-backdrop { display:none; }
@@ -184,6 +187,14 @@
         </div>
       </section>
       <p class="muted" id="hint">Cast mode: click a photo to show it on the frame.</p>
+      <div id="media-transform-tools" class="row" role="toolbar" aria-label="Media orientation controls">
+        <button id="media-select" type="button" aria-label="Toggle media selection mode">Select</button>
+        <button id="media-rotate-left" type="button" aria-label="Rotate selected media left 90 degrees">↶ Rotate left</button>
+        <button id="media-rotate-right" type="button" aria-label="Rotate selected media right 90 degrees">↷ Rotate right</button>
+        <button id="media-flip-horizontal" type="button" aria-label="Flip selected media horizontally">↔ Flip horizontal</button>
+        <button id="media-flip-vertical" type="button" aria-label="Flip selected media vertically">↕ Flip vertical</button>
+        <span id="media-selection-count" class="muted">Current item</span>
+      </div>
       <div id="grid" class="grid"></div>
     </main>
     <script type="module" src="/src/main.ts"></script>

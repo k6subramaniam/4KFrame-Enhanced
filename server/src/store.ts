@@ -12,6 +12,8 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
   defaultConfig,
+  normalizeTransform,
+  type DisplayTransform,
   type FrameConfig,
   type MediaItem,
 } from '@4kframe/shared';
@@ -41,7 +43,7 @@ export async function initStore(): Promise<void> {
     const parsed = JSON.parse(raw) as Partial<DbDocument>;
     doc = {
       config: { ...defaultConfig(), ...(parsed.config ?? {}) },
-      items: parsed.items ?? [],
+      items: (parsed.items ?? []).map((item) => ({ ...item, ...normalizeTransform(item) })),
       order: parsed.order ?? (parsed.items ?? []).map((i) => i.id),
       googleTokens: parsed.googleTokens,
     };
@@ -109,6 +111,16 @@ export async function updateItem(id: string, patch: Partial<MediaItem>): Promise
   Object.assign(item, patch);
   await flush();
   return item;
+}
+
+export async function patchItemTransforms(ids: string[], patch: Partial<DisplayTransform>): Promise<MediaItem[] | undefined> {
+  const d = db();
+  const uniqueIds = [...new Set(ids)];
+  const selected = uniqueIds.map((id) => d.items.find((item) => item.id === id));
+  if (selected.some((item) => !item)) return undefined;
+  for (const item of selected as MediaItem[]) Object.assign(item, patch);
+  await flush();
+  return selected as MediaItem[];
 }
 
 export async function removeItem(id: string): Promise<MediaItem | undefined> {

@@ -25,6 +25,9 @@ const STRING_PUBLIC_CONFIG_KEYS = new Set([
   'playbackMediaMode',
   'smartFraming',
   'showQr',
+  'screenRotation',
+  'screenFlipHorizontal',
+  'screenFlipVertical',
 ]);
 
 let controlSocket: WebSocket | null = null;
@@ -157,6 +160,19 @@ export async function toggleEnabled(id: string): Promise<boolean> {
   const res = await fetch(`/api/toggle/${id}`);
   const json = (await res.json()) as { enabled: boolean };
   return json.enabled;
+}
+
+export async function patchMediaTransforms(
+  ids: string[],
+  transform: Partial<Pick<MediaItem, 'rotation' | 'flipHorizontal' | 'flipVertical'>>,
+): Promise<MediaItem[]> {
+  const res = await fetch('/api/media/transforms', {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ids, transform }),
+  });
+  if (!res.ok) throw new Error((await res.json() as { error?: string }).error ?? 'transform update failed');
+  return ((await res.json()) as { items: MediaItem[] }).items;
 }
 
 export interface UploadResult {

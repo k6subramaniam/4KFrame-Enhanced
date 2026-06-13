@@ -10,6 +10,7 @@ import {
   fetchItems, fetchCurrent, castItem, deleteItem, upload, thumbUrl,
   skipNext, skipPrev, getPlayback, setPaused, setHold, toggleEnabled,
   me, login, logout,
+  patchMediaTransforms,
 } from './api.js';
 import { renderSettings } from './settings.js';
 import { initCastSender, isCastReady, castControl, toggleCastSession } from './cast-sender.js';
@@ -22,6 +23,8 @@ let peopleFilter: PeopleFilter = 'all';
 let sortMode: SortMode = 'date-desc';
 let labelFilter = '';
 let items: MediaItem[] = [];
+let selectionMode = false;
+const selectedIds = new Set<string>();
 
 const grid = document.getElementById('grid') as HTMLElement;
 const hint = document.getElementById('hint') as HTMLElement;
@@ -54,7 +57,7 @@ function renderGrid(): void {
   for (const item of visibleItems) {
     const tile = document.createElement('div');
     const excluded = item.enabled === false;
-    tile.className = `tile ${mode}${excluded ? ' excluded' : ''}`;
+    tile.className = `tile ${mode}${excluded ? ' excluded' : ''}${selectedIds.has(item.id) ? ' selected' : ''}`;
     // Videos only have an image thumb once a poster exists; otherwise show a placeholder.
     const hasImageThumb = item.kind === 'photo' || !!item.poster;
     const dur = item.kind === 'video' && item.durationSec
@@ -64,6 +67,8 @@ function renderGrid(): void {
       (item.kind === 'video' ? '<span class="badge">▶ video</span>' : '') +
       (item.transcoding ? '<span class="badge badge-proc">⏳ processing</span>' : '') +
       (item.faces?.length ? `<span class="badge badge-face">☺ ${item.faces.length}</span>` : '') +
+      ((item.rotation || item.flipHorizontal || item.flipVertical)
+        ? `<span class="badge badge-transform">${item.rotation ?? 0}°${item.flipHorizontal ? ' ↔' : ''}${item.flipVertical ? ' ↕' : ''}</span>` : '') +
       dur +
       `<button class="incl" title="${excluded ? 'Excluded — tap to include in slideshow' : 'Included — tap to exclude from slideshow'}">${excluded ? '🚫' : '✓'}</button>`;
     tile.addEventListener('click', () => onTileClick(item));
@@ -179,6 +184,12 @@ async function syncPlayback(): Promise<void> {
 }
 
 async function onTileClick(item: MediaItem): Promise<void> {
+  if (selectionMode) {
+    if (selectedIds.has(item.id)) selectedIds.delete(item.id); else selectedIds.add(item.id);
+    renderGrid();
+    syncTransformToolbar();
+    return;
+  }
   if (mode === 'cast') {
     // Prefer a live Cast session (native Google Cast); fall back to the LAN REST flow.
     const sent = await castControl({ type: 'cast', id: item.id });
@@ -191,6 +202,45 @@ async function onTileClick(item: MediaItem): Promise<void> {
       await refresh();
     }
   }
+}
+
+function syncTransformToolbar(): void {
+  document.getElementById('media-transform-tools')?.classList.toggle('selection-active', selectionMode);
+  const count = document.getElementById('media-selection-count');
+  if (count) count.textContent = selectionMode ? `${selectedIds.size} selected` : 'Current item';
+}
+
+async function applyMediaTransform(action: 'left' | 'right' | 'horizontal' | 'vertical'): Promise<void> {
+  const current = await fetchCurrent();
+  const targetIds = selectionMode
+    ? [...selectedIds]
+    : items.filter((item) => current.current.includes(item.file)).map((item) => item.id);
+  if (!targetIds.length) return;
+  const targets = targetIds.map((id) => items.find((item) => item.id === id)).filter((item): item is MediaItem => Boolean(item));
+  // Batch equal resulting values together; mixed selections may need separate patches.
+  for (const item of targets) {
+    const rotation = item.rotation ?? 0;
+    const transform = action === 'left' ? { rotation: ((rotation + 270) % 360) as MediaItem['rotation'] }
+      : action === 'right' ? { rotation: ((rotation + 90) % 360) as MediaItem['rotation'] }
+        : action === 'horizontal' ? { flipHorizontal: !item.flipHorizontal }
+          : { flipVertical: !item.flipVertical };
+    await patchMediaTransforms([item.id], transform);
+  }
+  await refresh();
+}
+
+function wireMediaTransforms(): void {
+  document.getElementById('media-select')?.addEventListener('click', () => {
+    selectionMode = !selectionMode;
+    if (!selectionMode) selectedIds.clear();
+    renderGrid();
+    syncTransformToolbar();
+  });
+  for (const [id, action] of [
+    ['media-rotate-left', 'left'], ['media-rotate-right', 'right'],
+    ['media-flip-horizontal', 'horizontal'], ['media-flip-vertical', 'vertical'],
+  ] as const) document.getElementById(id)?.addEventListener('click', () => { applyMediaTransform(action).catch(console.error); });
+  syncTransformToolbar();
 }
 
 async function refresh(): Promise<void> {
@@ -308,6 +358,7 @@ async function start(): Promise<void> {
     wirePlayback();
     wireControlSheet();
     wirePeopleFilters();
+    wireMediaTransforms();
     setMode('cast');
   }
   await refresh();

@@ -21,6 +21,7 @@ import {
   type MotionMode,
   type PlaybackMediaMode,
   type TransitionName,
+  isQuarterTurn,
 } from '@4kframe/shared';
 import { hub } from './hub.js';
 import { getConfig, setConfig } from './store.js';
@@ -40,6 +41,9 @@ type PublicConfigPatch = Partial<Pick<FrameConfig,
   | 'playbackMediaMode'
   | 'smartFraming'
   | 'showQr'
+  | 'screenRotation'
+  | 'screenFlipHorizontal'
+  | 'screenFlipVertical'
 >>;
 
 const ADMIN_CONTROL_TYPES = new Set<ControlMessage['type']>(['progress', 'cast', 'config']);
@@ -59,6 +63,9 @@ const PUBLIC_CONFIG_KEYS = new Set([
   'playbackMediaMode',
   'smartFraming',
   'showQr',
+  'screenRotation',
+  'screenFlipHorizontal',
+  'screenFlipVertical',
 ]);
 
 function clamp(value: number, min: number, max: number): number {
@@ -145,6 +152,19 @@ function validatePublicConfigPatch(patch: unknown): PublicConfigPatch | null {
         const parsed = parseBoolean(value);
         if (parsed === null) return null;
         sanitized.showQr = parsed;
+        break;
+      }
+      case 'screenRotation': {
+        const parsed = parseNumber(value);
+        if (!isQuarterTurn(parsed)) return null;
+        sanitized.screenRotation = parsed;
+        break;
+      }
+      case 'screenFlipHorizontal':
+      case 'screenFlipVertical': {
+        const parsed = parseBoolean(value);
+        if (parsed === null) return null;
+        sanitized[key] = parsed;
         break;
       }
     }
