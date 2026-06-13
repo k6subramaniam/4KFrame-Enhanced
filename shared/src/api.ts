@@ -105,6 +105,8 @@ export interface QueueState {
   ids: string[];
   index: number;
   active: boolean;
+}
+
 /** Transient playback details reported by a connected display for the active video. */
 export interface DisplayPlaybackState {
   itemId: string;

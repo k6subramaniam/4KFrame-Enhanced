@@ -121,6 +121,8 @@ export async function patchItemTransforms(ids: string[], patch: Partial<DisplayT
   for (const item of selected as MediaItem[]) Object.assign(item, patch);
   await flush();
   return selected as MediaItem[];
+}
+
 /** Atomically update the Favorite/automatic-playback flag for existing items. */
 export async function setItemsEnabled(ids: string[], enabled: boolean): Promise<MediaItem[]> {
   const wanted = new Set(ids);
