@@ -88,6 +88,15 @@ export interface ThumbsResponse {
   items: MediaItem[];
 }
 
+/** Transient playback details reported by a connected display for the active video. */
+export interface DisplayPlaybackState {
+  itemId: string;
+  currentTime: number;
+  duration: number;
+  seekable: boolean;
+  observedAt: number;
+}
+
 // --- WebSocket protocol (`/ws`) ---
 
 /** Commands a controller (admin / cast sender / display remote) sends to the server. */
@@ -97,6 +106,7 @@ export type ControlMessage =
   | { type: 'previous' }
   | { type: 'pause' }
   | { type: 'resume' }
+  | { type: 'playbackState'; itemId: string; currentTime: number; duration: number; seekable: boolean }
   | { type: 'cast'; id: string }
   | { type: 'config'; patch: Partial<FrameConfig> | ApiDataPayload }
   | {
@@ -124,6 +134,7 @@ export type FrameEvent =
   | { type: 'library'; items: MediaItem[] }
   | { type: 'paused'; paused: boolean }
   | { type: 'hold'; holding: boolean }
+  | { type: 'seek'; itemId: string; deltaSec: number }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; message: string };
 
 export type WsMessage = ControlMessage | FrameEvent;

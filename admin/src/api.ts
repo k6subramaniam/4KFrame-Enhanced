@@ -1,6 +1,6 @@
 /** Thin REST client for the admin PWA. */
 
-import type { ApiDataPayload, CurrentResponse, MediaItem } from '@4kframe/shared';
+import type { ApiDataPayload, CurrentResponse, DisplayPlaybackState, MediaItem, MediaKind } from '@4kframe/shared';
 
 export async function fetchItems(): Promise<MediaItem[]> {
   const res = await fetch('/api/thumbs');
@@ -140,6 +140,9 @@ export async function skipPrev(): Promise<void> { await fetch('/api/previous'); 
 export interface Playback {
   paused: boolean;
   holding: boolean;
+  itemId: string | null;
+  kind: MediaKind | null;
+  display: DisplayPlaybackState | null;
 }
 export async function getPlayback(): Promise<Playback> {
   const res = await fetch('/api/playback');
@@ -150,6 +153,9 @@ export async function setPaused(paused: boolean): Promise<void> {
 }
 export async function setHold(holding: boolean): Promise<void> {
   await fetch(holding ? '/api/hold' : '/api/unhold');
+}
+export async function seekBy(deltaSec: number): Promise<void> {
+  await fetch(`/api/seek?delta=${encodeURIComponent(deltaSec)}`);
 }
 
 /** Include/exclude an item from rotation; returns the new enabled state. */

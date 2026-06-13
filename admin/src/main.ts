@@ -8,11 +8,12 @@
 import type { MediaItem } from '@4kframe/shared';
 import {
   fetchItems, fetchCurrent, castItem, deleteItem, upload, thumbUrl,
-  skipNext, skipPrev, getPlayback, setPaused, setHold, toggleEnabled,
+  skipNext, skipPrev, getPlayback, setPaused, setHold, seekBy, toggleEnabled,
   me, login, logout,
 } from './api.js';
 import { renderSettings } from './settings.js';
 import { initCastSender, isCastReady, castControl, toggleCastSession } from './cast-sender.js';
+import { playbackNavigationState, VIDEO_SEEK_SECONDS } from './playbackState.js';
 
 type Mode = 'cast' | 'view' | 'delete';
 type PeopleFilter = 'all' | 'has-faces' | 'similar-faces' | 'labeled';
@@ -157,8 +158,8 @@ function wirePeopleFilters(): void {
 
 function wirePlayback(): void {
   const byId = (id: string) => document.getElementById(id) as HTMLButtonElement | null;
-  byId('pb-prev')?.addEventListener('click', () => { skipPrev().catch(() => {}); });
-  byId('pb-next')?.addEventListener('click', () => { skipNext().catch(() => {}); });
+  byId('pb-prev')?.addEventListener('click', () => navigatePlayback(-1));
+  byId('pb-next')?.addEventListener('click', () => navigatePlayback(1));
   byId('pb-play')?.addEventListener('click', async () => {
     const p = await getPlayback().catch(() => null);
     await setPaused(!(p?.paused)).catch(() => {});
@@ -171,11 +172,37 @@ function wirePlayback(): void {
   });
 }
 
+async function navigatePlayback(direction: -1 | 1): Promise<void> {
+  const playback = await getPlayback().catch(() => null);
+  const state = playback ? playbackNavigationState(playback) : null;
+  if (state?.action === 'video-seek') {
+    await seekBy(direction * VIDEO_SEEK_SECONDS).catch(() => {});
+  } else {
+    await (direction < 0 ? skipPrev() : skipNext()).catch(() => {});
+  }
+  await syncPlayback();
+}
+
 async function syncPlayback(): Promise<void> {
-  const p = await getPlayback().catch(() => ({ paused: false, holding: false }));
+  const p = await getPlayback().catch(() => ({
+    paused: false, holding: false, itemId: null, kind: null, display: null,
+  }));
   const play = document.getElementById('pb-play');
   if (play) { play.textContent = p.paused ? '▶' : '⏸'; play.classList.toggle('active', p.paused); }
   document.getElementById('pb-loop')?.classList.toggle('active', p.holding);
+  const nav = playbackNavigationState(p);
+  const previous = document.getElementById('pb-prev') as HTMLButtonElement | null;
+  const next = document.getElementById('pb-next') as HTMLButtonElement | null;
+  if (previous) {
+    previous.title = nav.previousLabel;
+    previous.setAttribute('aria-label', nav.previousLabel);
+    previous.disabled = nav.previousDisabled;
+  }
+  if (next) {
+    next.title = nav.nextLabel;
+    next.setAttribute('aria-label', nav.nextLabel);
+    next.disabled = nav.nextDisabled;
+  }
 }
 
 async function onTileClick(item: MediaItem): Promise<void> {
