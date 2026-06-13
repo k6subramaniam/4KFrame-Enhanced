@@ -5,6 +5,9 @@ export interface VideoPlaybackSyncOptions {
   onPlaybackRejected: (error: unknown) => void;
 }
 
+type VideoPlaybackElement = Pick<HTMLVideoElement, 'muted' | 'defaultMuted' | 'volume' | 'loop' | 'play'>;
+
+export const AUDIBLE_VIDEO_VOLUME = 1;
 type VideoPlaybackElement = Pick<HTMLVideoElement, 'muted' | 'loop' | 'play'>;
 type SeekableVideoElement = Pick<HTMLVideoElement, 'currentTime' | 'duration' | 'readyState'>;
 
@@ -15,6 +18,8 @@ export function syncVideoPlaybackProperties(
 ): void {
   const becameAudible = video.muted && !options.muted;
   video.muted = options.muted;
+  video.defaultMuted = options.muted;
+  video.volume = AUDIBLE_VIDEO_VOLUME;
   video.loop = options.loop;
 
   if (options.restartAfterUnmute && becameAudible) {

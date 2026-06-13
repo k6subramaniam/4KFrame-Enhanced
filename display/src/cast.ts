@@ -18,9 +18,40 @@ import { CAST_NAMESPACE, isSeekOffsetSec, type ControlMessage } from '@4kframe/s
 interface CafCustomEvent {
   data: unknown;
 }
+interface CafPlaybackConfig {
+  autoPauseDuration?: number;
+  autoResumeDuration?: number;
+  initialBandwidth?: number;
+  segmentRequestRetryLimit?: number;
+}
+interface CafReceiverOptions {
+  adBreakPreloadTime?: number;
+  customNamespaces?: Record<string, string>;
+  disableIdleTimeout?: boolean;
+  enforceSupportedCommands?: boolean;
+  localSenderId?: string;
+  maxInactivity?: number;
+  mediaElement?: HTMLMediaElement;
+  playbackConfig?: CafPlaybackConfig;
+  playWatchedBreak?: boolean;
+  preferredPlaybackRate?: number;
+  preferredTextLanguage?: string;
+  queue?: unknown;
+  shakaVariant?: unknown;
+  shakaVersion?: string;
+  skipMplLoad?: boolean;
+  skipPlayersLoad?: boolean;
+  skipShakaLoad?: boolean;
+  statusText?: string;
+  supportedCommands?: number;
+  uiConfig?: unknown;
+  useLegacyDashSupport?: boolean;
+  useShakaForHls?: boolean;
+  versionCode?: number;
+}
 interface CafReceiverContext {
   addCustomMessageListener(namespace: string, listener: (event: CafCustomEvent) => void): void;
-  start(options?: unknown): void;
+  start(options?: CafReceiverOptions): void;
 }
 
 declare global {
@@ -34,7 +65,10 @@ declare global {
  * may still be loading when the app boots, we retry briefly before giving up (a no-op on
  * non-Cast displays, which never load the SDK).
  */
-export function initCastReceiver(forward: (msg: ControlMessage) => void): void {
+export function initCastReceiver(
+  mediaElement: HTMLMediaElement,
+  forward: (msg: ControlMessage) => void,
+): void {
   let attempts = 0;
   const tryStart = (): void => {
     const ctor = window.cast?.framework?.CastReceiverContext;
@@ -48,7 +82,13 @@ export function initCastReceiver(forward: (msg: ControlMessage) => void): void {
         const msg = parseControl(event.data);
         if (msg) forward(msg);
       });
-      ctx.start();
+      ctx.start({
+        mediaElement,
+        // Playback is driven directly through the page's HTMLMediaElement; CAF only
+        // provides receiver lifecycle and custom-message transport for this app.
+        skipPlayersLoad: true,
+        statusText: 'Ready to display photos and videos',
+      });
     } catch {
       /* ignore — receiver simply stays inactive */
     }

@@ -143,7 +143,9 @@ function startMotion(): void {
 
 function reportPlaybackBlocked(error: unknown): void {
   console.error('Video playback was blocked.', error);
-  setStatus('Video playback was blocked. Press Play to resume.');
+  setStatus(config.videoMuted
+    ? 'Video playback was blocked. Press Play to resume.'
+    : 'Video sound was blocked by the receiver. Press Play to resume with audio.');
 }
 
 /** Keep the active video element aligned with persisted playback settings. */
@@ -886,5 +888,5 @@ renderPublicSettings();
 wirePublicControls();
 updateControlStates();
 wireRemote();
-initCastReceiver(sendControl);
+initCastReceiver(video, sendControl);
 connect();
