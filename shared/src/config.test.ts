@@ -32,23 +32,29 @@ test('screen transforms default safely and round-trip with validation', () => {
   assert.equal(toApiData(transformed).screenRotation, '270');
 });
 
-test('defaultConfig enables video sound for normal TV playback', () => {
+test('defaultConfig enables TV speaker video audio by default', () => {
+  assert.equal(defaultConfig().videoAudioMode, 'tv');
   assert.equal(defaultConfig().videoMuted, false);
 });
 
-test('videoMuted serialises and parses both muted and audible choices', () => {
+test('videoAudioMode serialises and parses explicit audio output choices', () => {
   const base = defaultConfig();
 
-  for (const videoMuted of [true, false]) {
-    const payload = toApiData({ ...base, videoMuted });
-    assert.equal(payload.videoMuted, String(videoMuted));
-    assert.equal(fromApiData(base, payload).videoMuted, videoMuted);
+  for (const videoAudioMode of ['tv', 'muted', 'phone'] as const) {
+    const payload = toApiData({ ...base, videoAudioMode, videoMuted: videoAudioMode !== 'tv' });
+    assert.equal(payload.videoAudioMode, videoAudioMode);
+    assert.equal(payload.videoMuted, String(videoAudioMode !== 'tv'));
+    const parsed = fromApiData(base, payload);
+    assert.equal(parsed.videoAudioMode, videoAudioMode);
+    assert.equal(parsed.videoMuted, videoAudioMode !== 'tv');
   }
 });
 
-test('fromApiData preserves the persisted videoMuted choice when a patch omits it', () => {
-  assert.equal(fromApiData({ ...defaultConfig(), videoMuted: true }, {}).videoMuted, true);
-  assert.equal(fromApiData({ ...defaultConfig(), videoMuted: false }, {}).videoMuted, false);
+test('fromApiData maps legacy videoMuted patches to videoAudioMode', () => {
+  assert.equal(fromApiData(defaultConfig(), { videoMuted: 'false' }).videoAudioMode, 'tv');
+  assert.equal(fromApiData(defaultConfig(), { videoMuted: 'true' }).videoAudioMode, 'muted');
+  assert.equal(fromApiData({ ...defaultConfig(), videoAudioMode: 'phone', videoMuted: true }, {}).videoAudioMode, 'phone');
+  assert.equal(fromApiData(defaultConfig(), { videoMuted: 'true', videoAudioMode: 'phone' }).videoAudioMode, 'phone');
 });
 
 test('toApiData serialises fillMode/frameAspect and mirrors legacy frameFill', () => {

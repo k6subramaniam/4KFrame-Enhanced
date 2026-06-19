@@ -180,7 +180,7 @@ function startMotion(): void {
 
 function reportPlaybackBlocked(error: unknown): void {
   console.error('Video playback was blocked.', error);
-  setStatus(config.videoMuted
+  setStatus(config.videoAudioMode !== 'tv'
     ? 'Video playback was blocked. Press Play to resume.'
     : 'Video sound was blocked by the receiver. Press Play to resume with audio.');
 }
@@ -188,7 +188,7 @@ function reportPlaybackBlocked(error: unknown): void {
 /** Keep the active video element aligned with persisted playback settings. */
 function syncActiveVideoPlaybackProperties(restartAfterUnmute = false): void {
   syncVideoPlaybackProperties(video, {
-    muted: config.videoMuted,
+    muted: config.videoAudioMode !== 'tv',
     loop: config.videoLoop || holding,
     restartAfterUnmute: restartAfterUnmute && showingVideo && !paused,
     onPlaybackRejected: reportPlaybackBlocked,
@@ -346,7 +346,12 @@ function handleEvent(event: FrameEvent): void {
       renderItems(event.items, event.interactive).catch((err) => console.error(err));
       break;
     case 'seek':
-      seekActiveVideo(video, event.offsetSec, showingVideo);
+      if ('offsetSec' in event) {
+        seekActiveVideo(video, event.offsetSec, showingVideo);
+      } else if (showingVideo && lastVideoItem?.id === event.itemId && Number.isFinite(video.duration)) {
+        video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + event.deltaSec));
+        reportVideoPlayback(true);
+      }
       break;
     case 'library':
       // No-op for the display; the server drives what is shown.
@@ -370,12 +375,7 @@ function handleEvent(event: FrameEvent): void {
       if (showingVideo) syncActiveVideoPlaybackProperties();
       setStatus(statusText());
       break;
-    case 'seek':
-      if (showingVideo && lastVideoItem?.id === event.itemId && Number.isFinite(video.duration)) {
-        video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + event.deltaSec));
-        reportVideoPlayback(true);
-      }
-      break;
+
     case 'log':
       if (event.level === 'error') console.error(event.message);
       break;

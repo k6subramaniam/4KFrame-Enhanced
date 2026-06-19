@@ -5,6 +5,7 @@ import {
   PHOTO_PERIOD_PRESETS,
   PLAYBACK_MEDIA_MODES,
   TRANSITIONS,
+  VIDEO_AUDIO_MODES,
   type ApiDataPayload,
   type FrameConfig,
 } from './config.js';
@@ -66,6 +67,12 @@ const PLAYBACK_MEDIA_LABELS: Record<string, string> = {
   both: 'Both',
   photos: 'Photos',
   videos: 'Videos',
+};
+
+const VIDEO_AUDIO_LABELS: Record<string, string> = {
+  tv: 'TV speakers',
+  muted: 'Muted',
+  phone: 'Phone / Browser',
 };
 
 export type ScalingPresetId = 'smart-cover' | 'fill-frame' | 'fit-full-image' | 'blur-background' | 'manual-crop';
@@ -191,6 +198,12 @@ function bool(config: SettingsConfigSource, key: keyof FrameConfig & string, fal
   return value === 'true' || value === '1';
 }
 
+function videoAudioMode(config: SettingsConfigSource): string {
+  const explicit = text(config, 'videoAudioMode', '');
+  if ((VIDEO_AUDIO_MODES as readonly string[]).includes(explicit)) return explicit;
+  return bool(config, 'videoMuted', false) ? 'muted' : 'tv';
+}
+
 function fillMode(config: SettingsConfigSource): string {
   const fill = bool(config, 'frameFill', true);
   return text(config, 'fillMode', fill ? 'cover' : 'contain');
@@ -243,12 +256,13 @@ export const SHARED_SETTINGS_PANELS: SettingsPanelMetadata[] = [
     title: 'Video Audio',
     adminOnly: true,
     render: (config) => {
-      const videoMuted = bool(config, 'videoMuted', false);
-      return `${segmentButtons('videoMuted', [
-        { label: 'Sound on', value: 'false', active: !videoMuted },
-        { label: 'Muted', value: 'true', active: videoMuted },
-      ])}
-      <div class="muted" style="margin-top:.4rem">Choose whether videos play through the TV speakers.</div>`;
+      const mode = videoAudioMode(config);
+      return `${segmentButtons('videoAudioMode', VIDEO_AUDIO_MODES.map((m) => ({
+        label: VIDEO_AUDIO_LABELS[m] ?? m,
+        value: m,
+        active: m === mode,
+      })))}
+      <div class="muted" style="margin-top:.4rem">Choose TV speakers, mute videos, or play audio in this admin browser. Phone / Browser audio depends on browser autoplay permissions and may require tapping Play.</div>`;
     },
   },
   {
@@ -383,7 +397,9 @@ export function settingsPanelsForCapabilities(
 
 export function settingsSelectionPatch(key: string, value: string): SettingsPatch {
   if (key === 'effect') return { transitionPeriod: value };
-  if (['videoMuted', 'screenFlipHorizontal', 'screenFlipVertical'].includes(key)) return { [key]: value === 'true' };
+  if (key === 'videoMuted') return { videoAudioMode: value === 'true' ? 'muted' : 'tv', videoMuted: value === 'true' };
+  if (key === 'videoAudioMode') return { videoAudioMode: value as FrameConfig['videoAudioMode'], videoMuted: value !== 'tv' };
+  if (['screenFlipHorizontal', 'screenFlipVertical'].includes(key)) return { [key]: value === 'true' };
   if (key === 'screenRotation') return { screenRotation: Number(value) as FrameConfig['screenRotation'] };
   return { [key]: value };
 }
