@@ -143,8 +143,6 @@ export interface FrameConfig {
   videoAudioMode: VideoAudioMode;
   /** Legacy mirror: true unless videoAudioMode is tv. Kept for original tooling. */
   videoMuted: boolean;
-  /** Explicit video audio output target. */
-  videoAudioMode: VideoAudioMode;
   videoLoop: boolean;
 
   // --- Enhanced: integrations & UX ---
@@ -186,7 +184,6 @@ export function defaultConfig(): FrameConfig {
     screenFlipVertical: false,
     videoAudioMode: 'tv',
     videoMuted: false,
-    videoAudioMode: 'tv',
     videoLoop: true,
     googlePhotos: {
       connected: false,
