@@ -32,48 +32,31 @@ test('screen transforms default safely and round-trip with validation', () => {
   assert.equal(toApiData(transformed).screenRotation, '270');
 });
 
-test('defaultConfig enables TV video sound for normal playback', () => {
 test('defaultConfig enables TV speaker video audio by default', () => {
   assert.equal(defaultConfig().videoAudioMode, 'tv');
   assert.equal(defaultConfig().videoMuted, false);
 });
 
-test('videoAudioMode serialises and legacy videoMuted mirrors muted mode', () => {
-  const base = defaultConfig();
-
-  for (const videoAudioMode of ['tv', 'phone', 'muted'] as const) {
-    const payload = toApiData({ ...base, videoAudioMode, videoMuted: videoAudioMode === 'muted' });
-    assert.equal(payload.videoAudioMode, videoAudioMode);
-    assert.equal(payload.videoMuted, String(videoAudioMode === 'muted'));
-    assert.equal(fromApiData(base, payload).videoAudioMode, videoAudioMode);
-    assert.equal(fromApiData(base, payload).videoMuted, videoAudioMode === 'muted');
-  }
-});
-
-test('fromApiData preserves the persisted videoAudioMode choice when a patch omits it', () => {
-  assert.equal(fromApiData({ ...defaultConfig(), videoAudioMode: 'muted', videoMuted: true }, {}).videoAudioMode, 'muted');
-  assert.equal(fromApiData({ ...defaultConfig(), videoAudioMode: 'phone', videoMuted: false }, {}).videoAudioMode, 'phone');
-});
-
-test('fromApiData maps legacy videoMuted patches onto videoAudioMode', () => {
-  assert.equal(fromApiData(defaultConfig(), { videoMuted: 'true' }).videoAudioMode, 'muted');
-  assert.equal(fromApiData({ ...defaultConfig(), videoAudioMode: 'muted', videoMuted: true }, { videoMuted: 'false' }).videoAudioMode, 'tv');
 test('videoAudioMode serialises and parses explicit audio output choices', () => {
   const base = defaultConfig();
 
   for (const videoAudioMode of ['tv', 'muted', 'phone'] as const) {
-    const payload = toApiData({ ...base, videoAudioMode, videoMuted: videoAudioMode !== 'tv' });
+    const payload = toApiData({ ...base, videoAudioMode, videoMuted: videoAudioMode === 'muted' });
     assert.equal(payload.videoAudioMode, videoAudioMode);
-    assert.equal(payload.videoMuted, String(videoAudioMode !== 'tv'));
+    assert.equal(payload.videoMuted, String(videoAudioMode === 'muted'));
     const parsed = fromApiData(base, payload);
     assert.equal(parsed.videoAudioMode, videoAudioMode);
-    assert.equal(parsed.videoMuted, videoAudioMode !== 'tv');
+    assert.equal(parsed.videoMuted, videoAudioMode === 'muted');
   }
 });
 
-test('fromApiData maps legacy videoMuted patches to videoAudioMode', () => {
+test('fromApiData maps legacy videoMuted patches onto videoAudioMode', () => {
   assert.equal(fromApiData(defaultConfig(), { videoMuted: 'false' }).videoAudioMode, 'tv');
   assert.equal(fromApiData(defaultConfig(), { videoMuted: 'true' }).videoAudioMode, 'muted');
+  assert.equal(
+    fromApiData({ ...defaultConfig(), videoAudioMode: 'muted', videoMuted: true }, { videoMuted: 'false' }).videoAudioMode,
+    'tv',
+  );
   assert.equal(fromApiData({ ...defaultConfig(), videoAudioMode: 'phone', videoMuted: true }, {}).videoAudioMode, 'phone');
   assert.equal(fromApiData(defaultConfig(), { videoMuted: 'true', videoAudioMode: 'phone' }).videoAudioMode, 'phone');
 });
