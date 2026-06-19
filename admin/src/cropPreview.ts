@@ -29,6 +29,34 @@ function numeric(value: unknown, fallback: number): number {
 
 export type CropPreviewUpdater = (patch: CropPreviewConfig) => void;
 
+export function cropPreviewControlPatch(
+  action: string,
+  state: { zoom: number; panX: number; panY: number },
+): { zoom?: number; panX?: number; panY?: number } | null {
+  const step = 0.1;
+  const panStep = 0.1;
+  switch (action) {
+    case 'zoom-in':
+      return { zoom: clamp(state.zoom + step, MIN_ZOOM, MAX_ZOOM) };
+    case 'zoom-out': {
+      const zoom = clamp(state.zoom - step, MIN_ZOOM, MAX_ZOOM);
+      return zoom === MIN_ZOOM ? { zoom, panX: 0, panY: 0 } : { zoom };
+    }
+    case 'pan-left':
+      return { panX: clamp(state.panX - panStep, -1, 1) };
+    case 'pan-right':
+      return { panX: clamp(state.panX + panStep, -1, 1) };
+    case 'pan-up':
+      return { panY: clamp(state.panY - panStep, -1, 1) };
+    case 'pan-down':
+      return { panY: clamp(state.panY + panStep, -1, 1) };
+    case 'reset':
+      return { zoom: MIN_ZOOM, panX: 0, panY: 0 };
+    default:
+      return null;
+  }
+}
+
 export function renderCropPreview(item: MediaItem | undefined, config: CropPreviewConfig): string {
   if (!item) {
     return '<div class="crop-preview-empty muted">Cast or play an item to preview its crop here.</div>';
@@ -46,7 +74,16 @@ export function renderCropPreview(item: MediaItem | undefined, config: CropPrevi
       <img class="crop-preview-media" data-crop-media src="${thumbUrl(item)}" alt="Current media crop preview" />
       <div class="crop-preview-mask" aria-hidden="true"></div>
     </div>
-    <div class="muted crop-preview-help">Drag to pan · pinch, wheel, or double tap to zoom in · triple tap to zoom out · sliders below remain available for keyboard users.</div>
+    <div class="row crop-preview-actions" role="toolbar" aria-label="Crop preview controls">
+      <button type="button" data-crop-action="zoom-out" aria-label="Zoom out">−</button>
+      <button type="button" data-crop-action="zoom-in" aria-label="Zoom in">+</button>
+      <button type="button" data-crop-action="reset">Reset</button>
+      <button type="button" data-crop-action="pan-left" aria-label="Pan left">←</button>
+      <button type="button" data-crop-action="pan-up" aria-label="Pan up">↑</button>
+      <button type="button" data-crop-action="pan-down" aria-label="Pan down">↓</button>
+      <button type="button" data-crop-action="pan-right" aria-label="Pan right">→</button>
+    </div>
+    <div class="muted crop-preview-help">Drag to pan · pinch, wheel, double tap, or buttons to zoom · arrow buttons pan · sliders below remain available for keyboard users.</div>
   </div>`;
 }
 
@@ -54,10 +91,18 @@ export function wireCropPreview(
   root: HTMLElement,
   updateConfig: (patch: Record<string, string>) => void | Promise<void>,
 ): CropPreviewUpdater {
-  const preview = root.querySelector<HTMLElement>('[data-crop-preview]');
-  const frame = root.querySelector<HTMLElement>('[data-crop-frame]');
-  const media = root.querySelector<HTMLElement>('[data-crop-media]');
-  if (!preview || !frame || !media) return () => {};
+  const previews = [...root.querySelectorAll<HTMLElement>('[data-crop-preview]')];
+  const syncers = previews.map((preview) => wireSingleCropPreview(preview, updateConfig));
+  return (patch) => syncers.forEach((sync) => sync(patch));
+}
+
+function wireSingleCropPreview(
+  preview: HTMLElement,
+  updateConfig: (patch: Record<string, string>) => void | Promise<void>,
+): CropPreviewUpdater {
+  const frame = preview.querySelector<HTMLElement>('[data-crop-frame]');
+  const media = preview.querySelector<HTMLElement>('[data-crop-media]');
+  if (!frame || !media) return () => {};
   const background = preview.querySelector<HTMLElement>('.crop-preview-bg');
 
   let zoom = numeric(preview.dataset.zoom, 1);
@@ -233,6 +278,32 @@ export function wireCropPreview(
     const factor = event.deltaY < 0 ? 1.06 : 0.94;
     void patch({ zoom: zoom * factor });
   }, { passive: false });
+
+  preview.querySelectorAll<HTMLButtonElement>('[data-crop-action]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const next = cropPreviewControlPatch(button.dataset.cropAction ?? '', { zoom, panX, panY });
+      if (next) void patch(next);
+    });
+  });
+
+  frame.addEventListener('keydown', (event) => {
+    const keyActions: Record<string, string> = {
+      '+': 'zoom-in',
+      '=': 'zoom-in',
+      '-': 'zoom-out',
+      '_': 'zoom-out',
+      '0': 'reset',
+      ArrowLeft: 'pan-left',
+      ArrowRight: 'pan-right',
+      ArrowUp: 'pan-up',
+      ArrowDown: 'pan-down',
+    };
+    const action = keyActions[event.key];
+    if (!action) return;
+    event.preventDefault();
+    const next = cropPreviewControlPatch(action, { zoom, panX, panY });
+    if (next) void patch(next);
+  });
 
   syncConfig({});
   return syncConfig;

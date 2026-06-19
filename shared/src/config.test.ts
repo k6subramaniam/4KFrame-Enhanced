@@ -33,6 +33,7 @@ test('screen transforms default safely and round-trip with validation', () => {
 });
 
 test('defaultConfig enables TV video sound for normal playback', () => {
+test('defaultConfig enables TV speaker video audio by default', () => {
   assert.equal(defaultConfig().videoAudioMode, 'tv');
   assert.equal(defaultConfig().videoMuted, false);
 });
@@ -57,6 +58,24 @@ test('fromApiData preserves the persisted videoAudioMode choice when a patch omi
 test('fromApiData maps legacy videoMuted patches onto videoAudioMode', () => {
   assert.equal(fromApiData(defaultConfig(), { videoMuted: 'true' }).videoAudioMode, 'muted');
   assert.equal(fromApiData({ ...defaultConfig(), videoAudioMode: 'muted', videoMuted: true }, { videoMuted: 'false' }).videoAudioMode, 'tv');
+test('videoAudioMode serialises and parses explicit audio output choices', () => {
+  const base = defaultConfig();
+
+  for (const videoAudioMode of ['tv', 'muted', 'phone'] as const) {
+    const payload = toApiData({ ...base, videoAudioMode, videoMuted: videoAudioMode !== 'tv' });
+    assert.equal(payload.videoAudioMode, videoAudioMode);
+    assert.equal(payload.videoMuted, String(videoAudioMode !== 'tv'));
+    const parsed = fromApiData(base, payload);
+    assert.equal(parsed.videoAudioMode, videoAudioMode);
+    assert.equal(parsed.videoMuted, videoAudioMode !== 'tv');
+  }
+});
+
+test('fromApiData maps legacy videoMuted patches to videoAudioMode', () => {
+  assert.equal(fromApiData(defaultConfig(), { videoMuted: 'false' }).videoAudioMode, 'tv');
+  assert.equal(fromApiData(defaultConfig(), { videoMuted: 'true' }).videoAudioMode, 'muted');
+  assert.equal(fromApiData({ ...defaultConfig(), videoAudioMode: 'phone', videoMuted: true }, {}).videoAudioMode, 'phone');
+  assert.equal(fromApiData(defaultConfig(), { videoMuted: 'true', videoAudioMode: 'phone' }).videoAudioMode, 'phone');
 });
 
 test('toApiData serialises fillMode/frameAspect and mirrors legacy frameFill', () => {

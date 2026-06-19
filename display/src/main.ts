@@ -186,7 +186,7 @@ function reportPlaybackBlocked(error: unknown): void {
 /** Keep the active video element aligned with persisted playback settings. */
 function syncActiveVideoPlaybackProperties(restartAfterUnmute = false): void {
   syncVideoPlaybackProperties(video, {
-    muted: mutedForVideoAudioMode(config.videoAudioMode),
+    muted: config.videoAudioMode !== 'tv',
     loop: config.videoLoop || holding,
     restartAfterUnmute: restartAfterUnmute && showingVideo && !paused,
     onPlaybackRejected: reportPlaybackBlocked,
@@ -462,6 +462,9 @@ const publicControlsRoot = document.getElementById('public-controls') as HTMLEle
 const publicSettingsRoot = document.getElementById('public-settings') as HTMLElement | null;
 const publicControls = getElementByIds<HTMLElement>('public-control-panel', 'public-controls');
 const bottomController = document.getElementById('public-bottom-controller') as HTMLElement | null;
+const zoomPanSection = document.getElementById('public-zoom-pan-section') as HTMLElement | null;
+const zoomPanToggle = document.getElementById('public-zoom-pan-toggle') as HTMLButtonElement | null;
+const ZOOM_PAN_COLLAPSE_STORAGE_KEY = '4kframe.publicControls.zoomPanOpen';
 const CONTROL_DIM_TIMEOUT_MS = 2600;
 const CONTROL_HIDE_TIMEOUT_MS = 7600;
 let controlDimTimer: ReturnType<typeof window.setTimeout> | undefined;
@@ -622,6 +625,29 @@ function renderPublicSettings(): void {
   });
 }
 
+function setZoomPanSectionOpen(open: boolean, persist = true): void {
+  if (!zoomPanSection || !zoomPanToggle) return;
+  const body = document.getElementById(zoomPanToggle.getAttribute('aria-controls') ?? '') as HTMLElement | null;
+  zoomPanSection.dataset.collapsed = open ? 'false' : 'true';
+  zoomPanToggle.setAttribute('aria-expanded', String(open));
+  if (body) {
+    body.hidden = !open;
+    body.toggleAttribute('aria-hidden', !open);
+    body.toggleAttribute('inert', !open);
+  }
+  if (persist) window.localStorage.setItem(ZOOM_PAN_COLLAPSE_STORAGE_KEY, open ? 'true' : 'false');
+}
+
+function wireZoomPanSection(): void {
+  if (!zoomPanToggle) return;
+  const storedOpen = window.localStorage.getItem(ZOOM_PAN_COLLAPSE_STORAGE_KEY);
+  if (storedOpen === 'true' || storedOpen === 'false') setZoomPanSectionOpen(storedOpen === 'true', false);
+  zoomPanToggle.addEventListener('click', () => {
+    registerPublicControlActivity();
+    setZoomPanSectionOpen(zoomPanToggle.getAttribute('aria-expanded') !== 'true');
+  });
+}
+
 function applyQuickAction(action: QuickAction): void {
   switch (action) {
     case 'fill-cover': {
@@ -767,6 +793,7 @@ function wirePublicControls(): void {
   controlsToggle?.addEventListener('click', () => {
     setControlsOpen(publicControls?.hidden ?? true);
   });
+  wireZoomPanSection();
 
   publicControlsRoot.querySelectorAll<HTMLButtonElement>('[data-control="previous"], #control-previous').forEach((button) => {
     button.addEventListener('click', () => {

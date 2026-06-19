@@ -38,9 +38,29 @@
       .tile.selected { outline:3px solid var(--accent); outline-offset:1px; }
       .tile .badge-transform { top:auto; bottom:2rem; left:.4rem; }
       #media-transform-tools { margin:.75rem 0; }
-      #control-sheet-header { display:none; }
-      #controls-toggle { display:none; }
-      #controls-backdrop { display:none; }
+      body.controls-open { overflow:hidden; }
+      #controls-toggle {
+        display:block; position:fixed; right:1rem; bottom:1rem; z-index:35;
+        min-width:7.25rem; box-shadow:0 .75rem 2rem rgba(0,0,0,.45);
+        background:var(--accent); border-color:var(--accent); color:#fff; font-weight:700;
+      }
+      #controls-backdrop {
+        display:block; position:fixed; inset:0; z-index:30; background:rgba(0,0,0,.55);
+        opacity:0; pointer-events:none; transition:opacity .2s ease;
+      }
+      body.controls-open #controls-backdrop { opacity:1; pointer-events:auto; }
+      #control-sheet {
+        position:fixed; left:0; right:0; bottom:0; z-index:40; max-height:min(82vh, 42rem);
+        display:flex; flex-direction:column; padding:.75rem; padding-bottom:calc(.75rem + env(safe-area-inset-bottom));
+        background:var(--bg); border-top:1px solid var(--line); border-radius:1rem 1rem 0 0;
+        box-shadow:0 -1rem 3rem rgba(0,0,0,.5); overflow:hidden;
+        transform:translateY(calc(100% + 1rem)); transition:transform .24s ease;
+      }
+      #control-sheet.open { transform:translateY(0); }
+      #control-sheet[hidden] { display:none; }
+      #control-sheet-header { display:flex; align-items:center; justify-content:space-between; gap:.75rem; padding:.1rem .15rem .65rem; }
+      #control-sheet-header h2 { margin:0; font-size:1rem; }
+      #controls-close { min-width:44px; padding:.45rem .75rem; }
       #playback { margin-bottom:1rem; }
       .playback-description { margin:0; }
       .playback-controls { display:flex; gap:.5rem; align-items:center; }
@@ -69,6 +89,8 @@
       .scaling-presets button { flex:1 1 8.5rem; }
       .settings-fallback { margin-top:.65rem; }
       .settings-fallback summary { color:var(--muted); cursor:pointer; font-size:.85rem; margin-bottom:.55rem; }
+      .active-crop-preview { border:1px solid var(--line); border-radius:1rem; padding:1rem; margin-bottom:1rem; background:rgba(255,255,255,.02); }
+      .active-crop-preview h2 { margin:.1rem 0 .75rem; font-size:1rem; }
       .crop-preview { display:grid; gap:.5rem; margin-bottom:.9rem; }
       .crop-preview-frame { position:relative; width:100%; aspect-ratio:var(--crop-aspect); max-height:20rem; overflow:hidden; border:1px solid var(--line); border-radius:.75rem; background:#05070b; touch-action:none; cursor:grab; }
       .crop-preview-frame:active { cursor:grabbing; }
@@ -77,6 +99,8 @@
       .crop-preview-bg { position:absolute; inset:-8%; width:116%; height:116%; object-fit:cover; filter:blur(18px) saturate(.9); opacity:.55; }
       .crop-preview-mask { position:absolute; inset:0; box-shadow:inset 0 0 0 1px rgba(255,255,255,.18), inset 0 0 4rem rgba(0,0,0,.22); pointer-events:none; }
       .crop-preview-empty { border:1px dashed var(--line); border-radius:.75rem; padding:1rem; text-align:center; }
+      .crop-preview-actions { flex-wrap:wrap; }
+      .crop-preview-actions button { min-width:2.5rem; }
       #drop { border:2px dashed var(--line); border-radius:.8rem; padding:1.5rem; text-align:center; color:var(--muted); margin-bottom:1rem; position:relative; }
       #drop.over { border-color:var(--accent); color:var(--fg); }
       #drop.busy { border-color:var(--accent); opacity:.7; pointer-events:none; }
@@ -90,7 +114,6 @@
       #login input { font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--line); border-radius:.6rem; padding:.6rem .8rem; }
       #login #login-err { color:#ff6b6b; min-height:1em; }
       @media (max-width: 700px) {
-        body.controls-open { overflow:hidden; }
         header { gap:.5rem; padding:.75rem; z-index:20; }
         header h1 { font-size:1rem; }
         .modes { gap:.35rem; }
@@ -99,27 +122,6 @@
         main { padding:.75rem .75rem 5.25rem; }
         #drop { margin-bottom:.65rem; padding:1rem; }
         #hint { margin:.5rem 0 .75rem; }
-        #controls-toggle {
-          display:block; position:fixed; right:1rem; bottom:1rem; z-index:35;
-          min-width:7.25rem; box-shadow:0 .75rem 2rem rgba(0,0,0,.45);
-          background:var(--accent); border-color:var(--accent); color:#fff; font-weight:700;
-        }
-        #controls-backdrop {
-          display:block; position:fixed; inset:0; z-index:30; background:rgba(0,0,0,.55);
-          opacity:0; pointer-events:none; transition:opacity .2s ease;
-        }
-        body.controls-open #controls-backdrop { opacity:1; pointer-events:auto; }
-        #control-sheet {
-          position:fixed; left:0; right:0; bottom:0; z-index:40; max-height:min(82vh, 42rem);
-          display:flex; flex-direction:column; padding:.75rem; padding-bottom:calc(.75rem + env(safe-area-inset-bottom));
-          background:var(--bg); border-top:1px solid var(--line); border-radius:1rem 1rem 0 0;
-          box-shadow:0 -1rem 3rem rgba(0,0,0,.5); overflow:hidden;
-          transform:translateY(calc(100% + 1rem)); transition:transform .24s ease;
-        }
-        #control-sheet.open { transform:translateY(0); }
-        #control-sheet-header { display:flex; align-items:center; justify-content:space-between; gap:.75rem; padding:.1rem .15rem .65rem; }
-        #control-sheet-header h2 { margin:0; font-size:1rem; }
-        #controls-close { min-width:44px; padding:.45rem .75rem; }
         #playback {
           order:1; position:sticky; top:0; z-index:1; margin:0 0 .75rem; padding:.65rem;
           display:grid; grid-template-columns:minmax(0, 1fr) auto; gap:.75rem; align-items:start;
@@ -163,7 +165,7 @@
       </div>
       <button id="controls-toggle" type="button" aria-controls="control-sheet" aria-expanded="false">Controls</button>
       <div id="controls-backdrop" aria-hidden="true"></div>
-      <section id="control-sheet" aria-label="Frame controls">
+      <section id="control-sheet" aria-label="Frame controls" aria-hidden="true" hidden inert>
         <div id="control-sheet-header">
           <h2>Controls</h2>
           <button id="controls-close" type="button" aria-label="Close controls">✕</button>
