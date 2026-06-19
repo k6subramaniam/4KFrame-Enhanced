@@ -68,30 +68,32 @@ test('pixel drag offsets convert to normalized pan values', () => {
   }), { panX: 0.5, panY: -0.3333333333333333 });
 });
 
-test('Video Audio panel renders user-friendly sound choices and current state', () => {
+test('Video Audio panel renders explicit output mode choices and current state', () => {
   const panel = SHARED_SETTINGS_PANELS.find((candidate) => candidate.id === 'video-audio');
   assert.ok(panel);
   assert.equal(panel.adminOnly, true);
 
-  const soundOnHtml = panel.render({ ...defaultConfig(), videoMuted: false });
-  assert.match(soundOnHtml, /Video Audio|Sound on/);
-  assert.match(soundOnHtml, /data-group="videoMuted"/);
-  assert.match(soundOnHtml, /data-value="false" class="active">Sound on/);
-  assert.match(soundOnHtml, /data-value="true" class="">Muted/);
+  const tvHtml = panel.render({ ...defaultConfig(), videoAudioMode: 'tv', videoMuted: false });
+  assert.match(tvHtml, /data-group="videoAudioMode"/);
+  assert.match(tvHtml, /data-value="tv" class="active">TV speakers/);
+  assert.match(tvHtml, /data-value="muted" class="">Muted/);
+  assert.match(tvHtml, /data-value="phone" class="">Phone \/ Browser/);
+  assert.match(tvHtml, /autoplay permissions/);
 
-  const mutedHtml = panel.render(toApiData({ ...defaultConfig(), videoMuted: true }));
-  assert.match(mutedHtml, /data-value="true" class="active">Muted/);
+  const mutedHtml = panel.render(toApiData({ ...defaultConfig(), videoAudioMode: 'muted', videoMuted: true }));
+  assert.match(mutedHtml, /data-value="muted" class="active">Muted/);
 });
 
-test('selecting Sound on emits the existing videoMuted key with boolean false', async () => {
+test('selecting video audio output emits explicit mode and legacy mirror', async () => {
   const emitted: unknown[] = [];
   await applySettingsSelection({
     getConfig: defaultConfig,
     updateConfig: (patch) => { emitted.push(patch); },
-  }, 'videoMuted', 'false');
+  }, 'videoAudioMode', 'phone');
 
-  assert.deepEqual(emitted, [{ videoMuted: false }]);
-  assert.deepEqual(settingsSelectionPatch('videoMuted', 'true'), { videoMuted: true });
+  assert.deepEqual(emitted, [{ videoAudioMode: 'phone', videoMuted: true }]);
+  assert.deepEqual(settingsSelectionPatch('videoAudioMode', 'tv'), { videoAudioMode: 'tv', videoMuted: false });
+  assert.deepEqual(settingsSelectionPatch('videoMuted', 'true'), { videoAudioMode: 'muted', videoMuted: true });
 });
 
 test('Video Audio is available to admins but excluded from public TV controls', () => {

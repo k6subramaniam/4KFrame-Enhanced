@@ -59,6 +59,10 @@ export type MotionMode = (typeof MOTION_MODES)[number];
 export const PLAYBACK_MEDIA_MODES = ['both', 'photos', 'videos'] as const;
 export type PlaybackMediaMode = (typeof PLAYBACK_MEDIA_MODES)[number];
 
+/** Where video audio should be played. */
+export const VIDEO_AUDIO_MODES = ['tv', 'muted', 'phone'] as const;
+export type VideoAudioMode = (typeof VIDEO_AUDIO_MODES)[number];
+
 /**
  * Target frame aspect. `auto` matches each display's real screen (so the same library casts
  * correctly to 16:9 TVs, ultrawide, 4:3, square, and portrait frames simultaneously). Any
@@ -134,7 +138,10 @@ export interface FrameConfig {
   screenFlipVertical: boolean;
 
   // --- Enhanced: video ---
+  /** Legacy mirror: true unless videoAudioMode is tv. Kept for original tooling. */
   videoMuted: boolean;
+  /** Explicit video audio output target. */
+  videoAudioMode: VideoAudioMode;
   videoLoop: boolean;
 
   // --- Enhanced: integrations & UX ---
@@ -175,6 +182,7 @@ export function defaultConfig(): FrameConfig {
     screenFlipHorizontal: false,
     screenFlipVertical: false,
     videoMuted: false,
+    videoAudioMode: 'tv',
     videoLoop: true,
     googlePhotos: {
       connected: false,
@@ -214,7 +222,8 @@ export function toApiData(c: FrameConfig): ApiDataPayload {
     screenRotation: String(c.screenRotation),
     screenFlipHorizontal: String(c.screenFlipHorizontal),
     screenFlipVertical: String(c.screenFlipVertical),
-    videoMuted: String(c.videoMuted),
+    videoMuted: String(c.videoAudioMode !== 'tv'),
+    videoAudioMode: c.videoAudioMode,
     videoLoop: String(c.videoLoop),
     lanAddress: c.lanAddress,
     storageUsed: String(c.storageUsed),
@@ -246,6 +255,14 @@ function parsePlaybackMediaMode(v: string | undefined, fallback: PlaybackMediaMo
   return v && (PLAYBACK_MEDIA_MODES as readonly string[]).includes(v) ? (v as PlaybackMediaMode) : fallback;
 }
 
+function parseVideoAudioMode(patch: ApiDataPayload, fallback: VideoAudioMode): VideoAudioMode {
+  if (patch.videoAudioMode && (VIDEO_AUDIO_MODES as readonly string[]).includes(patch.videoAudioMode)) {
+    return patch.videoAudioMode as VideoAudioMode;
+  }
+  if (patch.videoMuted !== undefined) return truthy(patch.videoMuted, fallback !== 'tv') ? 'muted' : 'tv';
+  return fallback;
+}
+
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
 const num = (v: string | undefined, fallback: number) => {
   const n = v === undefined ? NaN : Number(v);
@@ -254,6 +271,8 @@ const num = (v: string | undefined, fallback: number) => {
 
 /** Apply a partial loose payload (e.g. from an `/api/data` query string) onto a config. */
 export function fromApiData(current: FrameConfig, patch: ApiDataPayload): FrameConfig {
+  const currentVideoAudioMode = current.videoAudioMode ?? (current.videoMuted ? 'muted' : 'tv');
+  const videoAudioMode = parseVideoAudioMode(patch, currentVideoAudioMode);
   return {
     ...current,
     photoPeriod: num(patch.photoPeriod, current.photoPeriod),
@@ -279,7 +298,8 @@ export function fromApiData(current: FrameConfig, patch: ApiDataPayload): FrameC
       : current.screenRotation,
     screenFlipHorizontal: truthy(patch.screenFlipHorizontal, current.screenFlipHorizontal),
     screenFlipVertical: truthy(patch.screenFlipVertical, current.screenFlipVertical),
-    videoMuted: truthy(patch.videoMuted, current.videoMuted),
+    videoMuted: videoAudioMode !== 'tv',
+    videoAudioMode,
     videoLoop: truthy(patch.videoLoop, current.videoLoop),
     lanAddress: patch.lanAddress ?? current.lanAddress,
   };

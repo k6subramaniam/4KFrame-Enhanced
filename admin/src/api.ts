@@ -1,6 +1,6 @@
 /** Thin REST client for the admin PWA. */
 
-import type { ApiDataPayload, CurrentResponse, DisplayPlaybackState, MediaItem, MediaKind } from '@4kframe/shared';
+import type { ApiDataPayload, ControlMessage, CurrentResponse, DisplayPlaybackState, MediaItem, MediaKind } from '@4kframe/shared';
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
@@ -37,6 +37,8 @@ const STRING_PUBLIC_CONFIG_KEYS = new Set([
   'screenRotation',
   'screenFlipHorizontal',
   'screenFlipVertical',
+  'videoAudioMode',
+  'videoMuted',
 ]);
 
 let controlSocket: WebSocket | null = null;
@@ -135,7 +137,11 @@ export async function sendControl(message: ControlMessage): Promise<boolean> {
 }
 
 export async function updateData(patch: Record<string, string>): Promise<void> {
-  if (await sendPublicConfig(patch)) return;
+  if ('videoAudioMode' in patch || 'videoMuted' in patch) {
+    const typedPatch: Record<string, string | boolean> = { ...patch };
+    if ('videoMuted' in typedPatch) typedPatch.videoMuted = typedPatch.videoMuted === 'true';
+    if (await sendControl({ type: 'config', patch: typedPatch } as ControlMessage)) return;
+  } else if (await sendPublicConfig(patch)) return;
   const qs = new URLSearchParams(patch).toString();
   await fetch(`/api/data?${qs}`);
 }

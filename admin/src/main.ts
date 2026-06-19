@@ -5,7 +5,7 @@
  * of photos and videos, the settings panel, and Google Cast sender wiring.
  */
 
-import type { MediaItem } from '@4kframe/shared';
+import type { DisplayPlaybackState, FrameConfig, FrameEvent, MediaItem } from '@4kframe/shared';
 import {
   fetchItems, fetchCurrent, castItem, deleteItem, upload, thumbUrl,
   skipNext, skipPrev, getPlayback, setPaused, setHold, seekBy, toggleEnabled,
@@ -29,6 +29,10 @@ let selectionMode = false;
 const selectedIds = new Set<string>();
 const selectedMediaIds = new Set<string>();
 let activeItem: MediaItem | undefined;
+let activeConfig: Partial<FrameConfig> = {};
+let phonePreview: HTMLVideoElement | null = null;
+let phonePreviewItemId: string | null = null;
+let phonePreviewUserPaused = false;
 
 const grid = document.getElementById('grid') as HTMLElement;
 const hint = document.getElementById('hint') as HTMLElement;
@@ -200,6 +204,106 @@ function wirePeopleFilters(): void {
   });
 }
 
+
+function ensurePhonePreview(): { root: HTMLElement; video: HTMLVideoElement; status: HTMLElement } {
+  let root = document.getElementById('phone-audio-preview') as HTMLElement | null;
+  if (!root) {
+    root = document.createElement('section');
+    root.id = 'phone-audio-preview';
+    root.className = 'phone-audio-preview';
+    root.innerHTML = `
+      <style>
+        .phone-audio-preview{margin:.75rem 0;padding:.75rem;border:1px solid rgba(255,255,255,.18);border-radius:12px;background:rgba(0,0,0,.22)}
+        .phone-audio-preview video{width:100%;max-height:180px;border-radius:10px;background:#000}
+        .phone-audio-preview .preview-copy{margin:.35rem 0 0;font-size:.9rem;opacity:.82}
+      </style>
+      <strong>Phone / Browser audio preview</strong>
+      <video playsinline controls></video>
+      <p class="preview-copy">Audio plays in this browser while the TV stays muted. Browser autoplay permissions may block audio; tap Play if it does not start.</p>
+      <div class="preview-copy" data-preview-status></div>`;
+    hint.insertAdjacentElement('afterend', root);
+  }
+  const video = root.querySelector('video') as HTMLVideoElement;
+  const status = root.querySelector('[data-preview-status]') as HTMLElement;
+  phonePreview = video;
+  video.onplay = () => { phonePreviewUserPaused = false; };
+  video.onpause = () => { phonePreviewUserPaused = true; };
+  return { root, video, status };
+}
+
+function hidePhonePreview(): void {
+  document.getElementById('phone-audio-preview')?.remove();
+  phonePreview?.pause();
+  phonePreview = null;
+  phonePreviewItemId = null;
+}
+
+function syncPhonePreviewToDisplay(display: DisplayPlaybackState | null): void {
+  if (!phonePreview || activeConfig.videoAudioMode !== 'phone' || activeItem?.kind !== 'video') return;
+  if (!display || display.itemId !== activeItem.id) return;
+  const elapsed = Math.max(0, (Date.now() - display.observedAt) / 1000);
+  const target = Math.min(display.duration || Number.POSITIVE_INFINITY, display.currentTime + elapsed);
+  if (Number.isFinite(target) && Math.abs(phonePreview.currentTime - target) > 1.25) {
+    phonePreview.currentTime = target;
+  }
+}
+
+async function renderPhonePreview(display: DisplayPlaybackState | null = null): Promise<void> {
+  if (activeConfig.videoAudioMode !== 'phone' || activeItem?.kind !== 'video') {
+    hidePhonePreview();
+    return;
+  }
+  const { root, video, status } = ensurePhonePreview();
+  root.hidden = false;
+  if (phonePreviewItemId !== activeItem.id) {
+    phonePreviewItemId = activeItem.id;
+    phonePreviewUserPaused = false;
+    video.src = `/photos/${activeItem.file}`;
+    video.muted = false;
+    video.loop = Boolean(activeConfig.videoLoop);
+    video.load();
+  }
+  syncPhonePreviewToDisplay(display);
+  if (!phonePreviewUserPaused) {
+    try {
+      await video.play();
+      status.textContent = 'Playing browser audio for the active TV video.';
+    } catch {
+      status.textContent = 'Tap Play to start browser audio; autoplay with sound may be blocked.';
+    }
+  }
+}
+
+async function pollPreviewPlayback(): Promise<void> {
+  if (activeConfig.videoAudioMode !== 'phone' || activeItem?.kind !== 'video') return;
+  const playback = await getPlayback().catch(() => null);
+  await renderPhonePreview(playback?.display ?? null);
+}
+
+function wirePlaybackPreviewSocket(): void {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  try {
+    const socket = new WebSocket(`${proto}://${location.host}/ws`);
+    socket.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data as string) as FrameEvent;
+        if (msg.type === 'config') {
+          activeConfig = msg.config;
+          void renderPhonePreview();
+        } else if (msg.type === 'show') {
+          activeItem = msg.items.find((item) => item.kind === 'video') ?? msg.items[0];
+          void renderPhonePreview();
+        }
+      } catch {
+        // Ignore malformed/non-frame messages.
+      }
+    };
+  } catch {
+    // Polling still keeps the preview roughly synchronized when WebSocket setup fails.
+  }
+  window.setInterval(() => { pollPreviewPlayback().catch(() => {}); }, 1500);
+}
+
 function wirePlayback(): void {
   const byId = (id: string) => document.getElementById(id) as HTMLButtonElement | null;
   byId('pb-prev')?.addEventListener('click', () => navigatePlayback(-1));
@@ -318,7 +422,9 @@ async function refresh(): Promise<void> {
   renderGrid();
   const current = await fetchCurrent();
   activeItem = items.find((item) => current.current.includes(item.file));
+  activeConfig = current.data as Partial<FrameConfig>;
   await renderSettings(settingsRoot, current.data, activeItem);
+  await renderPhonePreview();
   updatePlaybackLabels();
   setControlsOpen(controlsOpen);
   await syncPlayback();
@@ -470,6 +576,7 @@ async function start(): Promise<void> {
     wireModes();
     wireUpload();
     wirePlayback();
+    wirePlaybackPreviewSocket();
     wireControlSheet();
     wirePeopleFilters();
     wireMediaTransforms();
