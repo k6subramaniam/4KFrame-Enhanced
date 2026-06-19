@@ -88,6 +88,10 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload, cu
   const smartFraming = sharedById.get('smart-framing');
 
   root.innerHTML = [
+    `<section class="active-crop-preview" aria-label="Current media zoom and pan controls">
+      <h2>Now playing crop</h2>
+      ${renderCropPreview(currentItem, data)}
+    </section>`,
     renderSharedPanel('photo-period'),
     renderSharedPanel('playback-media'),
     renderSharedPanel('video-audio'),
@@ -97,8 +101,7 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload, cu
     zoomPan ? settingsPanel(
       'zoom-pan',
       zoomPan.title,
-      `${renderCropPreview(currentItem, data)}
-      <h3 class="panel-subheading">Manual crop controls</h3>
+      `<h3 class="panel-subheading">Manual crop controls</h3>
       ${zoomPan.render(data)}
       ${motion ? `<h3 class="panel-subheading">Motion (Ken Burns)</h3>${motion.render(data)}` : ''}
       ${smartFraming ? `<h3 class="panel-subheading">Smart face framing</h3>${smartFraming.render(data)}` : ''}`,
