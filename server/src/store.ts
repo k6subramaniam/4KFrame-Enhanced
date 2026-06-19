@@ -12,6 +12,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
   defaultConfig,
+  fromStoredConfig,
   normalizeTransform,
   type DisplayTransform,
   type FrameConfig,
@@ -42,7 +43,7 @@ export async function initStore(): Promise<void> {
     const raw = await fs.readFile(DB_FILE, 'utf8');
     const parsed = JSON.parse(raw) as Partial<DbDocument>;
     doc = {
-      config: { ...defaultConfig(), ...(parsed.config ?? {}) },
+      config: fromStoredConfig(parsed.config),
       items: (parsed.items ?? []).map((item) => ({ ...item, ...normalizeTransform(item) })),
       order: parsed.order ?? (parsed.items ?? []).map((i) => i.id),
       googleTokens: parsed.googleTokens,

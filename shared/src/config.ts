@@ -197,6 +197,19 @@ export function defaultConfig(): FrameConfig {
 /** Loose string-keyed payload matching the original `/api/data` shape. */
 export type ApiDataPayload = Record<string, string>;
 
+export type StoredConfigPayload = Partial<FrameConfig>;
+
+/** Merge a persisted config document with defaults and migrate legacy fields. */
+export function fromStoredConfig(stored: StoredConfigPayload | undefined): FrameConfig {
+  const config = { ...defaultConfig(), ...(stored ?? {}) };
+  const hasStoredAudioMode = Boolean(stored && Object.hasOwn(stored, 'videoAudioMode'));
+  if (!hasStoredAudioMode && stored?.videoMuted === true) {
+    config.videoAudioMode = 'muted';
+  }
+  config.videoMuted = config.videoAudioMode === 'muted';
+  return config;
+}
+
 /** Serialise a {@link FrameConfig} into the original loosely-typed string payload. */
 export function toApiData(c: FrameConfig): ApiDataPayload {
   return {
