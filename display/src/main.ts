@@ -26,7 +26,7 @@ import { GLRenderer } from './gl.js';
 import { compose, contentRect } from './compositor.js';
 import { applyOverlays, setCaption, setStatus } from './overlays.js';
 import { initCastReceiver } from './cast.js';
-import { seekActiveVideo, syncVideoPlaybackProperties } from './videoPlayback.js';
+import { mutedForVideoAudioMode, playbackBlockedStatusMessage, seekActiveVideo, syncVideoPlaybackProperties } from './videoPlayback.js';
 
 const canvas = document.getElementById('gl') as HTMLCanvasElement;
 const video = document.getElementById('video') as HTMLVideoElement;
@@ -180,9 +180,7 @@ function startMotion(): void {
 
 function reportPlaybackBlocked(error: unknown): void {
   console.error('Video playback was blocked.', error);
-  setStatus(config.videoAudioMode !== 'tv'
-    ? 'Video playback was blocked. Press Play to resume.'
-    : 'Video sound was blocked by the receiver. Press Play to resume with audio.');
+  setStatus(playbackBlockedStatusMessage(config.videoAudioMode));
 }
 
 /** Keep the active video element aligned with persisted playback settings. */
@@ -375,7 +373,6 @@ function handleEvent(event: FrameEvent): void {
       if (showingVideo) syncActiveVideoPlaybackProperties();
       setStatus(statusText());
       break;
-
     case 'log':
       if (event.level === 'error') console.error(event.message);
       break;

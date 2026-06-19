@@ -59,6 +59,7 @@ export type MotionMode = (typeof MOTION_MODES)[number];
 export const PLAYBACK_MEDIA_MODES = ['both', 'photos', 'videos'] as const;
 export type PlaybackMediaMode = (typeof PLAYBACK_MEDIA_MODES)[number];
 
+/** Where video audio should play, if anywhere. */
 /** Where video audio should be played. */
 export const VIDEO_AUDIO_MODES = ['tv', 'muted', 'phone'] as const;
 export type VideoAudioMode = (typeof VIDEO_AUDIO_MODES)[number];
@@ -138,6 +139,8 @@ export interface FrameConfig {
   screenFlipVertical: boolean;
 
   // --- Enhanced: video ---
+  /** Preferred video audio output. `videoMuted` mirrors this for legacy clients. */
+  videoAudioMode: VideoAudioMode;
   /** Legacy mirror: true unless videoAudioMode is tv. Kept for original tooling. */
   videoMuted: boolean;
   /** Explicit video audio output target. */
@@ -181,6 +184,7 @@ export function defaultConfig(): FrameConfig {
     screenRotation: 0,
     screenFlipHorizontal: false,
     screenFlipVertical: false,
+    videoAudioMode: 'tv',
     videoMuted: false,
     videoAudioMode: 'tv',
     videoLoop: true,
@@ -259,7 +263,7 @@ function parseVideoAudioMode(patch: ApiDataPayload, fallback: VideoAudioMode): V
   if (patch.videoAudioMode && (VIDEO_AUDIO_MODES as readonly string[]).includes(patch.videoAudioMode)) {
     return patch.videoAudioMode as VideoAudioMode;
   }
-  if (patch.videoMuted !== undefined) return truthy(patch.videoMuted, fallback !== 'tv') ? 'muted' : 'tv';
+  if (patch.videoMuted !== undefined) return truthy(patch.videoMuted, fallback === 'muted') ? 'muted' : 'tv';
   return fallback;
 }
 
