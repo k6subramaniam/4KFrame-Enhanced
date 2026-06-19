@@ -9,5 +9,5 @@
     "types": ["node"],
     "noEmit": false
   },
-  "include": ["src/api.ts", "src/playbackState.ts", "src/cropTapGesture.ts", "src/controlSheet.ts", "src/cropTapGesture.test.ts", "tests/**/*.ts"]
+  "include": ["src/api.ts", "src/playbackState.ts", "src/cropTapGesture.ts", "src/cropPreview.ts", "src/cropTapGesture.test.ts", "tests/**/*.ts"]
 }
