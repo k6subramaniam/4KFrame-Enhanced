@@ -16,6 +16,7 @@ import {
 import { renderSettings } from './settings.js';
 import { initCastSender, isCastReady, castControl, toggleCastSession } from './cast-sender.js';
 import { playbackNavigationState, VIDEO_SEEK_SECONDS } from './playbackState.js';
+import { type ControlSheetController, wireControlSheet as wireControlSheetController } from './controlSheet.js';
 
 type Mode = 'cast' | 'view' | 'delete';
 type PeopleFilter = 'all' | 'has-faces' | 'similar-faces' | 'labeled';
@@ -37,7 +38,7 @@ const controlsToggle = document.getElementById('controls-toggle') as HTMLButtonE
 const controlsClose = document.getElementById('controls-close') as HTMLButtonElement | null;
 const controlsSheet = document.getElementById('control-sheet') as HTMLElement | null;
 const controlsBackdrop = document.getElementById('controls-backdrop') as HTMLElement | null;
-let controlsOpen = false;
+let controlsController: ControlSheetController | null = null;
 const peopleFilterSelect = document.getElementById('people-filter') as HTMLSelectElement | null;
 const labelFilterSelect = document.getElementById('label-filter') as HTMLSelectElement | null;
 const sortSelect = document.getElementById('media-sort') as HTMLSelectElement | null;
@@ -320,7 +321,7 @@ async function refresh(): Promise<void> {
   activeItem = items.find((item) => current.current.includes(item.file));
   await renderSettings(settingsRoot, current.data, activeItem);
   updatePlaybackLabels();
-  setControlsOpen(controlsOpen);
+  controlsController?.setOpen(controlsController.isOpen());
   await syncPlayback();
 }
 
@@ -377,31 +378,15 @@ function setMode(next: Mode): void {
   renderGrid();
 }
 
-function setControlsOpen(open: boolean): void {
-  controlsOpen = open;
-  controlsSheet?.classList.toggle('open', open);
-  document.body.classList.toggle('controls-open', open);
-  controlsToggle?.setAttribute('aria-expanded', String(open));
-}
-
 function wireControlSheet(): void {
-  controlsToggle?.addEventListener('click', () => {
-    setControlsOpen(!controlsOpen);
-    if (!controlsOpen) return;
-    controlsClose?.focus({ preventScroll: true });
+  controlsController = wireControlSheetController({
+    toggle: controlsToggle,
+    close: controlsClose,
+    sheet: controlsSheet,
+    backdrop: controlsBackdrop,
+    body: document.body,
+    document,
   });
-  controlsClose?.addEventListener('click', () => {
-    setControlsOpen(false);
-    controlsToggle?.focus({ preventScroll: true });
-  });
-  controlsBackdrop?.addEventListener('click', () => setControlsOpen(false));
-  document.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Escape' && controlsOpen) {
-      setControlsOpen(false);
-      controlsToggle?.focus({ preventScroll: true });
-    }
-  });
-  setControlsOpen(controlsOpen);
 }
 
 function wireModes(): void {
