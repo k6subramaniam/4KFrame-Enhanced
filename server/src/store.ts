@@ -12,6 +12,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
   defaultConfig,
+  normalizeFrameConfig,
   normalizeTransform,
   type DisplayTransform,
   type FrameConfig,
@@ -41,12 +42,14 @@ export async function initStore(): Promise<void> {
   try {
     const raw = await fs.readFile(DB_FILE, 'utf8');
     const parsed = JSON.parse(raw) as Partial<DbDocument>;
+    const persistedConfig = parsed.config ?? {};
     doc = {
-      config: { ...defaultConfig(), ...(parsed.config ?? {}) },
+      config: normalizeFrameConfig({ ...defaultConfig(), ...persistedConfig }, persistedConfig),
       items: (parsed.items ?? []).map((item) => ({ ...item, ...normalizeTransform(item) })),
       order: parsed.order ?? (parsed.items ?? []).map((i) => i.id),
       googleTokens: parsed.googleTokens,
     };
+    if (parsed.config && parsed.config.videoAudioMode === undefined) await flush();
   } catch {
     doc = { config: defaultConfig(), items: [], order: [] };
     await flush();
