@@ -85,9 +85,21 @@
       .public-control-title { font-size: 0.95rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
       .public-control-note { font-size: 0.72rem; color: rgba(255,255,255,0.6); }
       #public-playback { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; margin-bottom: 0.8rem; }
-      #public-quick-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.45rem; margin-bottom: 0.8rem; }
-      .public-quick-label { grid-column: 1 / -1; color: rgba(255,255,255,0.64); font-size: 0.72rem; font-weight: 700;
-        letter-spacing: 0.06em; text-transform: uppercase; margin-top: 0.1rem; }
+      #public-quick-actions { display: grid; grid-template-columns: 1fr; gap: 0.55rem; margin-bottom: 0.8rem; }
+      .public-quick-row, .public-zoom-pan-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.45rem; }
+      .public-collapse { border: 1px solid rgba(255,255,255,0.12); border-radius: 0.9rem;
+        background: rgba(255,255,255,0.055); overflow: hidden; }
+      .public-collapse-heading { margin: 0; font-size: 0.88rem; }
+      .public-collapse-toggle { width: 100%; min-height: 2.35rem; display: flex; align-items: center; justify-content: space-between;
+        gap: 0.8rem; border: 0; border-radius: 0; background: transparent; padding: 0.72rem 0.8rem;
+        color: rgba(255,255,255,0.86); cursor: auto; text-align: left; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+      .public-collapse-toggle:hover, .public-collapse-toggle:focus-visible { background: rgba(255,255,255,0.08); }
+      .public-collapse-chevron { transition: transform 0.18s ease; }
+      .public-collapse[data-collapsed="true"] .public-collapse-chevron { transform: rotate(-90deg); }
+      .public-collapse-body { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows 0.2s ease, opacity 0.18s ease; }
+      .public-collapse[data-collapsed="true"] .public-collapse-body { grid-template-rows: 0fr; opacity: 0; }
+      .public-collapse-body-inner { min-height: 0; overflow: hidden; padding: 0 0.8rem 0.8rem; }
+      .public-collapse[data-collapsed="true"] .public-collapse-body-inner { padding-bottom: 0; }
       .public-icon-button, .public-quick-button, #public-settings button { min-height: 2.35rem; border: 1px solid rgba(255,255,255,0.16);
         border-radius: 0.8rem; color: #fff; background: rgba(255,255,255,0.08); cursor: auto; }
       .public-icon-button { font-size: 1.1rem; }
@@ -186,17 +198,30 @@
             <button id="public-next" class="public-icon-button" type="button" data-control="next" aria-label="Next photo">›</button>
           </div>
           <div id="public-quick-actions" aria-label="Quick display actions">
-            <button id="public-fit-cover" class="public-quick-button" type="button" data-quick-action="fill-cover" aria-pressed="false">Cover/Crop</button>
-            <button id="public-fit-contain" class="public-quick-button" type="button" data-quick-action="fill-contain" aria-pressed="false">Contain/Fit</button>
-            <button id="public-smart-crop" class="public-quick-button" type="button" data-quick-action="smart-crop" aria-pressed="false">Smart Crop</button>
-            <button id="public-reset-view" class="public-quick-button" type="button" data-quick-action="reset-view">Reset</button>
-            <button id="public-zoom-out" class="public-quick-button" type="button" data-quick-action="zoom-out">Zoom Out</button>
-            <button id="public-zoom-in" class="public-quick-button" type="button" data-quick-action="zoom-in">Zoom In</button>
-            <span class="public-quick-label" aria-hidden="true">Pan</span>
-            <button id="public-pan-up" class="public-quick-button" type="button" data-quick-action="pan-up" aria-label="Pan up">↑</button>
-            <button id="public-pan-left" class="public-quick-button" type="button" data-quick-action="pan-left" aria-label="Pan left">←</button>
-            <button id="public-pan-down" class="public-quick-button" type="button" data-quick-action="pan-down" aria-label="Pan down">↓</button>
-            <button id="public-pan-right" class="public-quick-button" type="button" data-quick-action="pan-right" aria-label="Pan right">→</button>
+            <div class="public-quick-row">
+              <button id="public-fit-cover" class="public-quick-button" type="button" data-quick-action="fill-cover" aria-pressed="false">Cover/Crop</button>
+              <button id="public-fit-contain" class="public-quick-button" type="button" data-quick-action="fill-contain" aria-pressed="false">Contain/Fit</button>
+              <button id="public-smart-crop" class="public-quick-button" type="button" data-quick-action="smart-crop" aria-pressed="false">Smart Crop</button>
+              <button id="public-reset-view" class="public-quick-button" type="button" data-quick-action="reset-view">Reset</button>
+            </div>
+            <section class="public-collapse" id="public-zoom-pan-section" data-collapsed="false">
+              <h2 class="public-collapse-heading">
+                <button id="public-zoom-pan-toggle" class="public-collapse-toggle" type="button" aria-controls="public-zoom-pan-body" aria-expanded="true">
+                  <span>Zoom &amp; Pan</span>
+                  <span class="public-collapse-chevron" aria-hidden="true">▾</span>
+                </button>
+              </h2>
+              <div id="public-zoom-pan-body" class="public-collapse-body">
+                <div class="public-collapse-body-inner public-zoom-pan-grid">
+                  <button id="public-zoom-out" class="public-quick-button" type="button" data-quick-action="zoom-out">Zoom Out</button>
+                  <button id="public-zoom-in" class="public-quick-button" type="button" data-quick-action="zoom-in">Zoom In</button>
+                  <button id="public-pan-up" class="public-quick-button" type="button" data-quick-action="pan-up" aria-label="Pan up">↑</button>
+                  <button id="public-pan-left" class="public-quick-button" type="button" data-quick-action="pan-left" aria-label="Pan left">←</button>
+                  <button id="public-pan-down" class="public-quick-button" type="button" data-quick-action="pan-down" aria-label="Pan down">↓</button>
+                  <button id="public-pan-right" class="public-quick-button" type="button" data-quick-action="pan-right" aria-label="Pan right">→</button>
+                </div>
+              </div>
+            </section>
           </div>
           <div id="public-settings" aria-label="Slideshow settings"></div>
         </aside>
