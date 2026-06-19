@@ -195,6 +195,25 @@ export function defaultConfig(): FrameConfig {
   };
 }
 
+/**
+ * Normalize a partially persisted config after merging it with defaults.
+ *
+ * Older databases only persisted the legacy `videoMuted` boolean. Because
+ * `defaultConfig()` now supplies `videoAudioMode: 'tv'`, callers that shallow-merge
+ * defaults with persisted JSON must explicitly derive a missing audio mode from the
+ * legacy field before serving or storing the config.
+ */
+export function normalizeFrameConfig(config: FrameConfig, persisted?: Partial<FrameConfig>): FrameConfig {
+  if (persisted?.videoAudioMode !== undefined) {
+    return { ...config, videoMuted: config.videoAudioMode !== 'tv' };
+  }
+  if (persisted?.videoMuted !== undefined) {
+    const videoMuted = persisted.videoMuted === true;
+    return { ...config, videoAudioMode: videoMuted ? 'muted' : 'tv', videoMuted };
+  }
+  return { ...config, videoMuted: config.videoAudioMode !== 'tv' };
+}
+
 /** Loose string-keyed payload matching the original `/api/data` shape. */
 export type ApiDataPayload = Record<string, string>;
 

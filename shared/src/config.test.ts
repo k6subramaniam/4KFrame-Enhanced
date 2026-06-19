@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { aspectRatio, defaultConfig, toApiData, fromApiData, type FrameConfig } from './config.js';
+import { aspectRatio, defaultConfig, toApiData, fromApiData, normalizeFrameConfig, type FrameConfig } from './config.js';
 
 test('aspectRatio maps presets and returns null for auto', () => {
   assert.equal(aspectRatio('auto'), null);
@@ -55,6 +55,28 @@ test('fromApiData maps legacy videoMuted patches to videoAudioMode', () => {
   assert.equal(fromApiData(defaultConfig(), { videoMuted: 'true' }).videoAudioMode, 'muted');
   assert.equal(fromApiData({ ...defaultConfig(), videoAudioMode: 'phone', videoMuted: true }, {}).videoAudioMode, 'phone');
   assert.equal(fromApiData(defaultConfig(), { videoMuted: 'true', videoAudioMode: 'phone' }).videoAudioMode, 'phone');
+});
+
+test('normalizeFrameConfig migrates legacy persisted videoMuted configs', () => {
+  const legacyMuted = { videoMuted: true };
+  const migratedLegacyMuted = normalizeFrameConfig({ ...defaultConfig(), ...legacyMuted }, legacyMuted);
+  assert.deepEqual(
+    {
+      videoAudioMode: migratedLegacyMuted.videoAudioMode,
+      videoMuted: migratedLegacyMuted.videoMuted,
+    },
+    { videoAudioMode: 'muted', videoMuted: true },
+  );
+
+  const explicitPhone = { videoMuted: true, videoAudioMode: 'phone' as const };
+  const migratedExplicitPhone = normalizeFrameConfig({ ...defaultConfig(), ...explicitPhone }, explicitPhone);
+  assert.deepEqual(
+    {
+      videoAudioMode: migratedExplicitPhone.videoAudioMode,
+      videoMuted: migratedExplicitPhone.videoMuted,
+    },
+    { videoAudioMode: 'phone', videoMuted: true },
+  );
 });
 
 test('toApiData serialises fillMode/frameAspect and mirrors legacy frameFill', () => {
