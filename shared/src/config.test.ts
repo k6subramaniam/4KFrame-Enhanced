@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { aspectRatio, defaultConfig, toApiData, fromApiData, type FrameConfig } from './config.js';
+import { aspectRatio, defaultConfig, toApiData, fromApiData, fromStoredConfig, type FrameConfig } from './config.js';
 
 test('aspectRatio maps presets and returns null for auto', () => {
   assert.equal(aspectRatio('auto'), null);
@@ -48,6 +48,15 @@ test('videoAudioMode serialises and legacy videoMuted mirrors muted mode', () =>
     assert.equal(fromApiData(base, payload).videoAudioMode, videoAudioMode);
     assert.equal(fromApiData(base, payload).videoMuted, videoAudioMode === 'muted');
   }
+});
+
+test('fromStoredConfig migrates legacy muted configs without explicit audio mode', () => {
+  const migrated = fromStoredConfig({ videoMuted: true });
+
+  assert.equal(migrated.videoAudioMode, 'muted');
+  assert.equal(migrated.videoMuted, true);
+  assert.equal(fromStoredConfig({ videoAudioMode: 'phone', videoMuted: true }).videoAudioMode, 'phone');
+  assert.equal(fromStoredConfig({ videoAudioMode: 'phone', videoMuted: true }).videoMuted, false);
 });
 
 test('fromApiData preserves the persisted videoAudioMode choice when a patch omits it', () => {
