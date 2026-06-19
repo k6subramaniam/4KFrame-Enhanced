@@ -26,7 +26,7 @@ import { GLRenderer } from './gl.js';
 import { compose, contentRect } from './compositor.js';
 import { applyOverlays, setCaption, setStatus } from './overlays.js';
 import { initCastReceiver } from './cast.js';
-import { seekActiveVideo, syncVideoPlaybackProperties } from './videoPlayback.js';
+import { mutedForVideoAudioMode, playbackBlockedStatusMessage, seekActiveVideo, syncVideoPlaybackProperties } from './videoPlayback.js';
 
 const canvas = document.getElementById('gl') as HTMLCanvasElement;
 const video = document.getElementById('video') as HTMLVideoElement;
@@ -180,15 +180,13 @@ function startMotion(): void {
 
 function reportPlaybackBlocked(error: unknown): void {
   console.error('Video playback was blocked.', error);
-  setStatus(config.videoMuted
-    ? 'Video playback was blocked. Press Play to resume.'
-    : 'Video sound was blocked by the receiver. Press Play to resume with audio.');
+  setStatus(playbackBlockedStatusMessage(config.videoAudioMode));
 }
 
 /** Keep the active video element aligned with persisted playback settings. */
 function syncActiveVideoPlaybackProperties(restartAfterUnmute = false): void {
   syncVideoPlaybackProperties(video, {
-    muted: config.videoMuted,
+    muted: mutedForVideoAudioMode(config.videoAudioMode),
     loop: config.videoLoop || holding,
     restartAfterUnmute: restartAfterUnmute && showingVideo && !paused,
     onPlaybackRejected: reportPlaybackBlocked,
@@ -346,7 +344,12 @@ function handleEvent(event: FrameEvent): void {
       renderItems(event.items, event.interactive).catch((err) => console.error(err));
       break;
     case 'seek':
-      seekActiveVideo(video, event.offsetSec, showingVideo);
+      if ('offsetSec' in event) {
+        seekActiveVideo(video, event.offsetSec, showingVideo);
+      } else if (showingVideo && lastVideoItem?.id === event.itemId && Number.isFinite(video.duration)) {
+        video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + event.deltaSec));
+        reportVideoPlayback(true);
+      }
       break;
     case 'library':
       // No-op for the display; the server drives what is shown.
@@ -369,12 +372,6 @@ function handleEvent(event: FrameEvent): void {
       holding = event.holding;
       if (showingVideo) syncActiveVideoPlaybackProperties();
       setStatus(statusText());
-      break;
-    case 'seek':
-      if (showingVideo && lastVideoItem?.id === event.itemId && Number.isFinite(video.duration)) {
-        video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + event.deltaSec));
-        reportVideoPlayback(true);
-      }
       break;
     case 'log':
       if (event.level === 'error') console.error(event.message);

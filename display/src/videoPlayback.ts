@@ -1,3 +1,19 @@
+export type VideoAudioMode = 'tv' | 'muted' | 'phone';
+
+export function mutedForVideoAudioMode(mode: VideoAudioMode): boolean {
+  return mode === 'muted';
+}
+
+export function playbackBlockedStatusMessage(mode: VideoAudioMode): string {
+  if (mode === 'tv') {
+    return 'TV blocked autoplay audio. Press Play on the TV/browser to resume with sound.';
+  }
+  if (mode === 'phone') {
+    return 'Phone/browser audio may need a tap before it can play. Tap Play in the admin/controller UI to resume with sound.';
+  }
+  return 'Video playback was blocked. Press Play to resume muted playback.';
+}
+
 export interface VideoPlaybackSyncOptions {
   muted: boolean;
   loop: boolean;

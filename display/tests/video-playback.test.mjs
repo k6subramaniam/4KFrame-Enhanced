@@ -8,7 +8,7 @@ const source = await readFile(sourceUrl, 'utf8');
 const { outputText: code } = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
 });
-const { seekActiveVideo, syncVideoPlaybackProperties } = await import(`data:text/javascript,${encodeURIComponent(code)}`);
+const { mutedForVideoAudioMode, playbackBlockedStatusMessage, seekActiveVideo, syncVideoPlaybackProperties } = await import(`data:text/javascript,${encodeURIComponent(code)}`);
 
 test('synchronizes muted and loop properties immediately without restarting unchanged playback', () => {
   let playCalls = 0;
@@ -130,4 +130,43 @@ test('prepares initial muted autoplay while retaining volume for later unmute', 
   assert.equal(video.defaultMuted, true);
   assert.equal(video.volume, 1);
   assert.equal(video.loop, true);
+});
+
+
+test('maps audio output modes to video muted state for playback synchronization', () => {
+  assert.equal(mutedForVideoAudioMode('tv'), false);
+  assert.equal(mutedForVideoAudioMode('phone'), false);
+  assert.equal(mutedForVideoAudioMode('muted'), true);
+
+  const video = {
+    muted: false,
+    defaultMuted: false,
+    volume: 0,
+    loop: false,
+    play: () => Promise.resolve(),
+  };
+
+  syncVideoPlaybackProperties(video, {
+    muted: mutedForVideoAudioMode('muted'),
+    loop: true,
+    onPlaybackRejected: assert.fail,
+  });
+
+  assert.equal(video.muted, true);
+  assert.equal(video.defaultMuted, true);
+  assert.equal(video.volume, 1);
+  assert.equal(video.loop, true);
+});
+
+test('playback blocked status messages are specific to video audio mode', () => {
+  assert.equal(
+    playbackBlockedStatusMessage('tv'),
+    'TV blocked autoplay audio. Press Play on the TV/browser to resume with sound.',
+  );
+  assert.equal(
+    playbackBlockedStatusMessage('muted'),
+    'Video playback was blocked. Press Play to resume muted playback.',
+  );
+  assert.match(playbackBlockedStatusMessage('phone'), /Phone\/browser audio may need a tap/);
+  assert.match(playbackBlockedStatusMessage('phone'), /admin\/controller UI/);
 });

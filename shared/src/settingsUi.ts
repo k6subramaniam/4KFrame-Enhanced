@@ -243,12 +243,14 @@ export const SHARED_SETTINGS_PANELS: SettingsPanelMetadata[] = [
     title: 'Video Audio',
     adminOnly: true,
     render: (config) => {
-      const videoMuted = bool(config, 'videoMuted', false);
-      return `${segmentButtons('videoMuted', [
-        { label: 'Sound on', value: 'false', active: !videoMuted },
-        { label: 'Muted', value: 'true', active: videoMuted },
+      const legacyMuted = bool(config, 'videoMuted', false);
+      const videoAudioMode = text(config, 'videoAudioMode', legacyMuted ? 'muted' : 'tv');
+      return `${segmentButtons('videoAudioMode', [
+        { label: 'TV speakers', value: 'tv', active: videoAudioMode === 'tv' },
+        { label: 'Muted', value: 'muted', active: videoAudioMode === 'muted' },
+        { label: 'Phone/browser', value: 'phone', active: videoAudioMode === 'phone' },
       ])}
-      <div class="muted" style="margin-top:.4rem">Choose whether videos play through the TV speakers.</div>`;
+      <div class="muted" style="margin-top:.4rem">Choose TV audio, muted autoplay, or phone/browser audio. Phone/browser audio may require tapping Play before sound starts.</div>`;
     },
   },
   {
@@ -383,6 +385,10 @@ export function settingsPanelsForCapabilities(
 
 export function settingsSelectionPatch(key: string, value: string): SettingsPatch {
   if (key === 'effect') return { transitionPeriod: value };
+  if (key === 'videoAudioMode') {
+    if (value === 'tv' || value === 'muted' || value === 'phone') return { videoAudioMode: value, videoMuted: value === 'muted' };
+    return {};
+  }
   if (['videoMuted', 'screenFlipHorizontal', 'screenFlipVertical'].includes(key)) return { [key]: value === 'true' };
   if (key === 'screenRotation') return { screenRotation: Number(value) as FrameConfig['screenRotation'] };
   return { [key]: value };

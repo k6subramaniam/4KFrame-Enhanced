@@ -73,25 +73,26 @@ test('Video Audio panel renders user-friendly sound choices and current state', 
   assert.ok(panel);
   assert.equal(panel.adminOnly, true);
 
-  const soundOnHtml = panel.render({ ...defaultConfig(), videoMuted: false });
-  assert.match(soundOnHtml, /Video Audio|Sound on/);
-  assert.match(soundOnHtml, /data-group="videoMuted"/);
-  assert.match(soundOnHtml, /data-value="false" class="active">Sound on/);
-  assert.match(soundOnHtml, /data-value="true" class="">Muted/);
+  const soundOnHtml = panel.render({ ...defaultConfig(), videoAudioMode: 'tv', videoMuted: false });
+  assert.match(soundOnHtml, /Video Audio|TV speakers/);
+  assert.match(soundOnHtml, /data-group="videoAudioMode"/);
+  assert.match(soundOnHtml, /data-value="tv" class="active">TV speakers/);
+  assert.match(soundOnHtml, /data-value="muted" class="">Muted/);
+  assert.match(soundOnHtml, /Phone\/browser audio may require tapping Play/);
 
-  const mutedHtml = panel.render(toApiData({ ...defaultConfig(), videoMuted: true }));
-  assert.match(mutedHtml, /data-value="true" class="active">Muted/);
+  const mutedHtml = panel.render(toApiData({ ...defaultConfig(), videoAudioMode: 'muted', videoMuted: true }));
+  assert.match(mutedHtml, /data-value="muted" class="active">Muted/);
 });
 
-test('selecting Sound on emits the existing videoMuted key with boolean false', async () => {
+test('selecting video audio mode emits mode and legacy muted state', async () => {
   const emitted: unknown[] = [];
   await applySettingsSelection({
     getConfig: defaultConfig,
     updateConfig: (patch) => { emitted.push(patch); },
-  }, 'videoMuted', 'false');
+  }, 'videoAudioMode', 'phone');
 
-  assert.deepEqual(emitted, [{ videoMuted: false }]);
-  assert.deepEqual(settingsSelectionPatch('videoMuted', 'true'), { videoMuted: true });
+  assert.deepEqual(emitted, [{ videoAudioMode: 'phone', videoMuted: false }]);
+  assert.deepEqual(settingsSelectionPatch('videoAudioMode', 'muted'), { videoAudioMode: 'muted', videoMuted: true });
 });
 
 test('Video Audio is available to admins but excluded from public TV controls', () => {
