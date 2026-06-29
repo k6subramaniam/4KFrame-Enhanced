@@ -42,19 +42,19 @@ test('a connected seekable video switches controls to bounded seeking', () => {
     },
   }));
   assert.equal(state.action, 'video-seek');
-  assert.equal(state.previousLabel, 'Seek backward 10 seconds');
-  assert.equal(state.nextLabel, 'Seek forward 10 seconds');
+  assert.equal(state.previousLabel, 'Seek backward 10 seconds; double tap for previous slideshow item');
+  assert.equal(state.nextLabel, 'Seek forward 10 seconds; double tap for next slideshow item');
   assert.equal(state.previousDisabled, false);
   assert.equal(state.nextDisabled, false);
 });
 
-test('video seek controls disable at playback boundaries', () => {
+test('video seek controls remain enabled at playback boundaries so double tap can skip items', () => {
   const atStart = playbackNavigationState(playback({
     itemId: 'video-1',
     kind: 'video',
     display: { itemId: 'video-1', currentTime: 0, duration: 60, seekable: true, observedAt: Date.now() },
   }));
-  assert.equal(atStart.previousDisabled, true);
+  assert.equal(atStart.previousDisabled, false);
   assert.equal(atStart.nextDisabled, false);
 
   const atEnd = playbackNavigationState(playback({
@@ -63,7 +63,7 @@ test('video seek controls disable at playback boundaries', () => {
     display: { itemId: 'video-1', currentTime: 60, duration: 60, seekable: true, observedAt: Date.now() },
   }));
   assert.equal(atEnd.previousDisabled, false);
-  assert.equal(atEnd.nextDisabled, true);
+  assert.equal(atEnd.nextDisabled, false);
 });
 
 test('disconnected, stale, unseekable, and transitioned display state falls back to slideshow navigation', () => {

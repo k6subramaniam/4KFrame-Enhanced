@@ -31,10 +31,10 @@ export function playbackNavigationState(playback: Playback): PlaybackNavigationS
   }
 
   return {
-    previousLabel: `Seek backward ${VIDEO_SEEK_SECONDS} seconds`,
-    nextLabel: `Seek forward ${VIDEO_SEEK_SECONDS} seconds`,
-    previousDisabled: display.currentTime <= 0,
-    nextDisabled: display.currentTime >= display.duration,
+    previousLabel: `Seek backward ${VIDEO_SEEK_SECONDS} seconds; double tap for previous slideshow item`,
+    nextLabel: `Seek forward ${VIDEO_SEEK_SECONDS} seconds; double tap for next slideshow item`,
+    previousDisabled: false,
+    nextDisabled: false,
     action: 'video-seek',
   };
 }

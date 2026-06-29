@@ -15,6 +15,7 @@ import {
 } from './api.js';
 import { renderSettings } from './settings.js';
 import { initCastSender, isCastReady, castControl, toggleCastSession } from './cast-sender.js';
+import { createMultiActivationRecognizer } from './multiActivation.js';
 import { playbackNavigationState, VIDEO_SEEK_SECONDS } from './playbackState.js';
 import { type ControlSheetController, wireControlSheet as wireControlSheetController } from './controlSheet.js';
 
@@ -307,8 +308,18 @@ function wirePlaybackPreviewSocket(): void {
 
 function wirePlayback(): void {
   const byId = (id: string) => document.getElementById(id) as HTMLButtonElement | null;
-  byId('pb-prev')?.addEventListener('click', () => navigatePlayback(-1));
-  byId('pb-next')?.addEventListener('click', () => navigatePlayback(1));
+  const previous = byId('pb-prev');
+  const next = byId('pb-next');
+  const previousTap = createMultiActivationRecognizer(
+    () => navigatePlayback(-1),
+    () => skipPlayback(-1),
+  );
+  const nextTap = createMultiActivationRecognizer(
+    () => navigatePlayback(1),
+    () => skipPlayback(1),
+  );
+  previous?.addEventListener('click', () => previousTap.activate());
+  next?.addEventListener('click', () => nextTap.activate());
   byId('pb-play')?.addEventListener('click', async () => {
     const p = await getPlayback().catch(() => null);
     await setPaused(!(p?.paused)).catch(() => {});
@@ -319,6 +330,11 @@ function wirePlayback(): void {
     await setHold(!(p?.holding)).catch(() => {});
     await syncPlayback();
   });
+}
+
+async function skipPlayback(direction: -1 | 1): Promise<void> {
+  await (direction < 0 ? skipPrev() : skipNext()).catch(() => {});
+  await syncPlayback();
 }
 
 async function navigatePlayback(direction: -1 | 1): Promise<void> {
