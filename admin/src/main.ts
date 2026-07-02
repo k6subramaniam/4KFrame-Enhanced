@@ -5,21 +5,36 @@
  * of photos and videos, the settings panel, and Google Cast sender wiring.
  */
 
-import type { MediaItem } from '@4kframe/shared';
+import type { DisplayPlaybackState, FrameConfig, FrameEvent, MediaItem } from '@4kframe/shared';
 import {
-  fetchItems, fetchData, castItem, deleteItem, upload, thumbUrl,
-  skipNext, skipPrev, getPlayback, setPaused, setHold, toggleEnabled,
+  fetchItems, fetchCurrent, castItem, deleteItem, upload, thumbUrl,
+  skipNext, skipPrev, getPlayback, setPaused, setHold, seekBy, toggleEnabled,
   me, login, logout, type AuthState,
+  patchMediaTransforms,
+  setItemsEnabled, deleteItems, playSequence,
 } from './api.js';
 import { renderSettings } from './settings.js';
 import { initCastSender, isCastReady, castControl, toggleCastSession } from './cast-sender.js';
+import { createMultiActivationRecognizer } from './multiActivation.js';
+import { playbackNavigationState, VIDEO_SEEK_SECONDS } from './playbackState.js';
+import { type ControlSheetController, wireControlSheet as wireControlSheetController } from './controlSheet.js';
 
 type Mode = 'cast' | 'view' | 'delete';
 type PeopleFilter = 'all' | 'has-faces' | 'similar-faces' | 'labeled';
+type SortMode = 'date-desc' | 'date-asc' | 'filename-asc' | 'filename-desc';
 let mode: Mode = 'cast';
 let peopleFilter: PeopleFilter = 'all';
+let sortMode: SortMode = 'date-desc';
 let labelFilter = '';
 let items: MediaItem[] = [];
+let selectionMode = false;
+const selectedIds = new Set<string>();
+const selectedMediaIds = new Set<string>();
+let activeItem: MediaItem | undefined;
+let activeConfig: Partial<FrameConfig> = {};
+let phonePreview: HTMLVideoElement | null = null;
+let phonePreviewItemId: string | null = null;
+let phonePreviewUserPaused = false;
 
 const grid = document.getElementById('grid') as HTMLElement;
 const hint = document.getElementById('hint') as HTMLElement;
@@ -28,10 +43,13 @@ const controlsToggle = document.getElementById('controls-toggle') as HTMLButtonE
 const controlsClose = document.getElementById('controls-close') as HTMLButtonElement | null;
 const controlsSheet = document.getElementById('control-sheet') as HTMLElement | null;
 const controlsBackdrop = document.getElementById('controls-backdrop') as HTMLElement | null;
-let controlsOpen = false;
+let controlsController: ControlSheetController | null = null;
 const peopleFilterSelect = document.getElementById('people-filter') as HTMLSelectElement | null;
 const labelFilterSelect = document.getElementById('label-filter') as HTMLSelectElement | null;
+const sortSelect = document.getElementById('media-sort') as HTMLSelectElement | null;
 const peopleSummary = document.getElementById('people-summary') as HTMLElement | null;
+const bulkToolbar = document.getElementById('bulk-toolbar') as HTMLElement | null;
+const selectionCount = document.getElementById('selection-count') as HTMLElement | null;
 
 const HINTS: Record<Mode, string> = {
   cast: 'Cast mode: click a photo to show it on the frame.',
@@ -46,12 +64,17 @@ function fmtDuration(sec: number): string {
 
 function renderGrid(): void {
   grid.innerHTML = '';
-  const visibleItems = filterPeople(items);
+  const visibleItems = sortItems(filterPeople(items));
   renderPeopleSummary(visibleItems);
   for (const item of visibleItems) {
     const tile = document.createElement('div');
     const excluded = item.enabled === false;
-    tile.className = `tile ${mode}${excluded ? ' excluded' : ''}`;
+    const selected = selectedMediaIds.has(item.id);
+    tile.className = `tile ${mode}${excluded ? ' excluded' : ''}${selected ? ' selected' : ''}`;
+    tile.tabIndex = 0;
+    tile.setAttribute('role', 'option');
+    tile.setAttribute('aria-selected', String(selected));
+    tile.setAttribute('aria-label', `${selected ? 'Selected' : 'Not selected'}: ${item.file}`);
     // Videos only have an image thumb once a poster exists; otherwise show a placeholder.
     const hasImageThumb = item.kind === 'photo' || !!item.poster;
     const dur = item.kind === 'video' && item.durationSec
@@ -61,9 +84,22 @@ function renderGrid(): void {
       (item.kind === 'video' ? '<span class="badge">▶ video</span>' : '') +
       (item.transcoding ? '<span class="badge badge-proc">⏳ processing</span>' : '') +
       (item.faces?.length ? `<span class="badge badge-face">☺ ${item.faces.length}</span>` : '') +
+      ((item.rotation || item.flipHorizontal || item.flipVertical)
+        ? `<span class="badge badge-transform">${item.rotation ?? 0}°${item.flipHorizontal ? ' ↔' : ''}${item.flipVertical ? ' ↕' : ''}</span>` : '') +
       dur +
-      `<button class="incl" title="${excluded ? 'Excluded — tap to include in slideshow' : 'Included — tap to exclude from slideshow'}">${excluded ? '🚫' : '✓'}</button>`;
-    tile.addEventListener('click', () => onTileClick(item));
+      `<button class="select-control" type="button" aria-label="${selected ? 'Deselect' : 'Select'} ${escapeHtml(item.file)}">${selected ? '✓' : ''}</button>` +
+      `<button class="incl" title="${excluded ? 'Not a Favorite — tap to add to automatic playback' : 'Favorite — participates in automatic playback'}" aria-label="${excluded ? 'Add to Favorites' : 'Remove from Favorites'}">${excluded ? '☆' : '★'}</button>`;
+    tile.addEventListener('click', () => selectionMode ? toggleSelection(item.id) : onTileClick(item));
+    tile.addEventListener('keydown', (event) => {
+      if (event.key === ' ' || event.key === 'Enter') {
+        event.preventDefault();
+        toggleSelection(item.id);
+      }
+    });
+    tile.querySelector('.select-control')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleSelection(item.id);
+    });
     tile.querySelector('.incl')?.addEventListener('click', async (e) => {
       e.stopPropagation();
       await toggleEnabled(item.id);
@@ -71,6 +107,39 @@ function renderGrid(): void {
     });
     grid.appendChild(tile);
   }
+  renderBulkToolbar();
+}
+
+function toggleSelection(id: string): void {
+  selectionMode = true;
+  if (selectedMediaIds.has(id)) selectedMediaIds.delete(id);
+  else selectedMediaIds.add(id);
+  if (!selectedMediaIds.size) selectionMode = false;
+  renderGrid();
+}
+
+function renderBulkToolbar(): void {
+  if (!bulkToolbar || !selectionCount) return;
+  selectionCount.textContent = `${selectedMediaIds.size} selected`;
+  bulkToolbar.classList.toggle('active', selectionMode);
+  bulkToolbar.querySelectorAll<HTMLButtonElement>('[data-requires-selection]').forEach((button) => {
+    button.disabled = selectedMediaIds.size === 0;
+  });
+}
+
+const filenameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+function sortItems(source: MediaItem[]): MediaItem[] {
+  return [...source].sort((a, b) => {
+    if (sortMode === 'date-asc' || sortMode === 'date-desc') {
+      const direction = sortMode === 'date-asc' ? 1 : -1;
+      const dateCompare = (a.createdAt - b.createdAt) * direction;
+      return dateCompare || filenameCollator.compare(a.file, b.file) || a.id.localeCompare(b.id);
+    }
+
+    const direction = sortMode === 'filename-asc' ? 1 : -1;
+    return (filenameCollator.compare(a.file, b.file) * direction) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id);
+  });
 }
 
 function filterPeople(source: MediaItem[]): MediaItem[] {
@@ -121,6 +190,7 @@ function escapeHtml(value: string): string {
 }
 
 function wirePeopleFilters(): void {
+  if (sortSelect) sortMode = (sortSelect.value || sortMode) as SortMode;
   peopleFilterSelect?.addEventListener('change', () => {
     peopleFilter = (peopleFilterSelect.value || 'all') as PeopleFilter;
     syncPeopleLabels();
@@ -130,12 +200,126 @@ function wirePeopleFilters(): void {
     labelFilter = labelFilterSelect.value;
     renderGrid();
   });
+  sortSelect?.addEventListener('change', () => {
+    sortMode = (sortSelect.value || 'date-desc') as SortMode;
+    renderGrid();
+  });
+}
+
+
+function ensurePhonePreview(): { root: HTMLElement; video: HTMLVideoElement; status: HTMLElement } {
+  let root = document.getElementById('phone-audio-preview') as HTMLElement | null;
+  if (!root) {
+    root = document.createElement('section');
+    root.id = 'phone-audio-preview';
+    root.className = 'phone-audio-preview';
+    root.innerHTML = `
+      <style>
+        .phone-audio-preview{margin:.75rem 0;padding:.75rem;border:1px solid rgba(255,255,255,.18);border-radius:12px;background:rgba(0,0,0,.22)}
+        .phone-audio-preview video{width:100%;max-height:180px;border-radius:10px;background:#000}
+        .phone-audio-preview .preview-copy{margin:.35rem 0 0;font-size:.9rem;opacity:.82}
+      </style>
+      <strong>Phone / Browser audio preview</strong>
+      <video playsinline controls></video>
+      <p class="preview-copy">Audio plays in this browser while the TV stays muted. Browser autoplay permissions may block audio; tap Play if it does not start.</p>
+      <div class="preview-copy" data-preview-status></div>`;
+    hint.insertAdjacentElement('afterend', root);
+  }
+  const video = root.querySelector('video') as HTMLVideoElement;
+  const status = root.querySelector('[data-preview-status]') as HTMLElement;
+  phonePreview = video;
+  video.onplay = () => { phonePreviewUserPaused = false; };
+  video.onpause = () => { phonePreviewUserPaused = true; };
+  return { root, video, status };
+}
+
+function hidePhonePreview(): void {
+  document.getElementById('phone-audio-preview')?.remove();
+  phonePreview?.pause();
+  phonePreview = null;
+  phonePreviewItemId = null;
+}
+
+function syncPhonePreviewToDisplay(display: DisplayPlaybackState | null): void {
+  if (!phonePreview || activeConfig.videoAudioMode !== 'phone' || activeItem?.kind !== 'video') return;
+  if (!display || display.itemId !== activeItem.id) return;
+  const elapsed = Math.max(0, (Date.now() - display.observedAt) / 1000);
+  const target = Math.min(display.duration || Number.POSITIVE_INFINITY, display.currentTime + elapsed);
+  if (Number.isFinite(target) && Math.abs(phonePreview.currentTime - target) > 1.25) {
+    phonePreview.currentTime = target;
+  }
+}
+
+async function renderPhonePreview(display: DisplayPlaybackState | null = null): Promise<void> {
+  if (activeConfig.videoAudioMode !== 'phone' || activeItem?.kind !== 'video') {
+    hidePhonePreview();
+    return;
+  }
+  const { root, video, status } = ensurePhonePreview();
+  root.hidden = false;
+  if (phonePreviewItemId !== activeItem.id) {
+    phonePreviewItemId = activeItem.id;
+    phonePreviewUserPaused = false;
+    video.src = `/photos/${activeItem.file}`;
+    video.muted = false;
+    video.loop = Boolean(activeConfig.videoLoop);
+    video.load();
+  }
+  syncPhonePreviewToDisplay(display);
+  if (!phonePreviewUserPaused) {
+    try {
+      await video.play();
+      status.textContent = 'Playing browser audio for the active TV video.';
+    } catch {
+      status.textContent = 'Tap Play to start browser audio; autoplay with sound may be blocked.';
+    }
+  }
+}
+
+async function pollPreviewPlayback(): Promise<void> {
+  if (activeConfig.videoAudioMode !== 'phone' || activeItem?.kind !== 'video') return;
+  const playback = await getPlayback().catch(() => null);
+  await renderPhonePreview(playback?.display ?? null);
+}
+
+function wirePlaybackPreviewSocket(): void {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  try {
+    const socket = new WebSocket(`${proto}://${location.host}/ws`);
+    socket.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data as string) as FrameEvent;
+        if (msg.type === 'config') {
+          activeConfig = msg.config;
+          void renderPhonePreview();
+        } else if (msg.type === 'show') {
+          activeItem = msg.items.find((item) => item.kind === 'video') ?? msg.items[0];
+          void renderPhonePreview();
+        }
+      } catch {
+        // Ignore malformed/non-frame messages.
+      }
+    };
+  } catch {
+    // Polling still keeps the preview roughly synchronized when WebSocket setup fails.
+  }
+  window.setInterval(() => { pollPreviewPlayback().catch(() => {}); }, 1500);
 }
 
 function wirePlayback(): void {
   const byId = (id: string) => document.getElementById(id) as HTMLButtonElement | null;
-  byId('pb-prev')?.addEventListener('click', () => { skipPrev().catch(() => {}); });
-  byId('pb-next')?.addEventListener('click', () => { skipNext().catch(() => {}); });
+  const previous = byId('pb-prev');
+  const next = byId('pb-next');
+  const previousTap = createMultiActivationRecognizer(
+    () => navigatePlayback(-1),
+    () => skipPlayback(-1),
+  );
+  const nextTap = createMultiActivationRecognizer(
+    () => navigatePlayback(1),
+    () => skipPlayback(1),
+  );
+  previous?.addEventListener('click', () => previousTap.activate());
+  next?.addEventListener('click', () => nextTap.activate());
   byId('pb-play')?.addEventListener('click', async () => {
     const p = await getPlayback().catch(() => null);
     await setPaused(!(p?.paused)).catch(() => {});
@@ -148,14 +332,51 @@ function wirePlayback(): void {
   });
 }
 
+async function skipPlayback(direction: -1 | 1): Promise<void> {
+  await (direction < 0 ? skipPrev() : skipNext()).catch(() => {});
+  await syncPlayback();
+}
+
+async function navigatePlayback(direction: -1 | 1): Promise<void> {
+  const playback = await getPlayback().catch(() => null);
+  const state = playback ? playbackNavigationState(playback) : null;
+  if (state?.action === 'video-seek') {
+    await seekBy(direction * VIDEO_SEEK_SECONDS).catch(() => {});
+  } else {
+    await (direction < 0 ? skipPrev() : skipNext()).catch(() => {});
+  }
+  await syncPlayback();
+}
+
 async function syncPlayback(): Promise<void> {
-  const p = await getPlayback().catch(() => ({ paused: false, holding: false }));
+  const p = await getPlayback().catch(() => ({
+    paused: false, holding: false, itemId: null, kind: null, display: null,
+  }));
   const play = document.getElementById('pb-play');
   if (play) { play.textContent = p.paused ? '▶' : '⏸'; play.classList.toggle('active', p.paused); }
   document.getElementById('pb-loop')?.classList.toggle('active', p.holding);
+  const nav = playbackNavigationState(p);
+  const previous = document.getElementById('pb-prev') as HTMLButtonElement | null;
+  const next = document.getElementById('pb-next') as HTMLButtonElement | null;
+  if (previous) {
+    previous.title = nav.previousLabel;
+    previous.setAttribute('aria-label', nav.previousLabel);
+    previous.disabled = nav.previousDisabled;
+  }
+  if (next) {
+    next.title = nav.nextLabel;
+    next.setAttribute('aria-label', nav.nextLabel);
+    next.disabled = nav.nextDisabled;
+  }
 }
 
 async function onTileClick(item: MediaItem): Promise<void> {
+  if (selectionMode) {
+    if (selectedIds.has(item.id)) selectedIds.delete(item.id); else selectedIds.add(item.id);
+    renderGrid();
+    syncTransformToolbar();
+    return;
+  }
   if (mode === 'cast') {
     // Prefer a live Cast session (native Google Cast); fall back to the LAN REST flow.
     const sent = await castControl({ type: 'cast', id: item.id });
@@ -170,14 +391,104 @@ async function onTileClick(item: MediaItem): Promise<void> {
   }
 }
 
+function syncTransformToolbar(): void {
+  document.getElementById('media-transform-tools')?.classList.toggle('selection-active', selectionMode);
+  const count = document.getElementById('media-selection-count');
+  if (count) count.textContent = selectionMode ? `${selectedIds.size} selected` : 'Current item';
+}
+
+async function applyMediaTransform(action: 'left' | 'right' | 'horizontal' | 'vertical'): Promise<void> {
+  const current = await fetchCurrent();
+  const targetIds = selectionMode
+    ? [...selectedIds]
+    : items.filter((item) => current.current.includes(item.file)).map((item) => item.id);
+  if (!targetIds.length) return;
+  const targets = targetIds.map((id) => items.find((item) => item.id === id)).filter((item): item is MediaItem => Boolean(item));
+  // Batch equal resulting values together; mixed selections may need separate patches.
+  for (const item of targets) {
+    const rotation = item.rotation ?? 0;
+    const transform = action === 'left' ? { rotation: ((rotation + 270) % 360) as MediaItem['rotation'] }
+      : action === 'right' ? { rotation: ((rotation + 90) % 360) as MediaItem['rotation'] }
+        : action === 'horizontal' ? { flipHorizontal: !item.flipHorizontal }
+          : { flipVertical: !item.flipVertical };
+    await patchMediaTransforms([item.id], transform);
+  }
+  await refresh();
+}
+
+function wireMediaTransforms(): void {
+  document.getElementById('media-select')?.addEventListener('click', () => {
+    selectionMode = !selectionMode;
+    if (!selectionMode) selectedIds.clear();
+    renderGrid();
+    syncTransformToolbar();
+  });
+  for (const [id, action] of [
+    ['media-rotate-left', 'left'], ['media-rotate-right', 'right'],
+    ['media-flip-horizontal', 'horizontal'], ['media-flip-vertical', 'vertical'],
+  ] as const) document.getElementById(id)?.addEventListener('click', () => { applyMediaTransform(action).catch(console.error); });
+  syncTransformToolbar();
+}
+
 async function refresh(): Promise<void> {
   items = await fetchItems();
+  const existing = new Set(items.map((item) => item.id));
+  for (const id of selectedMediaIds) if (!existing.has(id)) selectedMediaIds.delete(id);
+  if (!selectedMediaIds.size) selectionMode = false;
   syncPeopleLabels();
   renderGrid();
-  const data = await fetchData();
-  await renderSettings(settingsRoot, data);
-  setControlsOpen(controlsOpen);
+  const current = await fetchCurrent();
+  activeItem = items.find((item) => current.current.includes(item.file));
+  activeConfig = current.data as Partial<FrameConfig>;
+  await renderSettings(settingsRoot, current.data, activeItem);
+  await renderPhonePreview();
+  updatePlaybackLabels();
+  controlsController?.setOpen(controlsController.isOpen());
   await syncPlayback();
+}
+
+function wireBulkActions(): void {
+  const visibleIds = () => sortItems(filterPeople(items)).map((item) => item.id);
+  document.getElementById('select-visible')?.addEventListener('click', () => {
+    selectionMode = true;
+    for (const id of visibleIds()) selectedMediaIds.add(id);
+    renderGrid();
+  });
+  document.getElementById('clear-selection')?.addEventListener('click', () => {
+    selectedMediaIds.clear(); selectionMode = false; renderGrid();
+  });
+  const run = async (action: () => Promise<void>, successClears = false): Promise<void> => {
+    try {
+      await action();
+      if (successClears) selectedMediaIds.clear();
+      await refresh();
+    } catch (error) {
+      alert((error as Error).message);
+    }
+  };
+  document.getElementById('bulk-delete')?.addEventListener('click', () => {
+    const ids = [...selectedMediaIds];
+    if (ids.length && confirm(`Delete ${ids.length} selected item(s) permanently?`)) void run(() => deleteItems(ids), true);
+  });
+  document.getElementById('bulk-favorite')?.addEventListener('click', () => void run(() => setItemsEnabled([...selectedMediaIds], true)));
+  document.getElementById('bulk-unfavorite')?.addEventListener('click', () => void run(() => setItemsEnabled([...selectedMediaIds], false)));
+  document.getElementById('bulk-play')?.addEventListener('click', () => void run(async () => {
+    const ids = [...selectedMediaIds];
+    if (!await castControl({ type: 'playSequence', ids })) await playSequence(ids);
+  }));
+}
+
+function updatePlaybackLabels(): void {
+  const videoActive = activeItem?.kind === 'video';
+  const labels = [
+    ['pb-prev', videoActive ? 'Seek backward 5 seconds; activate twice for 15 seconds' : 'Previous photo'],
+    ['pb-next', videoActive ? 'Seek forward 5 seconds; activate twice for 15 seconds' : 'Next photo'],
+  ] as const;
+  for (const [id, label] of labels) {
+    const button = document.getElementById(id);
+    button?.setAttribute('title', label);
+    button?.setAttribute('aria-label', label);
+  }
 }
 
 function setMode(next: Mode): void {
@@ -189,31 +500,15 @@ function setMode(next: Mode): void {
   renderGrid();
 }
 
-function setControlsOpen(open: boolean): void {
-  controlsOpen = open;
-  controlsSheet?.classList.toggle('open', open);
-  document.body.classList.toggle('controls-open', open);
-  controlsToggle?.setAttribute('aria-expanded', String(open));
-}
-
 function wireControlSheet(): void {
-  controlsToggle?.addEventListener('click', () => {
-    setControlsOpen(!controlsOpen);
-    if (!controlsOpen) return;
-    controlsClose?.focus({ preventScroll: true });
+  controlsController = wireControlSheetController({
+    toggle: controlsToggle,
+    close: controlsClose,
+    sheet: controlsSheet,
+    backdrop: controlsBackdrop,
+    body: document.body,
+    document,
   });
-  controlsClose?.addEventListener('click', () => {
-    setControlsOpen(false);
-    controlsToggle?.focus({ preventScroll: true });
-  });
-  controlsBackdrop?.addEventListener('click', () => setControlsOpen(false));
-  document.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Escape' && controlsOpen) {
-      setControlsOpen(false);
-      controlsToggle?.focus({ preventScroll: true });
-    }
-  });
-  setControlsOpen(controlsOpen);
 }
 
 function wireModes(): void {
@@ -282,8 +577,11 @@ async function start(): Promise<void> {
     wireModes();
     wireUpload();
     wirePlayback();
+    wirePlaybackPreviewSocket();
     wireControlSheet();
     wirePeopleFilters();
+    wireMediaTransforms();
+    wireBulkActions();
     setMode('cast');
   }
   await refresh();
@@ -293,17 +591,17 @@ function showLogin(auth: AuthState): void {
   const overlay = document.getElementById('login') as HTMLElement;
   const form = document.getElementById('login-form') as HTMLFormElement;
   const pw = document.getElementById('login-pw') as HTMLInputElement;
-  const submit = document.getElementById('login-submit') as HTMLButtonElement;
+  const submit = document.getElementById('login-submit') as HTMLButtonElement | null;
   const err = document.getElementById('login-err') as HTMLElement;
-  const google = document.getElementById('login-google') as HTMLAnchorElement;
-  const divider = document.getElementById('login-divider') as HTMLElement;
+  const google = document.getElementById('login-google') as HTMLAnchorElement | null;
+  const divider = document.getElementById('login-divider') as HTMLElement | null;
 
   // Older servers omit `methods`; they only support the password.
   const methods = auth.methods ?? { password: true, google: false };
-  google.classList.toggle('hidden', !methods.google);
-  divider.classList.toggle('hidden', !(methods.google && methods.password));
+  google?.classList.toggle('hidden', !methods.google);
+  divider?.classList.toggle('hidden', !(methods.google && methods.password));
   pw.classList.toggle('hidden', !methods.password);
-  submit.classList.toggle('hidden', !methods.password);
+  submit?.classList.toggle('hidden', !methods.password);
 
   const oauthError = new URLSearchParams(location.search).get('error');
   if (oauthError === 'forbidden') err.textContent = "This Google account isn't authorized.";

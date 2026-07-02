@@ -9,11 +9,13 @@ process.env.FRAME_DATA_DIR = await mkdtemp(path.join(tmpdir(), '4kframe-face-tes
 
 type FaceMatchModule = typeof import('./faceMatch.js');
 type ImageModule = typeof import('./images.js');
+type FocusRegionsModule = typeof import('./focusRegions.js');
 type StoreModule = typeof import('../store.js');
 type VideoModule = typeof import('./video.js');
 
-const [faceMatch, images, store, video] = await Promise.all([
+const [faceMatch, focusRegions, images, store, video] = await Promise.all([
   import('./faceMatch.js') as Promise<FaceMatchModule>,
+  import('./focusRegions.js') as Promise<FocusRegionsModule>,
   import('./images.js') as Promise<ImageModule>,
   import('../store.js') as Promise<StoreModule>,
   import('./video.js') as Promise<VideoModule>,
@@ -57,6 +59,47 @@ test('face metadata is persisted when Smart Face Match is enabled', async (t) =>
 
   assert.deepEqual(item.faces, [face]);
   assert.deepEqual(persisted.items.find((persistedItem) => persistedItem.id === item.id)?.faces, [face]);
+});
+
+
+test('generic local focus-region detectors populate image metadata when enabled', async (t) => {
+  process.env.FRAME_ENABLE_FOCUS_REGIONS = '1';
+  const detectorInputs: Array<{ source: string; buffer: Buffer }> = [];
+  focusRegions.setFocusRegionDetectorsForTests([
+    ({ source, buffer }) => {
+      detectorInputs.push({ source, buffer });
+      return [
+        { source: 'object', confidence: 0.87, label: 'pet', box: { x: 1, y: 2, width: 3, height: 4 } },
+        { source: 'saliency', confidence: Number.NaN, box: { x: 0, y: 0, width: 0, height: 2 } },
+      ];
+    },
+  ]);
+  t.after(() => {
+    delete process.env.FRAME_ENABLE_FOCUS_REGIONS;
+    focusRegions.resetFocusRegionDetectorsForTests();
+  });
+
+  const bytes = await tinyJpeg();
+  const { item } = await images.ingestImage(bytes);
+
+  assert.equal(detectorInputs.length, 1);
+  assert.equal(detectorInputs[0].source, 'image');
+  assert.deepEqual(item.focusRegions, [
+    { source: 'object', confidence: 0.87, label: 'pet', box: { x: 1, y: 2, width: 3, height: 4 } },
+  ]);
+});
+
+test('face detections are mirrored into generic focus regions when Smart Face Match is enabled', async (t) => {
+  process.env.FRAME_ENABLE_FACE_MATCH = '1';
+  faceMatch.setFaceDetector(() => [face]);
+  t.after(() => {
+    delete process.env.FRAME_ENABLE_FACE_MATCH;
+    faceMatch.resetFaceDetectorForTests();
+  });
+
+  const { item } = await images.ingestImage(await tinyJpeg());
+
+  assert.deepEqual(item.focusRegions, [{ box: face.box, confidence: 1, source: 'face', label: face.label }]);
 });
 
 test('video face detection uses the generated poster frame instead of scanning the whole file', async (t) => {

@@ -65,10 +65,15 @@ HTTPS is required for PWA install and to serve the display as a publicly reachab
 receiver.
 
 ### Admin authentication
-Locking the admin protects the admin UI and all management/control APIs (one login per
-browser, 30-day cookie), while the **display and TVs need no login**. Strongly recommended
+Locking the admin protects the admin UI, all management/control APIs and the **display
+WebSocket (`/ws`)** (one login per browser, 30-day cookie). Chromecast, kiosk, and
+TV-browser display clients must be opened after authenticating in that browser/session so
+the cookie is available to `/ws`; otherwise the server closes the socket before sending
+slideshow state or accepting remote controls. For a documented private LAN deployment where
+unauthenticated TV access is acceptable, leave auth unconfigured; in that mode `/ws` remains
+open to LAN display clients and their TV remote controls. Locking is strongly recommended
 for any **public/cloud** deployment — without it the admin and your library are open to
-anyone with the URL. On a private LAN it's optional. Two methods, usable together:
+anyone with the URL. Two methods, usable together:
 
 - **Google sign-in (recommended):** set **`FRAME_ADMIN_EMAILS`** to a comma-separated list
   of allowed Google accounts (e.g. `FRAME_ADMIN_EMAILS=you@gmail.com`). Reuses the same
@@ -95,6 +100,17 @@ behind a proxy that rewrites `Host`.
   HTTPS is skipped and HTTP still serves.
 - **sharp** (optional npm dependency) — image variant generation. Without it, originals
   are served as-is.
+
+### Smart Face Match (optional)
+Smart Face Match is disabled by default. Set **`FRAME_ENABLE_FACE_MATCH=1`** to run the
+CPU-only Tiny Face Detector as a background job after media enters the library. Set
+**`FRAME_FACE_MODEL_DIR`** to override the bundled `server/models/face` directory, and use
+**`FRAME_FACE_INPUT_SIZE`** to select a multiple of 32 from 128 through 608 (default **416**;
+smaller values reduce CPU use but can miss small faces).
+
+**Privacy:** face processing runs locally on the frame device. The feature computes and stores
+only normalized face bounding boxes for face-aware framing; it does not compute or store
+embeddings or labels, and no image or face data is sent to a biometric or cloud service.
 
 ## Google Photos
 
@@ -149,7 +165,8 @@ pick items in Google's UI, and they're imported onto the frame.
   LAN via `POST /api/cast/:id`.
 
 ### TV remote / keyboard control
-When the display is open in a TV browser, the remote drives it directly:
+When the display is open in an authenticated TV browser (or in private LAN mode with
+`FRAME_ADMIN_PASSWORD` unset), the remote drives it directly:
 **→ / ↓ / Next = next**, **← / ↑ / Prev = previous**, **OK / Play-Pause = pause/resume**
 (pausing stops auto-advance and pauses the current video). **`+` / `-` zoom**, and once
 zoomed in the **arrows pan** the image (zoom back to 1× to navigate again); **`0` resets**.
@@ -180,7 +197,8 @@ of different shapes can run at once, each framed correctly. In **Admin → Scali
 `/api/thumbs` · `/api/cast/:id` · `/api/delete/:id` · `/api/photo/:id` ·
 `/api/preview/:id` · `/photos/:filename`
 New: `/api/upload` (and chunked `/api/upload/chunk` + `/api/upload/finish`), `/api/video/:id`,
-`/api/google/*`, `/api/qr`, `/api/logs`, WS `/ws`.
+`/api/google/*`, `/api/qr`, `/api/logs`, WS `/ws` (requires the `frame_auth` cookie when
+`FRAME_ADMIN_PASSWORD` is set; leave that variable unset only for private LAN display mode).
 
 > Large files are uploaded in 4 MB chunks and reassembled server-side, so big videos upload
 > even through proxies/CDNs that cap request body size (e.g. GitHub Codespaces' `413`). The
@@ -197,3 +215,10 @@ personal/non-commercial use, mirroring the original.
 ## License
 
 MIT
+# Ordered playback queues
+
+Bulk “Play selected in sequence” creates a transient ordered queue. The frame stops on
+the final selected item rather than wrapping. Previous/next are bounded by the queue,
+and pause/hold apply normally. Starting normal library playback or casting an unrelated
+item clears the queue. `MediaItem.enabled` is the persisted **Favorite** flag; Favorites
+are the items eligible for automatic playback.

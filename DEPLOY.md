@@ -159,6 +159,19 @@ docker compose down            # add -v to also delete the data volume (wipes me
   reachable HTTPS URL** with a trusted cert plus a registered Cast Application ID
   (`VITE_CAST_APP_ID`) — see `packaging/`. Self-signed/LAN-only won't be trusted by Chromecast.
 
+### Physical Chromecast video-audio verification
+
+CAF receiver startup and browser media-property transitions are covered by automated tests,
+but the Chromecast platform's audible-autoplay policy cannot be reproduced faithfully in
+headless Chromium. Before a Cast receiver release, verify on physical hardware that:
+
+1. With **Video Audio → Sound on**, a newly selected video starts audibly and the receiver
+   remains connected.
+2. With **Video Audio → Muted**, a newly selected video autoplays silently.
+3. Switching from **Muted** to **Sound on** while a video is active restores audio. If the
+   device rejects audible playback, the display reports that sound was blocked and playback
+   resumes after the user presses Play.
+
 ## 8. Cloud hosting (Railway / Fly.io)
 
 For remote access (not just your LAN), host the **same Docker image** on a platform that runs
@@ -166,10 +179,12 @@ a persistent container with a volume. **Vercel does not work** (serverless — n
 no long-lived WebSocket server, no ffmpeg).
 
 > 🔒 **Set `FRAME_ADMIN_PASSWORD` first** — a public URL is open to anyone otherwise.
-> With the password set, displays can still connect to `/ws` and receive live events without
-> a login, but unauthenticated WebSocket clients cannot send slideshow/config/cast controls.
-> These platforms terminate TLS at their edge and forward HTTP to the container, so set
-> `FRAME_DISABLE_HTTPS=1` (the public URL is still `https://`, and `wss://` works).
+> With the password set, browsers/TVs must log in before they can load `/api/current`,
+> `/api/qr`, or raw media under `/photos/`. Displays can still connect to `/ws` and receive
+> live events without a login, but unauthenticated WebSocket clients cannot send admin-only
+> slideshow/config/cast controls. These platforms terminate TLS at their edge and forward
+> HTTP to the container, so set `FRAME_DISABLE_HTTPS=1` (the public URL is still `https://`,
+> and `wss://` works).
 
 **Fly.io** — a [`fly.toml`](fly.toml) is included:
 ```bash

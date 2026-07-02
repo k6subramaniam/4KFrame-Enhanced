@@ -12,7 +12,11 @@ import {
   toApiData,
   type ApiDataPayload,
   type CurrentResponse,
+  type MediaIdsPayload,
   type MediaItem,
+  isQuarterTurn,
+  type DisplayTransform,
+  type SetItemsEnabledPayload,
 } from '@4kframe/shared';
 import { MEDIA_DIR, DATA_DIR } from '../env.js';
 import {
@@ -22,22 +26,36 @@ import {
   getItem,
   addItem,
   updateItem,
+  patchItemTransforms,
   removeItem,
+  removeItems,
+  setItemsEnabled,
 } from '../store.js';
 import { ingestImage } from '../media/images.js';
 import { ingestVideo } from '../media/video.js';
 import { enqueueTranscode } from '../media/transcode.js';
+import { enqueueFaceDetection } from '../media/faceJob.js';
 import {
   cast, next, previous, progress, getCurrent, refresh,
   setPaused, setHold, isPaused, isHolding,
+  playSequence,
 } from '../slideshow.js';
 import { hub } from '../hub.js';
 import * as gphotos from '../integrations/googlePhotos.js';
 import * as gauth from '../integrations/googleAuth.js';
 import { computeStorage } from '../storage.js';
 import * as auth from '../auth.js';
+import { getDisplayPlayback } from '../displayPlayback.js';
 
 const VIDEO_EXT = new Set(['mp4', 'webm', 'mov', 'm4v', 'mkv']);
+const MAX_BULK_IDS = 500;
+
+function mediaIds(body: unknown): string[] | null {
+  const ids = (body as Partial<MediaIdsPayload> | null)?.ids;
+  if (!Array.isArray(ids) || ids.length < 1 || ids.length > MAX_BULK_IDS) return null;
+  if (ids.some((id) => typeof id !== 'string' || id.length < 1 || id.length > 256)) return null;
+  return [...new Set(ids)];
+}
 
 /** Scratch dir for in-progress chunked uploads. */
 const UPLOADS_DIR = path.join(DATA_DIR, '.uploads');
@@ -47,9 +65,9 @@ function safeUploadId(id: unknown): string | null {
   return typeof id === 'string' && /^[A-Za-z0-9_-]{8,128}$/.test(id) ? id : null;
 }
 
-/** /api/* paths reachable without a login (display/TV needs these; plus the login flow). */
+/** /api/* paths reachable without a login when an admin password is configured. */
 const OPEN_API = new Set([
-  '/api/health', '/api/current', '/api/qr', '/api/login', '/api/logout', '/api/me',
+  '/api/health', '/api/login', '/api/logout', '/api/me',
   '/api/auth/google/start', '/api/auth/google/callback',
 ]);
 
@@ -61,7 +79,8 @@ function adminRedirectUri(req: { protocol: string; headers: { host?: string } })
 
 export async function registerApi(app: FastifyInstance): Promise<void> {
   // Gate management/control API behind the admin password (when one is set). Static assets,
-  // /ws and /photos are not under /api/ and stay open so TVs need no login.
+  // /ws is authenticated in server/src/ws.ts when auth is enabled; /photos stays open so
+  // authenticated display clients can load media assets directly.
   app.addHook('onRequest', async (req, reply) => {
     if (!auth.authRequired()) return;
     const path = req.url.split('?')[0];
@@ -128,7 +147,25 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
   app.get('/api/previous', async () => { previous(); return { ok: true }; });
 
   // --- Playback state (pause auto-advance / hold-loop the current item) ---
-  app.get('/api/playback', async () => ({ paused: isPaused(), holding: isHolding() }));
+  app.get('/api/playback', async () => {
+    const item = getCurrent()[0] ?? null;
+    return {
+      paused: isPaused(),
+      holding: isHolding(),
+      itemId: item?.id ?? null,
+      kind: item?.kind ?? null,
+      display: getDisplayPlayback(item?.id ?? null),
+    };
+  });
+  app.get('/api/seek', async (req, reply) => {
+    const item = getCurrent()[0];
+    const deltaSec = Number((req.query as { delta?: unknown }).delta);
+    if (!item || item.kind !== 'video' || !Number.isFinite(deltaSec) || deltaSec === 0) {
+      return reply.code(400).send({ error: 'active video and non-zero seek delta required' });
+    }
+    hub.emitEvent({ type: 'seek', itemId: item.id, deltaSec: Math.max(-300, Math.min(300, deltaSec)) });
+    return { ok: true };
+  });
   app.get('/api/pause', async () => { setPaused(true); return { ok: true }; });
   app.get('/api/resume', async () => { setPaused(false); return { ok: true }; });
   app.get('/api/hold', async () => { setHold(true); return { ok: true }; });
@@ -143,6 +180,70 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
     refresh();
     hub.emitEvent({ type: 'library', items: listItems() });
     return { ok: true, enabled };
+  });
+
+  app.patch('/api/media/transforms', async (req, reply) => {
+    const body = req.body as { ids?: unknown; transform?: Record<string, unknown> } | undefined;
+    if (!body || !Array.isArray(body.ids) || body.ids.length === 0 || body.ids.some((id) => typeof id !== 'string')) {
+      return reply.code(400).send({ error: 'ids must be a non-empty string array' });
+    }
+    const transform = body.transform;
+    if (!transform || typeof transform !== 'object' || Array.isArray(transform)) {
+      return reply.code(400).send({ error: 'transform is required' });
+    }
+    const allowed = new Set(['rotation', 'flipHorizontal', 'flipVertical']);
+    if (Object.keys(transform).length === 0 || Object.keys(transform).some((key) => !allowed.has(key))) {
+      return reply.code(400).send({ error: 'invalid transform fields' });
+    }
+    const patch: Partial<DisplayTransform> = {};
+    if ('rotation' in transform) {
+      if (!isQuarterTurn(transform.rotation)) return reply.code(400).send({ error: 'rotation must be 0, 90, 180, or 270' });
+      patch.rotation = transform.rotation;
+    }
+    for (const key of ['flipHorizontal', 'flipVertical'] as const) {
+      if (key in transform) {
+        if (typeof transform[key] !== 'boolean') return reply.code(400).send({ error: `${key} must be boolean` });
+        patch[key] = transform[key];
+      }
+    }
+    const updated = await patchItemTransforms(body.ids as string[], patch);
+    if (!updated) return reply.code(404).send({ error: 'unknown media id' });
+    refresh();
+    hub.emitEvent({ type: 'library', items: listItems() });
+    return { ok: true, items: updated };
+  });
+
+  app.post('/api/items/enabled', async (req, reply) => {
+    const ids = mediaIds(req.body);
+    const enabled = (req.body as Partial<SetItemsEnabledPayload> | null)?.enabled;
+    if (!ids || typeof enabled !== 'boolean') return reply.code(400).send({ error: 'invalid media ids or enabled flag' });
+    const missing = ids.filter((id) => !getItem(id));
+    if (missing.length) return reply.code(404).send({ error: 'media not found', missing });
+    await setItemsEnabled(ids, enabled);
+    refresh();
+    hub.emitEvent({ type: 'library', items: listItems() });
+    return { ok: true, updated: ids };
+  });
+
+  app.delete('/api/items', async (req, reply) => {
+    const ids = mediaIds(req.body);
+    if (!ids) return reply.code(400).send({ error: 'invalid media ids' });
+    const missing = ids.filter((id) => !getItem(id));
+    if (missing.length) return reply.code(404).send({ error: 'media not found', missing });
+    const removed = await removeItems(ids);
+    const failures = await deleteAssetsForItems(removed);
+    refresh();
+    hub.emitEvent({ type: 'library', items: listItems() });
+    if (failures.length) return reply.code(207).send({ ok: false, deleted: ids, failures });
+    return { ok: true, deleted: ids, failures: [] };
+  });
+
+  app.post('/api/play-sequence', async (req, reply) => {
+    const ids = mediaIds(req.body);
+    if (!ids) return reply.code(400).send({ error: 'invalid media ids' });
+    const missing = ids.filter((id) => !getItem(id));
+    if (missing.length || !playSequence(ids)) return reply.code(404).send({ error: 'media not found', missing });
+    return { ok: true, ids };
   });
 
   app.get('/api/current', async (): Promise<CurrentResponse> => {
@@ -321,6 +422,7 @@ async function ingestUpload(buf: Buffer, filename: string, mimetype?: string): P
     : await ingestImage(buf, 'upload');
   await addItem(item);
   enqueueTranscode(item);
+  enqueueFaceDetection(item);
   return item;
 }
 
@@ -348,6 +450,21 @@ async function deleteAssets(item: MediaItem): Promise<void> {
   await Promise.all(
     [...names].map((n) => fs.rm(path.join(MEDIA_DIR, n)).catch(() => undefined)),
   );
+}
+
+async function deleteAssetsForItems(items: MediaItem[]): Promise<{ id: string; asset: string; error: string }[]> {
+  const failures: { id: string; asset: string; error: string }[] = [];
+  await Promise.all(items.flatMap((item) => {
+    const names = new Set([item.file, item.preview, item.thumb, item.poster].filter(Boolean) as string[]);
+    return [...names].map(async (asset) => {
+      try {
+        await fs.rm(path.join(MEDIA_DIR, asset), { force: true });
+      } catch (error) {
+        failures.push({ id: item.id, asset, error: (error as Error).message });
+      }
+    });
+  }));
+  return failures;
 }
 
 function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {

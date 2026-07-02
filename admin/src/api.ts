@@ -1,6 +1,15 @@
 /** Thin REST client for the admin PWA. */
 
-import type { ApiDataPayload, MediaItem } from '@4kframe/shared';
+import type { ApiDataPayload, ControlMessage, CurrentResponse, DisplayPlaybackState, MediaItem, MediaKind } from '@4kframe/shared';
+
+async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, init);
+  const body = await res.json().catch(() => ({})) as { error?: string; failures?: unknown[] };
+  if (!res.ok || body.failures?.length) {
+    throw new Error(body.error ?? `Request failed (${res.status})${body.failures?.length ? `: ${body.failures.length} asset operation(s) failed` : ''}`);
+  }
+  return body as T;
+}
 
 export async function fetchItems(): Promise<MediaItem[]> {
   const res = await fetch('/api/thumbs');
@@ -8,13 +17,131 @@ export async function fetchItems(): Promise<MediaItem[]> {
   return json.items;
 }
 
-export async function fetchData(): Promise<ApiDataPayload> {
+export async function fetchCurrent(): Promise<CurrentResponse> {
   const res = await fetch('/api/current');
-  const json = (await res.json()) as { data: ApiDataPayload };
-  return json.data;
+  return (await res.json()) as CurrentResponse;
+}
+
+export async function fetchData(): Promise<ApiDataPayload> {
+  return (await fetchCurrent()).data;
+}
+
+const STRING_PUBLIC_CONFIG_KEYS = new Set([
+  'fillMode',
+  'frameAspect',
+  'transition',
+  'motion',
+  'playbackMediaMode',
+  'smartFraming',
+  'showQr',
+  'screenRotation',
+  'screenFlipHorizontal',
+  'screenFlipVertical',
+  'videoAudioMode',
+  'videoMuted',
+]);
+
+let controlSocket: WebSocket | null = null;
+
+function getControlSocket(): WebSocket | null {
+  if (controlSocket && controlSocket.readyState <= WebSocket.OPEN) return controlSocket;
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  try {
+    const socket = new WebSocket(`${proto}://${location.host}/ws`);
+    controlSocket = socket;
+    socket.onerror = () => socket.close();
+    socket.onclose = () => {
+      if (controlSocket === socket) controlSocket = null;
+    };
+    return socket;
+  } catch {
+    controlSocket = null;
+    return null;
+  }
+}
+
+const CONTROL_SOCKET_TIMEOUT_MS = 1500;
+
+function publicConfigMessage(patch: Record<string, string>): string {
+  const publicPatch = Object.fromEntries(Object.entries(patch).map(([key, value]) => {
+    const numeric = Number(value);
+    return [key, Number.isFinite(numeric) && !STRING_PUBLIC_CONFIG_KEYS.has(key) ? numeric : value];
+  }));
+  return JSON.stringify({ type: 'publicConfig', patch: publicPatch });
+}
+
+async function sendPublicConfig(patch: Record<string, string>): Promise<boolean> {
+  const socket = getControlSocket();
+  if (!socket) return false;
+  const message = publicConfigMessage(patch);
+
+  if (socket.readyState === WebSocket.OPEN) {
+    try {
+      socket.send(message);
+      return true;
+    } catch {
+      socket.close();
+      return false;
+    }
+  }
+  if (socket.readyState !== WebSocket.CONNECTING) return false;
+
+  return await new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (sent: boolean): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      socket.removeEventListener('open', onOpen);
+      socket.removeEventListener('error', onFailure);
+      socket.removeEventListener('close', onFailure);
+      resolve(sent);
+    };
+    const onOpen = (): void => {
+      try {
+        socket.send(message);
+        finish(true);
+      } catch {
+        socket.close();
+        finish(false);
+      }
+    };
+    const onFailure = (): void => finish(false);
+    const timeout = window.setTimeout(() => {
+      socket.close();
+      finish(false);
+    }, CONTROL_SOCKET_TIMEOUT_MS);
+    socket.addEventListener('open', onOpen, { once: true });
+    socket.addEventListener('error', onFailure, { once: true });
+    socket.addEventListener('close', onFailure, { once: true });
+  });
+}
+
+export async function sendControl(message: ControlMessage): Promise<boolean> {
+  const socket = getControlSocket();
+  if (!socket) return false;
+  const payload = JSON.stringify(message);
+  if (socket.readyState === WebSocket.OPEN) {
+    socket.send(payload);
+    return true;
+  }
+  if (socket.readyState !== WebSocket.CONNECTING) return false;
+  return await new Promise<boolean>((resolve) => {
+    const timeout = window.setTimeout(() => resolve(false), CONTROL_SOCKET_TIMEOUT_MS);
+    socket.addEventListener('open', () => {
+      window.clearTimeout(timeout);
+      socket.send(payload);
+      resolve(true);
+    }, { once: true });
+  });
 }
 
 export async function updateData(patch: Record<string, string>): Promise<void> {
+  if ('videoAudioMode' in patch || 'videoMuted' in patch) {
+    const typedPatch: Record<string, string | boolean> = { ...patch };
+    if ('videoMuted' in typedPatch) typedPatch.videoMuted = typedPatch.videoMuted === 'true';
+    if (await sendControl({ type: 'config', patch: typedPatch } as ControlMessage)) return;
+  } else if (await sendPublicConfig(patch)) return;
   const qs = new URLSearchParams(patch).toString();
   await fetch(`/api/data?${qs}`);
 }
@@ -25,6 +152,24 @@ export async function castItem(id: string): Promise<void> {
 
 export async function deleteItem(id: string): Promise<void> {
   await fetch(`/api/delete/${id}`);
+}
+
+export async function setItemsEnabled(ids: string[], enabled: boolean): Promise<void> {
+  await requestJson('/api/items/enabled', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids, enabled }),
+  });
+}
+
+export async function deleteItems(ids: string[]): Promise<void> {
+  await requestJson('/api/items', {
+    method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }),
+  });
+}
+
+export async function playSequence(ids: string[]): Promise<void> {
+  await requestJson('/api/play-sequence', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }),
+  });
 }
 
 export interface AuthState {
@@ -55,6 +200,9 @@ export async function skipPrev(): Promise<void> { await fetch('/api/previous'); 
 export interface Playback {
   paused: boolean;
   holding: boolean;
+  itemId: string | null;
+  kind: MediaKind | null;
+  display: DisplayPlaybackState | null;
 }
 export async function getPlayback(): Promise<Playback> {
   const res = await fetch('/api/playback');
@@ -66,12 +214,28 @@ export async function setPaused(paused: boolean): Promise<void> {
 export async function setHold(holding: boolean): Promise<void> {
   await fetch(holding ? '/api/hold' : '/api/unhold');
 }
+export async function seekBy(deltaSec: number): Promise<void> {
+  await fetch(`/api/seek?delta=${encodeURIComponent(deltaSec)}`);
+}
 
 /** Include/exclude an item from rotation; returns the new enabled state. */
 export async function toggleEnabled(id: string): Promise<boolean> {
   const res = await fetch(`/api/toggle/${id}`);
   const json = (await res.json()) as { enabled: boolean };
   return json.enabled;
+}
+
+export async function patchMediaTransforms(
+  ids: string[],
+  transform: Partial<Pick<MediaItem, 'rotation' | 'flipHorizontal' | 'flipVertical'>>,
+): Promise<MediaItem[]> {
+  const res = await fetch('/api/media/transforms', {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ids, transform }),
+  });
+  if (!res.ok) throw new Error((await res.json() as { error?: string }).error ?? 'transform update failed');
+  return ((await res.json()) as { items: MediaItem[] }).items;
 }
 
 export interface UploadResult {

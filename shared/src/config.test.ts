@@ -10,11 +10,63 @@ test('aspectRatio maps presets and returns null for auto', () => {
   assert.ok(aspectRatio('21:9')! > 2);
 });
 
+test('defaultConfig uses both photos and videos for playback', () => {
+  assert.equal(defaultConfig().playbackMediaMode, 'both');
+});
+
+test('screen transforms default safely and round-trip with validation', () => {
+  const base = defaultConfig();
+  assert.deepEqual(
+    [base.screenRotation, base.screenFlipHorizontal, base.screenFlipVertical],
+    [0, false, false],
+  );
+  const transformed = fromApiData(base, {
+    screenRotation: '270',
+    screenFlipHorizontal: 'true',
+    screenFlipVertical: 'true',
+  });
+  assert.equal(transformed.screenRotation, 270);
+  assert.equal(transformed.screenFlipHorizontal, true);
+  assert.equal(transformed.screenFlipVertical, true);
+  assert.equal(fromApiData(transformed, { screenRotation: '45' }).screenRotation, 270);
+  assert.equal(toApiData(transformed).screenRotation, '270');
+});
+
+test('defaultConfig enables TV speaker video audio by default', () => {
+  assert.equal(defaultConfig().videoAudioMode, 'tv');
+  assert.equal(defaultConfig().videoMuted, false);
+});
+
+test('videoAudioMode serialises and parses explicit audio output choices', () => {
+  const base = defaultConfig();
+
+  for (const videoAudioMode of ['tv', 'muted', 'phone'] as const) {
+    const payload = toApiData({ ...base, videoAudioMode, videoMuted: videoAudioMode === 'muted' });
+    assert.equal(payload.videoAudioMode, videoAudioMode);
+    assert.equal(payload.videoMuted, String(videoAudioMode === 'muted'));
+    const parsed = fromApiData(base, payload);
+    assert.equal(parsed.videoAudioMode, videoAudioMode);
+    assert.equal(parsed.videoMuted, videoAudioMode === 'muted');
+  }
+});
+
+test('fromApiData maps legacy videoMuted patches onto videoAudioMode', () => {
+  assert.equal(fromApiData(defaultConfig(), { videoMuted: 'false' }).videoAudioMode, 'tv');
+  assert.equal(fromApiData(defaultConfig(), { videoMuted: 'true' }).videoAudioMode, 'muted');
+  assert.equal(
+    fromApiData({ ...defaultConfig(), videoAudioMode: 'muted', videoMuted: true }, { videoMuted: 'false' }).videoAudioMode,
+    'tv',
+  );
+  assert.equal(fromApiData({ ...defaultConfig(), videoAudioMode: 'phone', videoMuted: true }, {}).videoAudioMode, 'phone');
+  assert.equal(fromApiData(defaultConfig(), { videoMuted: 'true', videoAudioMode: 'phone' }).videoAudioMode, 'phone');
+});
+
 test('toApiData serialises fillMode/frameAspect and mirrors legacy frameFill', () => {
   const blur: FrameConfig = { ...defaultConfig(), fillMode: 'blur', frameAspect: '4:3' };
   const d = toApiData(blur);
   assert.equal(d.fillMode, 'blur');
   assert.equal(d.frameAspect, '4:3');
+  assert.equal(d.playbackMediaMode, 'both');
   assert.equal(d.frameFill, 'false'); // anything but cover is not "fill"
 
   const cover: FrameConfig = { ...defaultConfig(), fillMode: 'cover' };
@@ -46,12 +98,15 @@ test('fromApiData prefers explicit fillMode, supports legacy frameFill, validate
   assert.equal(fromApiData(base, { fillMode: 'stretch' }).fillMode, 'stretch');
 });
 
-test('video sound defaults on (through the TV) and round-trips', () => {
+test('fromApiData validates playbackMediaMode and falls back on invalid values', () => {
   const base = defaultConfig();
-  assert.equal(base.videoMuted, false);
-  assert.equal(fromApiData(base, { videoMuted: 'true' }).videoMuted, true);
-  assert.equal(fromApiData({ ...base, videoMuted: true }, { videoMuted: 'false' }).videoMuted, false);
-  assert.equal(toApiData({ ...base, videoMuted: true }).videoMuted, 'true');
+  assert.equal(fromApiData(base, { playbackMediaMode: 'photos' }).playbackMediaMode, 'photos');
+  assert.equal(fromApiData(base, { playbackMediaMode: 'videos' }).playbackMediaMode, 'videos');
+  assert.equal(fromApiData({ ...base, playbackMediaMode: 'photos' }, { playbackMediaMode: 'sideways' }).playbackMediaMode, 'photos');
+
+  const d = toApiData({ ...base, playbackMediaMode: 'videos' });
+  assert.equal(d.playbackMediaMode, 'videos');
+  assert.equal(fromApiData(base, d).playbackMediaMode, 'videos');
 });
 
 test('zoom/pan are clamped and motion is validated', () => {

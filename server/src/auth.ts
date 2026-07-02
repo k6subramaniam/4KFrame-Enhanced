@@ -6,8 +6,8 @@
  *    (comma-separated allowlist). The admin signs in with their Google account.
  *  - Password fallback: set FRAME_ADMIN_PASSWORD and POST it to /api/login.
  *
- * The display, its WebSocket, media under /photos and a few read-only endpoints stay open
- * so TVs need no login.
+ * The display WebSocket stays reachable for receiver state and safe display-local
+ * controls; media under /photos stays protected except for valid handoff tokens.
  *
  * Stateless: the cookie is `<expiry>.<HMAC(expiry)>`. The HMAC key is derived from
  * FRAME_AUTH_SECRET, else the password (so changing the password invalidates existing
@@ -125,6 +125,17 @@ export function clearCookie(): string {
 
 export function isAuthed(cookieHeader: string | undefined): boolean {
   return !authRequired() || verifyToken(cookieFromHeader(cookieHeader));
+}
+
+/**
+ * Authorize a request by the auth cookie OR a valid `frame_auth` query token. The query
+ * token lets a Cast receiver (which can't send our cookie) load protected `/photos` media
+ * via a handoff URL like `/photos/x.jpg?frame_auth=<token>`.
+ */
+export function isAuthedRequest(cookieHeader: string | undefined, frameAuthToken: string | undefined): boolean {
+  if (!authRequired()) return true;
+  if (verifyToken(cookieFromHeader(cookieHeader))) return true;
+  return frameAuthToken !== undefined && verifyToken(frameAuthToken);
 }
 
 // --- OAuth state (CSRF protection for the Google sign-in round trip) ---

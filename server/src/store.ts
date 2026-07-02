@@ -12,6 +12,8 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
   defaultConfig,
+  normalizeTransform,
+  type DisplayTransform,
   type FrameConfig,
   type MediaItem,
 } from '@4kframe/shared';
@@ -43,7 +45,7 @@ export async function initStore(): Promise<void> {
     const parsed = JSON.parse(raw) as Partial<DbDocument>;
     doc = {
       config: { ...defaultConfig(), ...(parsed.config ?? {}) },
-      items: parsed.items ?? [],
+      items: (parsed.items ?? []).map((item) => ({ ...item, ...normalizeTransform(item) })),
       order: parsed.order ?? (parsed.items ?? []).map((i) => i.id),
       googleTokens: parsed.googleTokens,
       authSecret: parsed.authSecret,
@@ -112,6 +114,36 @@ export async function updateItem(id: string, patch: Partial<MediaItem>): Promise
   Object.assign(item, patch);
   await flush();
   return item;
+}
+
+export async function patchItemTransforms(ids: string[], patch: Partial<DisplayTransform>): Promise<MediaItem[] | undefined> {
+  const d = db();
+  const uniqueIds = [...new Set(ids)];
+  const selected = uniqueIds.map((id) => d.items.find((item) => item.id === id));
+  if (selected.some((item) => !item)) return undefined;
+  for (const item of selected as MediaItem[]) Object.assign(item, patch);
+  await flush();
+  return selected as MediaItem[];
+}
+
+/** Atomically update the Favorite/automatic-playback flag for existing items. */
+export async function setItemsEnabled(ids: string[], enabled: boolean): Promise<MediaItem[]> {
+  const wanted = new Set(ids);
+  const updated = db().items.filter((item) => wanted.has(item.id));
+  for (const item of updated) item.enabled = enabled;
+  await flush();
+  return updated;
+}
+
+/** Atomically remove multiple records and their play-order entries. */
+export async function removeItems(ids: string[]): Promise<MediaItem[]> {
+  const d = db();
+  const wanted = new Set(ids);
+  const removed = d.items.filter((item) => wanted.has(item.id));
+  d.items = d.items.filter((item) => !wanted.has(item.id));
+  d.order = d.order.filter((id) => !wanted.has(id));
+  await flush();
+  return removed;
 }
 
 export async function removeItem(id: string): Promise<MediaItem | undefined> {

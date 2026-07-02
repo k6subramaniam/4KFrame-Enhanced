@@ -14,6 +14,7 @@
  */
 
 import { existsSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import fastifyMultipart from '@fastify/multipart';
@@ -21,7 +22,7 @@ import fastifyWebsocket from '@fastify/websocket';
 import {
   MEDIA_DIR, DISPLAY_DIST, ADMIN_DIST,
   HTTP_PORT, HTTPS_PORT, HOST, HTTPS_ENABLED,
-  detectLanAddress, detectLanIp,
+  detectLanAddress, detectLanIp, faceMatchEnabled,
 } from './env.js';
 import { initStore, getConfig, setConfig } from './store.js';
 import { registerApi } from './routes/api.js';
@@ -29,10 +30,14 @@ import { registerWs } from './ws.js';
 import { startSlideshow } from './slideshow.js';
 import { imageProcessingAvailable } from './media/images.js';
 import { videoProcessingAvailable } from './media/video.js';
+import { setFaceDetector } from './media/faceMatch.js';
 import { loadOrCreateTls, type TlsMaterial } from './tls.js';
+import * as auth from './auth.js';
+
+const FALLBACK_HTML = '<html><head><title>4KFrame</title></head><body></body></html>';
 
 /** Build a fully-configured Fastify instance. Pass TLS material to serve HTTPS. */
-async function buildApp(https?: TlsMaterial): Promise<FastifyInstance> {
+export async function buildApp(https?: TlsMaterial): Promise<FastifyInstance> {
   const app = Fastify({
     logger: true,
     bodyLimit: 1024 * 1024 * 512,
@@ -42,15 +47,43 @@ async function buildApp(https?: TlsMaterial): Promise<FastifyInstance> {
   await app.register(fastifyMultipart, { limits: { fileSize: 1024 * 1024 * 1024 } });
   await app.register(fastifyWebsocket);
 
-  // Raw media assets (photos, previews, thumbnails, posters, videos).
+  // Raw media assets (photos, previews, thumbnails, posters, videos). When the admin
+  // password is configured, protect these before the static plugin can serve private
+  // library files directly. Authorized by the admin cookie OR a valid `frame_auth` query
+  // token (so a Cast receiver, which can't send our cookie, can load media via a handoff URL).
+  app.addHook('onRequest', async (req, reply) => {
+    if (!auth.authRequired()) return;
+    const url = new URL(req.url, 'http://frame.local');
+    const requestPath = url.pathname;
+    if (!requestPath.startsWith('/photos/')) return;
+    const frameAuthToken = url.searchParams.get('frame_auth') ?? undefined;
+    if (!auth.isAuthed(req.headers.cookie) && !auth.verifyToken(frameAuthToken)) {
+      return reply.code(401).send({ error: 'unauthorized' });
+    }
+  });
   await app.register(fastifyStatic, { root: MEDIA_DIR, prefix: '/photos/', decorateReply: false });
+
+  // Canonical admin URL. The admin SPA is built with a `/admin/` base, so requests
+  // without the trailing slash need a redirect before static assets are evaluated.
+  app.get('/admin', async (_req, reply) => reply.redirect('/admin/', 308));
+
+  // The display SPA (and its assets) stays public so a TV / Chromecast needs no login.
+  // Do not add a root static-site auth redirect here: FRAME_ADMIN_PASSWORD gates the
+  // admin UI plus management/mutating APIs, while /photos is protected by the narrow
+  // media hook above and /ws remains reachable for display receivers.
 
   // Built SPAs, when available (after `npm run build`).
   if (existsSync(DISPLAY_DIST)) {
     await app.register(fastifyStatic, { root: DISPLAY_DIST, prefix: '/', decorateReply: false });
+  } else {
+    // Fallback for testing or when builds are missing
+    app.get('/', async (_req, reply) => reply.type('text/html').send(FALLBACK_HTML));
   }
   if (existsSync(ADMIN_DIST)) {
     await app.register(fastifyStatic, { root: ADMIN_DIST, prefix: '/admin/', decorateReply: true });
+  } else {
+    // Fallback for testing or when builds are missing
+    app.get('/admin/', async (_req, reply) => reply.type('text/html').send(FALLBACK_HTML));
   }
 
   await registerApi(app);
@@ -97,6 +130,16 @@ async function main(): Promise<void> {
     }
   }
 
+  if (faceMatchEnabled()) {
+    try {
+      const { detectFacesLocal } = await import('./media/faceDetector.js');
+      setFaceDetector(detectFacesLocal);
+      httpApp.log.info('Smart Face Match initialized (local face boxes only).');
+    } catch (err) {
+      httpApp.log.warn(`Smart Face Match initialization failed: ${(err as Error).message}`);
+    }
+  }
+
   startSlideshow();
 
   if (!(await imageProcessingAvailable())) {
@@ -107,7 +150,9 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

@@ -5,7 +5,8 @@
  * progression. Mirrors the original behaviour:
  *  - photos advance after `photoPeriod` seconds (0 = paused),
  *  - when `frameFill` is enabled and the current photo is portrait, a second
- *    portrait photo may be paired to fill a landscape frame,
+ *    portrait photo may be paired to fill a landscape frame only when the
+ *    primary photo matches the target frame/content aspect,
  *  - casting shows a specific item immediately (interactive transition).
  *
  * Items excluded from rotation (`enabled === false`) are skipped by automatic
@@ -16,7 +17,7 @@
  * before advancing.
  */
 
-import type { MediaItem } from '@4kframe/shared';
+import { aspectRatio, type MediaItem } from '@4kframe/shared';
 import { getConfig, listItems, getItem } from './store.js';
 import { hub } from './hub.js';
 
@@ -25,14 +26,59 @@ let current: MediaItem[] = [];
 let timer: NodeJS.Timeout | undefined;
 let paused = false;
 let holding = false;
+let queueIds: string[] = [];
+let queueIndex = -1;
 
-function isPortrait(i: MediaItem): boolean {
-  return i.height > i.width && i.width > 0;
+function queueState() {
+  return { ids: [...queueIds], index: queueIndex, active: queueIds.length > 0 };
 }
 
-/** Items eligible for automatic rotation (excluded items are filtered out). */
+function emitQueue(): void {
+  hub.emitEvent({ type: 'queue', queue: queueState() });
+}
+
+export function getQueueState() {
+  return queueState();
+}
+
+export function clearQueue(): void {
+  const hadQueue = queueIds.length > 0 || queueIndex >= 0;
+  queueIds = [];
+  queueIndex = -1;
+  if (hadQueue) emitQueue();
+}
+
+function clearTimer(): void {
+  if (timer) clearTimeout(timer);
+  timer = undefined;
+}
+
+function mediaAspect(item: MediaItem): number | null {
+  return item.width > 0 && item.height > 0 ? item.width / item.height : null;
+}
+
+function isPortrait(i: MediaItem): boolean {
+  const ratio = mediaAspect(i);
+  return ratio !== null && ratio < 1;
+}
+
+function targetAspect(): number | null {
+  const cfg = getConfig();
+  const configuredAspect = aspectRatio(cfg.frameAspect);
+  if (configuredAspect !== null) return configuredAspect;
+  return cfg.frameWidth > 0 && cfg.frameHeight > 0 ? cfg.frameWidth / cfg.frameHeight : null;
+}
+
+/** Items eligible for automatic rotation (excluded items and unselected media kinds are filtered out). */
 function rotation(): MediaItem[] {
-  return listItems().filter((i) => i.enabled !== false);
+  const mode = getConfig().playbackMediaMode;
+  return listItems()
+    .filter((i) => i.enabled !== false)
+    .filter((i) => {
+      if (mode === 'photos') return i.kind === 'photo';
+      if (mode === 'videos') return i.kind === 'video';
+      return true;
+    });
 }
 
 /** Choose the item(s) to display at `index` within the rotation. */
@@ -46,6 +92,12 @@ function selectAt(index: number): MediaItem[] {
 
   // Fill a landscape frame with two portrait photos when possible.
   if (cfg.frameFill && primary.kind === 'photo' && isPortrait(primary)) {
+    const primaryAspect = mediaAspect(primary);
+    const contentAspect = targetAspect();
+    if (primaryAspect === null || contentAspect === null || Math.abs(primaryAspect - contentAspect) > 0.01) {
+      return [primary];
+    }
+
     const frameLandscape = cfg.frameWidth >= cfg.frameHeight;
     if (frameLandscape) {
       const partner = items
@@ -67,7 +119,7 @@ function durationMs(items: MediaItem[]): number {
 }
 
 function schedule(): void {
-  if (timer) clearTimeout(timer);
+  clearTimer();
   if (paused || holding) return; // hold on the current item
   const ms = durationMs(current);
   if (ms <= 0) return; // paused via photoPeriod = 0
@@ -79,7 +131,7 @@ export function setPaused(value: boolean): void {
   if (paused === value) return;
   paused = value;
   if (paused) {
-    if (timer) clearTimeout(timer);
+    clearTimer();
   } else {
     schedule();
   }
@@ -91,7 +143,7 @@ export function setHold(value: boolean): void {
   if (holding === value) return;
   holding = value;
   if (holding) {
-    if (timer) clearTimeout(timer);
+    clearTimer();
   } else {
     schedule();
   }
@@ -113,9 +165,37 @@ function show(interactive: boolean): void {
 
 /** Advance by `delta` steps within the rotation (e.g. +1 next, -1 previous). */
 export function advance(delta: number, interactive: boolean): void {
+  if (queueIds.length) {
+    const nextIndex = Math.min(queueIds.length - 1, Math.max(0, queueIndex + delta));
+    if (nextIndex === queueIndex) {
+      clearTimer(); // A transient queue stops on its final selected item.
+      return;
+    }
+    queueIndex = nextIndex;
+    const item = getItem(queueIds[queueIndex]);
+    if (!item) {
+      queueIds.splice(queueIndex, 1);
+      if (!queueIds.length) {
+        queueIndex = -1;
+        emitQueue();
+        current = [];
+        clearTimer();
+        return;
+      }
+      queueIndex = Math.min(queueIndex, queueIds.length - 1);
+      emitQueue();
+      advance(0, interactive);
+      return;
+    }
+    current = [item];
+    emitQueue();
+    show(interactive);
+    return;
+  }
   const items = rotation();
   if (items.length === 0) {
     current = [];
+    clearTimer();
     return;
   }
   pointer = (pointer + delta + items.length) % items.length;
@@ -143,10 +223,23 @@ export function previous(): void {
 export async function cast(id: string): Promise<boolean> {
   const item = getItem(id);
   if (!item) return false;
+  clearQueue();
   current = [item];
   const rot = rotation();
   const idx = rot.findIndex((r) => r.id === id);
   if (idx >= 0) pointer = idx; // continue rotation from here when not held
+  show(true);
+  return true;
+}
+
+/** Start a transient ordered queue. Missing ids reject the entire request. */
+export function playSequence(ids: string[]): boolean {
+  const resolved = ids.map((id) => getItem(id));
+  if (!ids.length || resolved.some((item) => !item)) return false;
+  queueIds = [...ids];
+  queueIndex = 0;
+  current = [resolved[0]!];
+  emitQueue();
   show(true);
   return true;
 }
@@ -157,6 +250,8 @@ export function getCurrent(): MediaItem[] {
 
 /** Initialise the engine and start automatic progression. */
 export function startSlideshow(): void {
+  clearQueue();
+  clearTimer();
   pointer = 0;
   current = rotation().length ? selectAt(0) : [];
   if (current.length) show(false);
@@ -164,7 +259,26 @@ export function startSlideshow(): void {
 
 /** Re-evaluate timing after a config or library change. */
 export function refresh(): void {
-  if (current.length === 0 && rotation().length) {
+  if (queueIds.length) {
+    queueIds = queueIds.filter((id) => Boolean(getItem(id)));
+    if (!queueIds.length) {
+      queueIndex = -1;
+      emitQueue();
+    } else {
+      queueIndex = Math.min(queueIndex, queueIds.length - 1);
+      current = [getItem(queueIds[queueIndex])!];
+      emitQueue();
+      schedule();
+      return;
+    }
+  }
+  if (rotation().length === 0) {
+    current = [];
+    clearTimer();
+    return;
+  }
+
+  if (current.length === 0) {
     startSlideshow();
   } else {
     schedule();

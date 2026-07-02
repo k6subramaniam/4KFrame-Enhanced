@@ -9,18 +9,31 @@
  * size, so the same library casts correctly to 16:9 TVs, ultrawide, 4:3, square and
  * portrait frames at the same time — each connected display composes for its own screen.
  */
-
-import { defaultConfig, faceCenterToPan, type ControlMessage, type FrameConfig, type FillMode, type FrameEvent, type MediaItem } from '@4kframe/shared';
+import {
+  defaultConfig,
+  faceCenterToPan,
+  type ControlMessage,
+  type FrameConfig,
+  type FillMode,
+  type FrameEvent,
+  renderSharedSettings,
+  type MediaItem,
+  type SettingsPatch,
+  normalizeTransform,
+  orientedDimensions,
+} from '@4kframe/shared';
 import { GLRenderer } from './gl.js';
 import { compose, contentRect } from './compositor.js';
 import { applyOverlays, setCaption, setStatus } from './overlays.js';
 import { initCastReceiver } from './cast.js';
+import { playbackBlockedStatusMessage, seekActiveVideo, syncVideoPlaybackProperties } from './videoPlayback.js';
 import { attachMediaGestures } from './gestures.js';
 
 const canvas = document.getElementById('gl') as HTMLCanvasElement;
 const video = document.getElementById('video') as HTMLVideoElement;
 const videoBg = document.getElementById('video-bg') as HTMLElement;
 const renderer = new GLRenderer(canvas);
+const app = document.getElementById('app') as HTMLElement;
 
 let config: FrameConfig = defaultConfig();
 let prevFrame: HTMLCanvasElement | null = null;
@@ -32,6 +45,10 @@ let lastVideoItem: MediaItem | null = null;
 let showingVideo = false;
 let paused = false;
 let holding = false;
+let receivedConfigEvent = false;
+let receivedPausedEvent = false;
+let lastPlaybackReportAt = 0;
+const PLAYBACK_REPORT_INTERVAL_MS = 1_000;
 
 /** Forward a control message to the backend (used to bridge Cast custom messages). */
 function sendControl(msg: ControlMessage): void {
@@ -40,11 +57,26 @@ function sendControl(msg: ControlMessage): void {
   }
 }
 
+function reportVideoPlayback(force = false): void {
+  if (!showingVideo || !lastVideoItem) return;
+  const now = Date.now();
+  if (!force && now - lastPlaybackReportAt < PLAYBACK_REPORT_INTERVAL_MS) return;
+  lastPlaybackReportAt = now;
+  sendControl({
+    type: 'playbackState',
+    itemId: lastVideoItem.id,
+    currentTime: Number.isFinite(video.currentTime) ? video.currentTime : 0,
+    duration: Number.isFinite(video.duration) ? video.duration : 0,
+    seekable: video.seekable.length > 0 && Number.isFinite(video.duration) && video.duration > 0,
+  });
+}
+
 /** This display's render size in device pixels, capped to bound texture memory. */
 function screenPixels(): { w: number; h: number } {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   let w = Math.round(window.innerWidth * dpr);
   let h = Math.round(window.innerHeight * dpr);
+  if (config.screenRotation === 90 || config.screenRotation === 270) [w, h] = [h, w];
   const longest = Math.max(w, h);
   const maxEdge = 3840;
   if (longest > maxEdge) {
@@ -53,6 +85,23 @@ function screenPixels(): { w: number; h: number } {
     h = Math.round(h * s);
   }
   return { w: Math.max(1, w), h: Math.max(1, h) };
+}
+
+function logicalViewport(): { w: number; h: number } {
+  return config.screenRotation === 90 || config.screenRotation === 270
+    ? { w: window.innerHeight, h: window.innerWidth }
+    : { w: window.innerWidth, h: window.innerHeight };
+}
+
+function applyScreenTransform(): void {
+  const quarterTurn = config.screenRotation === 90 || config.screenRotation === 270;
+  app.style.inset = 'auto';
+  app.style.left = '50%';
+  app.style.top = '50%';
+  app.style.width = quarterTurn ? '100vh' : '100vw';
+  app.style.height = quarterTurn ? '100vw' : '100vh';
+  app.style.transformOrigin = 'center';
+  app.style.transform = `translate(-50%, -50%) rotate(${config.screenRotation}deg) scale(${config.screenFlipHorizontal ? -1 : 1}, ${config.screenFlipVertical ? -1 : 1})`;
 }
 
 function composeCurrent(items: MediaItem[]): Promise<HTMLCanvasElement> {
@@ -130,27 +179,37 @@ function startMotion(): void {
   });
 }
 
+function reportPlaybackBlocked(error: unknown): void {
+  console.error('Video playback was blocked.', error);
+  setStatus(playbackBlockedStatusMessage(config.videoAudioMode));
+}
+
+/** Keep the active video element aligned with persisted playback settings. */
+function syncActiveVideoPlaybackProperties(restartAfterUnmute = false): void {
+  syncVideoPlaybackProperties(video, {
+    muted: config.videoAudioMode !== 'tv',
+    loop: config.videoLoop || holding,
+    restartAfterUnmute: restartAfterUnmute && showingVideo && !paused,
+    onPlaybackRejected: reportPlaybackBlocked,
+  });
+}
+
 async function renderVideo(item: MediaItem): Promise<void> {
   showingVideo = true;
   lastVideoItem = item;
   layoutVideo(item);
-  video.muted = config.videoMuted;
-  video.loop = config.videoLoop || holding;
+  syncActiveVideoPlaybackProperties();
   video.onerror = () => handleVideoError(item);
   video.src = `/photos/${item.file}`;
+  lastPlaybackReportAt = 0;
   video.classList.add('visible');
   try {
     await video.play();
-  } catch {
-    // Browser tabs may block unmuted autoplay until a user gesture (Cast receivers on a TV
-    // allow it). Fall back to muted playback instead of freezing; the 🔊 control unmutes.
-    if (!video.muted) {
-      video.muted = true;
-      setStatus('Video sound blocked by the browser — open Controls and tap 🔊 to unmute.');
-      try { await video.play(); } catch { /* decode errors handled by onerror */ }
-    }
+  } catch (error) {
+    reportPlaybackBlocked(error);
   }
   setCaption([item], config);
+  reportVideoPlayback(true);
 }
 
 /** A video that can't be decoded (bad/unsupported file) shouldn't freeze the frame on black. */
@@ -160,49 +219,74 @@ function handleVideoError(item: MediaItem): void {
   setStatus('Skipping unplayable video…');
   // Delay so several bad files in a row skip calmly rather than in a tight loop.
   window.setTimeout(() => {
-    if (lastVideoItem?.id === item.id && !paused) sendControl({ type: 'next' });
+    if (lastVideoItem?.id === item.id && !paused) goNext();
   }, 2500);
 }
 
 /** Position the <video> into the aspect content rect and set its backdrop. */
-function fittedMediaSize(item: MediaItem, frameW: number, frameH: number, fillMode: FillMode): { w: number; h: number } {
-  if (fillMode === 'stretch') return { w: frameW, h: frameH };
-  const fit = fillMode === 'cover' ? 'cover' : 'contain';
-  const base = fit === 'cover'
-    ? Math.max(frameW / item.width, frameH / item.height)
-    : Math.min(frameW / item.width, frameH / item.height);
-  return { w: item.width * base, h: item.height * base };
+function effectiveVideoFit(fillMode: FillMode): 'cover' | 'contain' | 'stretch' {
+  // Blur mode keeps the sharp foreground video contained above the blurred backdrop.
+  if (fillMode === 'blur') return 'contain';
+  return fillMode;
 }
 
-function smartVideoObjectPosition(item: MediaItem, r: { w: number; h: number }): string {
-  const hasManualOverride = Math.abs(config.panX) > 0.001 || Math.abs(config.panY) > 0.001 || config.zoom > 1.001;
-  if (!config.smartFraming || hasManualOverride || !item.faces?.length) return '50% 50%';
+function fittedMediaSize(
+  item: MediaItem,
+  frameW: number,
+  frameH: number,
+  fillMode: FillMode | 'cover' | 'contain' | 'stretch',
+  zoom = 1,
+): { w: number; h: number } {
+  const safeZoom = Math.max(1, Number.isFinite(zoom) ? zoom : 1);
+  if (fillMode === 'stretch') return { w: frameW * safeZoom, h: frameH * safeZoom };
+  const fit = fillMode === 'cover' ? 'cover' : 'contain';
+  const source = orientedDimensions(item.width, item.height, item.rotation ?? 0);
+  const base = fit === 'cover'
+    ? Math.max(frameW / source.width, frameH / source.height)
+    : Math.min(frameW / source.width, frameH / source.height);
+  return { w: source.width * base * safeZoom, h: source.height * base * safeZoom };
+}
 
-  const fitted = fittedMediaSize(item, r.w, r.h, config.fillMode);
-  const pan = faceCenterToPan({
+function hasManualVideoOverride(): boolean {
+  return Math.abs(config.panX) > 0.001 || Math.abs(config.panY) > 0.001 || config.zoom > 1.001;
+}
+
+function smartVideoObjectPosition(item: MediaItem, r: { w: number; h: number }, fit: 'cover' | 'contain' | 'stretch'): { panX: number; panY: number } {
+  if (hasManualVideoOverride()) return { panX: config.panX, panY: config.panY };
+  if (!config.smartFraming || !item.faces?.length) return { panX: 0, panY: 0 };
+
+  const fitted = fittedMediaSize(item, r.w, r.h, fit, config.zoom);
+  return faceCenterToPan({
     item,
     frameWidth: r.w,
     frameHeight: r.h,
     fittedWidth: fitted.w,
     fittedHeight: fitted.h,
   });
-  return `${(pan.panX + 1) * 50}% ${(pan.panY + 1) * 50}%`;
 }
 
 function layoutVideo(item: MediaItem): void {
-  const r = contentRect(window.innerWidth, window.innerHeight, config.frameAspect);
-  video.style.left = `${r.x}px`;
-  video.style.top = `${r.y}px`;
-  video.style.width = `${r.w}px`;
-  video.style.height = `${r.h}px`;
-  video.style.objectFit = config.fillMode === 'cover' ? 'cover' : config.fillMode === 'stretch' ? 'fill' : 'contain';
-  video.style.objectPosition = smartVideoObjectPosition(item, r);
+  const viewport = logicalViewport();
+  const r = contentRect(viewport.w, viewport.h, config.frameAspect);
+  const fillMode = effectiveVideoFit(config.fillMode);
+  const zoom = clampN(config.zoom, MIN_ZOOM, MAX_ZOOM);
+  const fitted = fittedMediaSize(item, r.w, r.h, fillMode, zoom);
+  const pan = smartVideoObjectPosition(item, r, fillMode);
+  const overflowX = Math.max(0, fitted.w - r.w);
+  const overflowY = Math.max(0, fitted.h - r.h);
+  const dx = r.x + (r.w - fitted.w) / 2 - (clampN(pan.panX, -1, 1) * overflowX) / 2;
+  const dy = r.y + (r.h - fitted.h) / 2 - (clampN(pan.panY, -1, 1) * overflowY) / 2;
 
-  // Manual zoom/pan on videos: scale the element and shift so pan ±1 reaches the edges.
-  const z = config.zoom;
-  video.style.transform = z > 1.001
-    ? `scale(${z}) translate(${(-config.panX * (z - 1) * 50 / z).toFixed(3)}%, ${(-config.panY * (z - 1) * 50 / z).toFixed(3)}%)`
-    : '';
+  const transform = normalizeTransform(item);
+  const quarterTurn = transform.rotation === 90 || transform.rotation === 270;
+  video.style.left = `${dx + fitted.w / 2}px`;
+  video.style.top = `${dy + fitted.h / 2}px`;
+  video.style.width = `${quarterTurn ? fitted.h : fitted.w}px`;
+  video.style.height = `${quarterTurn ? fitted.w : fitted.h}px`;
+  video.style.transform = `translate(-50%, -50%) rotate(${transform.rotation}deg) scale(${transform.flipHorizontal ? -1 : 1}, ${transform.flipVertical ? -1 : 1})`;
+  video.style.objectFit = 'fill';
+  video.style.objectPosition = '50% 50%';
+  video.style.clipPath = '';
 
   // Opaque backdrop hides the stale photo behind any bars; blurred poster in blur mode.
   videoBg.classList.add('visible');
@@ -228,8 +312,6 @@ function hideVideo(): void {
 async function rerender(): Promise<void> {
   stopMotion();
   if (showingVideo && lastVideoItem) {
-    video.muted = config.videoMuted;
-    video.loop = config.videoLoop || holding;
     layoutVideo(lastVideoItem);
     return;
   }
@@ -250,35 +332,46 @@ function statusText(): string {
 function handleEvent(event: FrameEvent): void {
   switch (event.type) {
     case 'config':
-      // A config echo can arrive while a local gesture is still ahead of the server;
-      // keep the not-yet-broadcast local changes on top so the image doesn't jump back.
-      config = pendingPatch ? { ...event.config, ...pendingPatch } : event.config;
+      receivedConfigEvent = true;
+      config = event.config;
+      applyScreenTransform();
+      syncActiveVideoPlaybackProperties(true);
       applyOverlays(config);
-      syncControlsUi();
+      renderPublicSettings();
+      updateControlStates();
       rerender().catch((err) => console.error(err));
       break;
     case 'show':
       renderItems(event.items, event.interactive).catch((err) => console.error(err));
       break;
+    case 'seek':
+      if ('offsetSec' in event) {
+        seekActiveVideo(video, event.offsetSec, showingVideo);
+      } else if (showingVideo && lastVideoItem?.id === event.itemId && Number.isFinite(video.duration)) {
+        video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + event.deltaSec));
+        reportVideoPlayback(true);
+      }
+      break;
     case 'library':
       // No-op for the display; the server drives what is shown.
       break;
     case 'paused':
+      receivedPausedEvent = true;
       paused = event.paused;
       if (showingVideo) {
         if (paused) video.pause();
-        else video.play().catch(() => undefined);
+        else video.play().catch(reportPlaybackBlocked);
       } else if (paused) {
         motionAnim?.pause();
       } else {
         motionAnim?.play();
       }
       setStatus(statusText());
-      syncControlsUi();
+      updateControlStates();
       break;
     case 'hold':
       holding = event.holding;
-      if (showingVideo) video.loop = config.videoLoop || holding;
+      if (showingVideo) syncActiveVideoPlaybackProperties();
       setStatus(statusText());
       break;
     case 'log':
@@ -287,6 +380,11 @@ function handleEvent(event: FrameEvent): void {
   }
 }
 
+video.addEventListener('loadedmetadata', () => reportVideoPlayback(true));
+video.addEventListener('durationchange', () => reportVideoPlayback(true));
+video.addEventListener('timeupdate', () => reportVideoPlayback());
+video.addEventListener('seeked', () => reportVideoPlayback(true));
+
 /**
  * TV remote / keyboard control. D-pad and OK on TV browsers arrive as arrow + Enter keys;
  * media remotes send the Media* keys. All control flows through the same WebSocket protocol.
@@ -294,166 +392,600 @@ function handleEvent(event: FrameEvent): void {
  * When zoomed in (zoom > 1), the D-pad arrows pan the image instead of navigating; zoom out
  * to 1× to navigate again. `+`/`-` zoom, `0` resets.
  */
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 3;
+const ZOOM_STEP = 0.2;
+const PAN_STEP = 0.1;
+
 function clampN(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
+
+function goNext(): void {
+  sendControl({ type: 'next' });
+}
+
+function goPrevious(): void {
+  sendControl({ type: 'previous' });
+}
+
+function togglePause(): void {
+  sendControl({ type: paused ? 'resume' : 'pause' });
+}
+
 function adjustConfig(patch: Partial<FrameConfig>): void {
-  sendControl({ type: 'config', patch });
+  sendControl({ type: 'publicConfig', patch });
 }
 
-// --- Local config changes (gestures / on-screen controls) ---
-// Apply immediately for responsive feedback, rerender on the next frame, and debounce the
-// WebSocket broadcast so a drag doesn't flood the server with per-frame patches.
-
-let pendingPatch: Partial<FrameConfig> | null = null;
-let sendTimer: ReturnType<typeof setTimeout> | undefined;
-let rerenderQueued = false;
-
-function scheduleRerender(): void {
-  if (rerenderQueued) return;
-  rerenderQueued = true;
-  requestAnimationFrame(() => {
-    rerenderQueued = false;
-    rerender().catch((err) => console.error(err));
-  });
+function setZoom(zoom: number): void {
+  const z = clampN(zoom, MIN_ZOOM, MAX_ZOOM);
+  adjustConfig(z <= MIN_ZOOM + 0.001 ? { zoom: MIN_ZOOM, panX: 0, panY: 0 } : { zoom: z });
 }
 
-function applyLocal(patch: Partial<FrameConfig>): void {
-  config = { ...config, ...patch };
-  pendingPatch = { ...(pendingPatch ?? {}), ...patch };
-  scheduleRerender();
-  syncControlsUi();
-  clearTimeout(sendTimer);
-  sendTimer = setTimeout(() => {
-    if (pendingPatch) adjustConfig(pendingPatch);
-    pendingPatch = null;
-  }, 200);
-}
-
-function setZoomPan(zoom: number, panX: number, panY: number): void {
-  applyLocal({
-    zoom: clampN(zoom, 1, 3),
+function setPan(panX: number, panY: number): void {
+  adjustConfig({
     panX: clampN(panX, -1, 1),
     panY: clampN(panY, -1, 1),
   });
 }
 
 function resetZoomPan(): void {
-  applyLocal({ zoom: 1, panX: 0, panY: 0 });
+  adjustConfig({ zoom: MIN_ZOOM, panX: 0, panY: 0 });
 }
 
-// --- Frame Controls overlay (open/close panel + reveal-on-activity) ---
-
-const controlsRoot = document.getElementById('controls');
-let uiTimer: ReturnType<typeof setTimeout> | undefined;
-
-function setControlsOpen(open: boolean): void {
-  controlsRoot?.classList.toggle('open', open);
-  document.getElementById('controls-open')?.setAttribute('aria-expanded', String(open));
-}
-
-function controlsOpenNow(): boolean {
-  return controlsRoot?.classList.contains('open') ?? false;
-}
-
-/** Any pointer activity reveals the controls toggle (the display normally hides the cursor). */
-function showUi(): void {
-  document.body.classList.add('ui-active');
-  clearTimeout(uiTimer);
-  uiTimer = setTimeout(() => document.body.classList.remove('ui-active'), 3500);
-}
-
-function syncControlsUi(): void {
-  const play = document.getElementById('c-play');
-  if (play) play.textContent = paused ? '▶' : '⏸';
-  const mute = document.getElementById('c-mute');
-  if (mute) {
-    mute.textContent = config.videoMuted ? '🔇' : '🔊';
-    mute.classList.toggle('active', config.videoMuted);
-  }
-  const reset = document.getElementById('c-zoom-reset');
-  if (reset) reset.textContent = config.zoom > 1.01 ? `${config.zoom.toFixed(1)}×` : '1×';
-}
-
-function wireControls(): void {
-  const byId = (id: string) => document.getElementById(id);
-  byId('controls-open')?.addEventListener('click', () => setControlsOpen(true));
-  byId('controls-close')?.addEventListener('click', () => setControlsOpen(false));
-  byId('c-prev')?.addEventListener('click', () => sendControl({ type: 'previous' }));
-  byId('c-next')?.addEventListener('click', () => sendControl({ type: 'next' }));
-  byId('c-play')?.addEventListener('click', () => sendControl({ type: paused ? 'resume' : 'pause' }));
-  byId('c-mute')?.addEventListener('click', () => applyLocal({ videoMuted: !config.videoMuted }));
-  byId('c-zoom-in')?.addEventListener('click', () => setZoomPan(config.zoom + 0.25, config.panX, config.panY));
-  byId('c-zoom-out')?.addEventListener('click', () => {
-    const z = config.zoom - 0.25;
-    if (z <= 1.001) resetZoomPan();
-    else setZoomPan(z, config.panX, config.panY);
+/**
+ * Touch gestures on the media itself: double-tap zooms 2× centered on the tap (double-tap
+ * again resets), dragging while zoomed pans. Pan broadcasts are throttled (leading +
+ * trailing) so a drag doesn't flood the WebSocket/config store with per-frame patches.
+ */
+function wireMediaGestures(): void {
+  const app = document.getElementById('app');
+  if (!app) return;
+  const PAN_SEND_MS = 120;
+  let lastPanSend = 0;
+  let panTrailing: ReturnType<typeof setTimeout> | undefined;
+  const sendZoomPan = (zoom: number, panX: number, panY: number): void => {
+    adjustConfig({
+      zoom: clampN(zoom, MIN_ZOOM, MAX_ZOOM),
+      panX: clampN(panX, -1, 1),
+      panY: clampN(panY, -1, 1),
+    });
+  };
+  attachMediaGestures(app as HTMLElement, {
+    getZoom: () => config.zoom,
+    getPan: () => ({ panX: config.panX, panY: config.panY }),
+    setZoomPan: (zoom, panX, panY) => {
+      const now = performance.now();
+      clearTimeout(panTrailing);
+      if (now - lastPanSend >= PAN_SEND_MS) {
+        lastPanSend = now;
+        sendZoomPan(zoom, panX, panY);
+      } else {
+        panTrailing = setTimeout(() => {
+          lastPanSend = performance.now();
+          sendZoomPan(zoom, panX, panY);
+        }, PAN_SEND_MS - (now - lastPanSend));
+      }
+    },
+    resetZoomPan,
   });
-  byId('c-zoom-reset')?.addEventListener('click', () => resetZoomPan());
+}
 
-  window.addEventListener('pointermove', showUi);
-  window.addEventListener('pointerdown', showUi);
-  syncControlsUi();
+function getElementByIds<T extends HTMLElement>(...ids: string[]): T | null {
+  for (const id of ids) {
+    const element = document.getElementById(id) as T | null;
+    if (element) return element;
+  }
+  return null;
+}
+
+type PublicConfigKey =
+  | 'photoPeriod'
+  | 'transitionPeriod'
+  | 'zoom'
+  | 'panX'
+  | 'panY'
+  | 'fillMode'
+  | 'frameAspect'
+  | 'transition'
+  | 'motion'
+  | 'playbackMediaMode'
+  | 'smartFraming'
+  | 'showQr';
+
+const NUMERIC_PUBLIC_CONFIG_KEYS = new Set<PublicConfigKey>(['photoPeriod', 'transitionPeriod', 'zoom', 'panX', 'panY']);
+const BOOLEAN_PUBLIC_CONFIG_KEYS = new Set<PublicConfigKey>(['smartFraming', 'showQr']);
+
+const controlsToggle = getElementByIds<HTMLButtonElement>('public-controls-toggle', 'controls-toggle');
+const publicControlsRoot = document.getElementById('public-controls') as HTMLElement | null;
+const publicSettingsRoot = document.getElementById('public-settings') as HTMLElement | null;
+const publicControls = getElementByIds<HTMLElement>('public-control-panel', 'public-controls');
+const bottomController = document.getElementById('public-bottom-controller') as HTMLElement | null;
+const zoomPanSection = document.getElementById('public-zoom-pan-section') as HTMLElement | null;
+const zoomPanToggle = document.getElementById('public-zoom-pan-toggle') as HTMLButtonElement | null;
+const ZOOM_PAN_COLLAPSE_STORAGE_KEY = '4kframe.publicControls.zoomPanOpen';
+const CONTROL_DIM_TIMEOUT_MS = 2600;
+const CONTROL_HIDE_TIMEOUT_MS = 7600;
+let controlDimTimer: ReturnType<typeof window.setTimeout> | undefined;
+let controlHideTimer: ReturnType<typeof window.setTimeout> | undefined;
+
+const QUICK_ACTIONS = [
+  'fill-cover',
+  'fill-contain',
+  'smart-crop',
+  'zoom-in',
+  'zoom-out',
+  'reset-view',
+  'pan-up',
+  'pan-down',
+  'pan-left',
+  'pan-right',
+] as const;
+
+type QuickAction = typeof QUICK_ACTIONS[number];
+
+function isQuickAction(action: string | undefined): action is QuickAction {
+  return QUICK_ACTIONS.includes(action as QuickAction);
+}
+
+function isPublicControlTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest('#public-controls, #public-control-panel, #public-controls-toggle, #controls-toggle'));
+}
+
+function bottomControllerHasFocus(): boolean {
+  return Boolean(bottomController?.contains(document.activeElement));
+}
+
+function clearControlIdleTimers(): void {
+  window.clearTimeout(controlDimTimer);
+  window.clearTimeout(controlHideTimer);
+  controlDimTimer = undefined;
+  controlHideTimer = undefined;
+}
+
+function showBottomController(): void {
+  bottomController?.classList.remove('is-hidden', 'is-dim');
+}
+
+function scheduleControlIdle(): void {
+  if (!bottomController) return;
+  clearControlIdleTimers();
+  controlDimTimer = window.setTimeout(() => {
+    if (!bottomControllerHasFocus()) bottomController.classList.add('is-dim');
+  }, CONTROL_DIM_TIMEOUT_MS);
+  controlHideTimer = window.setTimeout(() => {
+    if (!bottomControllerHasFocus()) bottomController.classList.add('is-hidden');
+  }, CONTROL_HIDE_TIMEOUT_MS);
+}
+
+function registerPublicControlActivity(): void {
+  showBottomController();
+  scheduleControlIdle();
+}
+
+function isDisplayRemoteKey(key: string): boolean {
+  return [
+    'ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp',
+    'PageDown', 'MediaTrackNext', 'n', 'N',
+    'PageUp', 'MediaTrackPrevious', 'p', 'P',
+    '+', '=', 'Add', '-', '_', 'Subtract', '0',
+    'Enter', ' ', 'Spacebar', 'MediaPlayPause', 'MediaPlay', 'MediaPause',
+  ].includes(key);
+}
+
+function setControlsOpen(open: boolean, revealController = true): void {
+  if (!controlsToggle || !publicControls) return;
+  publicControls.hidden = !open;
+  controlsToggle.setAttribute('aria-expanded', String(open));
+  controlsToggle.setAttribute('aria-label', open ? 'Close slideshow controls' : 'Open slideshow controls');
+  controlsToggle.textContent = open ? 'Close' : 'Controls';
+  if (revealController) registerPublicControlActivity();
+}
+
+function configValueForControl(key: PublicConfigKey): string {
+  const value = config[key];
+  if (key === 'zoom' || key === 'panX' || key === 'panY') return String(Math.round(Number(value) * 100));
+  return String(value);
+}
+
+function publicConfigPatch(key: string | undefined, rawValue: string): Partial<FrameConfig> | null {
+  if (!key) return null;
+  const publicKey = key as PublicConfigKey;
+  if (NUMERIC_PUBLIC_CONFIG_KEYS.has(publicKey)) {
+    const divisor = publicKey === 'zoom' || publicKey === 'panX' || publicKey === 'panY' ? 100 : 1;
+    const parsed = Number(rawValue) / divisor;
+    return Number.isFinite(parsed) ? { [publicKey]: parsed } : null;
+  }
+  if (BOOLEAN_PUBLIC_CONFIG_KEYS.has(publicKey)) {
+    if (rawValue !== 'true' && rawValue !== 'false') return null;
+    return { [publicKey]: rawValue === 'true' };
+  }
+  if (['fillMode', 'frameAspect', 'transition', 'motion', 'playbackMediaMode'].includes(publicKey)) {
+    return { [publicKey]: rawValue };
+  }
+  return null;
+}
+
+function sharedSettingsConfigPatch(patch: SettingsPatch): Partial<FrameConfig> | null {
+  const nextPatch: Partial<FrameConfig> = {};
+
+  for (const [key, value] of Object.entries(patch)) {
+    const publicKey = key as PublicConfigKey;
+    if (NUMERIC_PUBLIC_CONFIG_KEYS.has(publicKey)) {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) return null;
+      Object.assign(nextPatch, { [publicKey]: parsed });
+    } else if (BOOLEAN_PUBLIC_CONFIG_KEYS.has(publicKey)) {
+      if (typeof value === 'boolean') {
+        Object.assign(nextPatch, { [publicKey]: value });
+      } else if (value === 'true' || value === 'false') {
+        Object.assign(nextPatch, { [publicKey]: value === 'true' });
+      } else {
+        return null;
+      }
+    } else if (['fillMode', 'frameAspect', 'transition', 'motion', 'playbackMediaMode'].includes(publicKey)) {
+      Object.assign(nextPatch, { [publicKey]: String(value) });
+    }
+  }
+
+  return Object.keys(nextPatch).length ? nextPatch : null;
+}
+
+function renderPublicSettings(): void {
+  if (!publicSettingsRoot) return;
+
+  const openPanels = new Map<string, boolean>();
+  publicSettingsRoot.querySelectorAll<HTMLElement>('.panel[data-panel-id]').forEach((panel) => {
+    const id = panel.dataset.panelId;
+    if (id) openPanels.set(id, panel.dataset.collapsed !== 'true');
+  });
+
+  renderSharedSettings(publicSettingsRoot, {
+    getConfig: () => config,
+    updateConfig: (patch: SettingsPatch) => {
+      const normalizedPatch = sharedSettingsConfigPatch(patch);
+      if (normalizedPatch) adjustConfig(normalizedPatch);
+    },
+  }, {
+    isPanelOpen: (id: string) => openPanels.get(id) ?? true,
+  });
+
+  publicSettingsRoot.querySelectorAll<HTMLButtonElement>('.panel-toggle').forEach((toggle) => {
+    toggle.addEventListener('click', () => {
+      const panel = toggle.closest<HTMLElement>('.panel');
+      const body = document.getElementById(toggle.getAttribute('aria-controls') ?? '');
+      if (!panel || !body) return;
+      const open = toggle.getAttribute('aria-expanded') !== 'true';
+      panel.dataset.collapsed = open ? 'false' : 'true';
+      toggle.setAttribute('aria-expanded', String(open));
+      body.toggleAttribute('aria-hidden', !open);
+      body.toggleAttribute('inert', !open);
+    });
+  });
+}
+
+function setZoomPanSectionOpen(open: boolean, persist = true): void {
+  if (!zoomPanSection || !zoomPanToggle) return;
+  const body = document.getElementById(zoomPanToggle.getAttribute('aria-controls') ?? '') as HTMLElement | null;
+  zoomPanSection.dataset.collapsed = open ? 'false' : 'true';
+  zoomPanToggle.setAttribute('aria-expanded', String(open));
+  if (body) {
+    body.hidden = !open;
+    body.toggleAttribute('aria-hidden', !open);
+    body.toggleAttribute('inert', !open);
+  }
+  if (persist) window.localStorage.setItem(ZOOM_PAN_COLLAPSE_STORAGE_KEY, open ? 'true' : 'false');
+}
+
+function wireZoomPanSection(): void {
+  if (!zoomPanToggle) return;
+  const storedOpen = window.localStorage.getItem(ZOOM_PAN_COLLAPSE_STORAGE_KEY);
+  if (storedOpen === 'true' || storedOpen === 'false') setZoomPanSectionOpen(storedOpen === 'true', false);
+  zoomPanToggle.addEventListener('click', () => {
+    registerPublicControlActivity();
+    setZoomPanSectionOpen(zoomPanToggle.getAttribute('aria-expanded') !== 'true');
+  });
+}
+
+function applyQuickAction(action: QuickAction): void {
+  switch (action) {
+    case 'fill-cover': {
+      const patch = publicConfigPatch('fillMode', 'cover');
+      if (patch) adjustConfig(patch);
+      break;
+    }
+    case 'fill-contain': {
+      const patch = publicConfigPatch('fillMode', 'contain');
+      if (patch) adjustConfig(patch);
+      break;
+    }
+    case 'smart-crop':
+      adjustConfig({ fillMode: 'cover', smartFraming: true, zoom: MIN_ZOOM, panX: 0, panY: 0 });
+      break;
+    case 'zoom-in':
+      setZoom(config.zoom + ZOOM_STEP);
+      break;
+    case 'zoom-out':
+      setZoom(config.zoom - ZOOM_STEP);
+      break;
+    case 'reset-view':
+      resetZoomPan();
+      break;
+    case 'pan-up':
+      setPan(config.panX, config.panY - PAN_STEP);
+      break;
+    case 'pan-down':
+      setPan(config.panX, config.panY + PAN_STEP);
+      break;
+    case 'pan-left':
+      setPan(config.panX - PAN_STEP, config.panY);
+      break;
+    case 'pan-right':
+      setPan(config.panX + PAN_STEP, config.panY);
+      break;
+  }
+}
+
+function quickActionDisabled(action: QuickAction, configControlsReady: boolean): boolean {
+  if (!configControlsReady) return true;
+  switch (action) {
+    case 'zoom-in':
+      return config.zoom >= MAX_ZOOM - 0.001;
+    case 'zoom-out':
+      return config.zoom <= MIN_ZOOM + 0.001;
+    case 'reset-view':
+      return config.zoom <= MIN_ZOOM + 0.001 && Math.abs(config.panX) <= 0.001 && Math.abs(config.panY) <= 0.001;
+    case 'pan-up':
+      return config.panY <= -1 + 0.001;
+    case 'pan-down':
+      return config.panY >= 1 - 0.001;
+    case 'pan-left':
+      return config.panX <= -1 + 0.001;
+    case 'pan-right':
+      return config.panX >= 1 - 0.001;
+    default:
+      return false;
+  }
+}
+
+function quickActionSelected(action: QuickAction): boolean {
+  switch (action) {
+    case 'fill-cover':
+      return config.fillMode === 'cover';
+    case 'fill-contain':
+      return config.fillMode === 'contain';
+    case 'smart-crop':
+      return config.fillMode === 'cover' && config.smartFraming;
+    default:
+      return false;
+  }
+}
+
+function isQuickActionToggle(action: QuickAction): boolean {
+  return action === 'fill-cover' || action === 'fill-contain' || action === 'smart-crop';
+}
+
+function quickActionButtons(root: ParentNode): NodeListOf<HTMLButtonElement> {
+  return root.querySelectorAll<HTMLButtonElement>('button[data-quick-action]');
+}
+
+function syncQuickActions(root: ParentNode): void {
+  quickActionButtons(root).forEach((button) => {
+    const action = button.dataset.quickAction;
+    if (!isQuickAction(action)) return;
+    const selected = quickActionSelected(action);
+    button.classList.toggle('is-selected', selected);
+    if (isQuickActionToggle(action)) button.setAttribute('aria-pressed', String(selected));
+  });
+}
+
+function wireQuickActions(root: ParentNode): void {
+  quickActionButtons(root).forEach((button) => {
+    button.addEventListener('click', () => {
+      const action = button.dataset.quickAction;
+      if (isQuickAction(action)) applyQuickAction(action);
+    });
+  });
+}
+
+function updateQuickActionDisabledStates(root: ParentNode, configControlsReady: boolean): void {
+  quickActionButtons(root).forEach((button) => {
+    const action = button.dataset.quickAction;
+    button.disabled = isQuickAction(action) ? quickActionDisabled(action, configControlsReady) : !configControlsReady;
+  });
+}
+
+function syncPublicControls(): void {
+  publicControlsRoot?.querySelectorAll<HTMLButtonElement>('[data-control="play-pause"], #control-pause').forEach((button) => {
+    button.textContent = paused ? '▶' : '⏸';
+    button.setAttribute('aria-label', paused ? 'Resume slideshow' : 'Pause slideshow');
+    button.setAttribute('aria-pressed', String(paused));
+  });
+
+  publicControls?.querySelectorAll<HTMLSelectElement>('select[data-config-key]').forEach((select) => {
+    const key = select.dataset.configKey as PublicConfigKey | undefined;
+    if (key) select.value = configValueForControl(key);
+  });
+
+  publicControls?.querySelectorAll<HTMLInputElement>('input[type=range][data-config-key]').forEach((input) => {
+    const key = input.dataset.configKey as PublicConfigKey | undefined;
+    if (key) input.value = configValueForControl(key);
+  });
+
+  publicControls?.querySelectorAll<HTMLElement>('[role=group][data-config-key]').forEach((group) => {
+    const key = group.dataset.configKey as PublicConfigKey | undefined;
+    if (!key) return;
+    const currentValue = configValueForControl(key);
+    group.querySelectorAll<HTMLButtonElement>('button[data-value]').forEach((button) => {
+      const selected = button.dataset.value === currentValue;
+      button.classList.toggle('is-selected', selected);
+      button.setAttribute('aria-pressed', String(selected));
+    });
+  });
+
+  if (publicControls) syncQuickActions(publicControls);
+}
+
+function wirePublicControls(): void {
+  if (!publicControlsRoot) return;
+
+  controlsToggle?.addEventListener('click', () => {
+    setControlsOpen(publicControls?.hidden ?? true);
+  });
+  wireZoomPanSection();
+
+  publicControlsRoot.querySelectorAll<HTMLButtonElement>('[data-control="previous"], #control-previous').forEach((button) => {
+    button.addEventListener('click', () => {
+      registerPublicControlActivity();
+      goPrevious();
+    });
+  });
+  publicControlsRoot.querySelectorAll<HTMLButtonElement>('[data-control="next"], #control-next').forEach((button) => {
+    button.addEventListener('click', () => {
+      registerPublicControlActivity();
+      goNext();
+    });
+  });
+  publicControlsRoot.querySelectorAll<HTMLButtonElement>('[data-control="play-pause"], #control-pause').forEach((button) => {
+    button.addEventListener('click', () => {
+      registerPublicControlActivity();
+      togglePause();
+    });
+  });
+
+  if (publicControls) {
+    wireQuickActions(publicControls);
+  }
+
+  publicControlsRoot.querySelectorAll<HTMLSelectElement>('select[data-config-key]').forEach((select) => {
+    select.addEventListener('change', () => {
+      registerPublicControlActivity();
+      const patch = publicConfigPatch(select.dataset.configKey, select.value);
+      if (patch) adjustConfig(patch);
+    });
+  });
+
+  publicControlsRoot.querySelectorAll<HTMLInputElement>('input[type=range][data-config-key]').forEach((input) => {
+    input.addEventListener('change', () => {
+      registerPublicControlActivity();
+      const patch = publicConfigPatch(input.dataset.configKey, input.value);
+      if (patch) adjustConfig(patch);
+    });
+  });
+
+  publicControlsRoot.querySelectorAll<HTMLElement>('[role=group][data-config-key]').forEach((group) => {
+    const key = group.dataset.configKey;
+    if (!key) return;
+    group.querySelectorAll<HTMLButtonElement>('button[data-value]').forEach((button) => {
+      button.addEventListener('click', () => {
+        registerPublicControlActivity();
+        const value = button.dataset.value;
+        if (value === undefined) return;
+        const patch = publicConfigPatch(key, value);
+        if (patch) adjustConfig(patch);
+      });
+    });
+  });
+
+  window.addEventListener('pointermove', registerPublicControlActivity, { passive: true });
+  window.addEventListener('pointerdown', registerPublicControlActivity, { passive: true });
+  window.addEventListener('touchstart', registerPublicControlActivity, { passive: true });
+  window.addEventListener('focusin', (e) => {
+    if (isPublicControlTarget(e.target)) registerPublicControlActivity();
+  });
+  window.addEventListener('focusout', (e) => {
+    if (isPublicControlTarget(e.target)) scheduleControlIdle();
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (isDisplayRemoteKey(e.key)) registerPublicControlActivity();
+    if (e.key === 'Escape' && publicControls && !publicControls.hidden) {
+      setControlsOpen(false);
+      controlsToggle?.focus({ preventScroll: true });
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, { capture: true });
+
+  setControlsOpen(false, false);
+  syncPublicControls();
 }
 
 function wireRemote(): void {
   window.addEventListener('keydown', (e) => {
+    const target = e.target as HTMLElement | null;
+    if (target?.closest('#public-settings') || isPublicControlTarget(target)) return;
     const zoomed = config.zoom > 1.01;
-    const STEP = 0.15;
     switch (e.key) {
       case 'ArrowRight':
-        if (zoomed) adjustConfig({ panX: clampN(config.panX + STEP, -1, 1) });
-        else sendControl({ type: 'next' });
+        if (zoomed) setPan(config.panX + PAN_STEP, config.panY);
+        else goNext();
         break;
       case 'ArrowLeft':
-        if (zoomed) adjustConfig({ panX: clampN(config.panX - STEP, -1, 1) });
-        else sendControl({ type: 'previous' });
+        if (zoomed) setPan(config.panX - PAN_STEP, config.panY);
+        else goPrevious();
         break;
       case 'ArrowDown':
-        if (zoomed) adjustConfig({ panY: clampN(config.panY + STEP, -1, 1) });
-        else sendControl({ type: 'next' });
+        if (zoomed) setPan(config.panX, config.panY + PAN_STEP);
+        else goNext();
         break;
       case 'ArrowUp':
-        if (zoomed) adjustConfig({ panY: clampN(config.panY - STEP, -1, 1) });
-        else sendControl({ type: 'previous' });
+        if (zoomed) setPan(config.panX, config.panY - PAN_STEP);
+        else goPrevious();
         break;
       case 'PageDown': case 'MediaTrackNext': case 'n': case 'N':
-        sendControl({ type: 'next' });
+        goNext();
         break;
       case 'PageUp': case 'MediaTrackPrevious': case 'p': case 'P':
-        sendControl({ type: 'previous' });
+        goPrevious();
         break;
       case '+': case '=': case 'Add':
-        adjustConfig({ zoom: clampN(config.zoom + 0.2, 1, 3) });
+        setZoom(config.zoom + ZOOM_STEP);
         break;
       case '-': case '_': case 'Subtract': {
-        const z = clampN(config.zoom - 0.2, 1, 3);
-        adjustConfig(z <= 1.001 ? { zoom: 1, panX: 0, panY: 0 } : { zoom: z });
+        setZoom(config.zoom - ZOOM_STEP);
         break;
       }
       case '0':
-        adjustConfig({ zoom: 1, panX: 0, panY: 0 });
+        resetZoomPan();
         break;
       case 'Enter': case ' ': case 'Spacebar':
       case 'MediaPlayPause': case 'MediaPlay': case 'MediaPause':
-        sendControl({ type: paused ? 'resume' : 'pause' });
-        break;
-      case 'Escape':
-        if (!controlsOpenNow()) return;
-        setControlsOpen(false);
+        togglePause();
         break;
       default:
         return;
     }
+    registerPublicControlActivity();
     e.preventDefault();
   });
+}
+
+function setPublicControlDisabled(selector: string, disabled: boolean): void {
+  publicControlsRoot?.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>(selector).forEach((control) => {
+    control.disabled = disabled;
+  });
+}
+
+function updateControlStates(): void {
+  const connected = socket?.readyState === WebSocket.OPEN;
+  const configControlsReady = connected && receivedConfigEvent;
+  const pauseControlReady = connected && receivedPausedEvent;
+
+  setPublicControlDisabled('[data-control="previous"], [data-control="next"], #control-previous, #control-next', !connected);
+  setPublicControlDisabled('[data-control="play-pause"], #control-pause', !pauseControlReady);
+  setPublicControlDisabled('#public-settings button, #public-settings input, #public-settings select', !configControlsReady);
+  if (publicControlsRoot) updateQuickActionDisabledStates(publicControlsRoot, configControlsReady);
+  syncPublicControls();
 }
 
 function connect(): void {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
   socket = ws;
-  ws.onopen = () => setStatus('');
+  ws.onopen = () => {
+    setStatus('');
+  };
   ws.onmessage = (ev) => {
     try { handleEvent(JSON.parse(ev.data) as FrameEvent); } catch { /* ignore */ }
   };
@@ -469,16 +1001,20 @@ function connect(): void {
 let resizeTimer: ReturnType<typeof setTimeout> | undefined;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => rerender().catch((err) => console.error(err)), 150);
+  resizeTimer = setTimeout(() => {
+    applyScreenTransform();
+    rerender().catch((err) => console.error(err));
+  }, 150);
 });
-
+window.addEventListener('orientationchange', () => {
+  applyScreenTransform();
+  rerender().catch((err) => console.error(err));
+});
+applyScreenTransform();
+renderPublicSettings();
+wirePublicControls();
+updateControlStates();
 wireRemote();
-wireControls();
-attachMediaGestures(document.getElementById('app') as HTMLElement, {
-  getZoom: () => config.zoom,
-  getPan: () => ({ panX: config.panX, panY: config.panY }),
-  setZoomPan,
-  resetZoomPan,
-});
-initCastReceiver(sendControl);
+wireMediaGestures();
+initCastReceiver(video, sendControl);
 connect();

@@ -50,7 +50,8 @@ export function attachMediaGestures(target: HTMLElement, handlers: MediaGestureH
   };
 
   const isControl = (ev: Event): boolean =>
-    ev.target instanceof Element && ev.target.closest('[data-control]') !== null;
+    ev.target instanceof Element
+    && ev.target.closest('#public-controls, [data-control], [data-quick-action], button, a, input, select, label') !== null;
 
   target.addEventListener('pointerdown', (ev) => {
     if (isControl(ev) || activePointer !== null) return;

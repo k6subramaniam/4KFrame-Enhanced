@@ -1,0 +1,105 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  RESET_TO_SMART_PATCH,
+  SHARED_SETTINGS_PANELS,
+  applySettingsSelection,
+  activeScalingPreset,
+  defaultConfig,
+  scalingPresetPatch,
+  panFromPixelDrag,
+  settingsPanelsForCapabilities,
+  settingsSelectionPatch,
+  toApiData,
+} from './index.js';
+
+test('scaling panel renders user-facing presets and selects Smart Cover', () => {
+  const config = toApiData({ ...defaultConfig(), fillMode: 'cover', frameFill: true, smartFraming: true });
+  const html = SHARED_SETTINGS_PANELS.find((panel) => panel.id === 'scaling')?.render(config) ?? '';
+
+  assert.match(html, /Smart Cover/);
+  assert.match(html, /Fill Frame/);
+  assert.match(html, /Fit Full Image/);
+  assert.match(html, /Blur Background/);
+  assert.match(html, /Manual Crop/);
+  assert.match(html, /data-scaling-preset="smart-cover" class="active"/);
+});
+
+test('preset selection returns public config patches for fill modes and manual crop', () => {
+  const config = toApiData({ ...defaultConfig(), zoom: 1, panX: 0, panY: 0 });
+
+  assert.deepEqual(scalingPresetPatch('fit-full-image', config), {
+    fillMode: 'contain',
+    smartFraming: false,
+    zoom: 1,
+    panX: 0,
+    panY: 0,
+  });
+  assert.deepEqual(scalingPresetPatch('manual-crop', config), {
+    fillMode: 'cover',
+    smartFraming: false,
+    zoom: 1.1,
+  });
+});
+
+test('reset to smart clears manual pan and zoom overrides', () => {
+  const manual = toApiData({ ...defaultConfig(), fillMode: 'cover', smartFraming: true, zoom: 1.6, panX: 0.25, panY: -0.5 });
+
+  assert.equal(activeScalingPreset(manual), 'manual-crop');
+  assert.deepEqual(RESET_TO_SMART_PATCH, {
+    fillMode: 'cover',
+    smartFraming: true,
+    zoom: 1,
+    panX: 0,
+    panY: 0,
+  });
+});
+
+test('pixel drag offsets convert to normalized pan values', () => {
+  assert.deepEqual(panFromPixelDrag({
+    startPanX: 0,
+    startPanY: 0,
+    deltaX: -100,
+    deltaY: 50,
+    frame: { width: 400, height: 300 },
+    media: { width: 800, height: 600 },
+    fillMode: 'cover',
+    zoom: 2,
+  }), { panX: 0.5, panY: -0.3333333333333333 });
+});
+
+test('Video Audio panel renders explicit output mode choices and current state', () => {
+  const panel = SHARED_SETTINGS_PANELS.find((candidate) => candidate.id === 'video-audio');
+  assert.ok(panel);
+  assert.equal(panel.adminOnly, true);
+
+  const tvHtml = panel.render({ ...defaultConfig(), videoAudioMode: 'tv', videoMuted: false });
+  assert.match(tvHtml, /data-group="videoAudioMode"/);
+  assert.match(tvHtml, /data-value="tv" class="active">TV speakers/);
+  assert.match(tvHtml, /data-value="muted" class="">Muted/);
+  assert.match(tvHtml, /data-value="phone" class="">Phone \/ Browser/);
+  assert.match(tvHtml, /autoplay permissions/);
+
+  const mutedHtml = panel.render(toApiData({ ...defaultConfig(), videoAudioMode: 'muted', videoMuted: true }));
+  assert.match(mutedHtml, /data-value="muted" class="active">Muted/);
+});
+
+test('selecting video audio output emits explicit mode and legacy mirror', async () => {
+  const emitted: unknown[] = [];
+  await applySettingsSelection({
+    getConfig: defaultConfig,
+    updateConfig: (patch) => { emitted.push(patch); },
+  }, 'videoAudioMode', 'phone');
+
+  assert.deepEqual(emitted, [{ videoAudioMode: 'phone', videoMuted: true }]);
+  assert.deepEqual(settingsSelectionPatch('videoAudioMode', 'tv'), { videoAudioMode: 'tv', videoMuted: false });
+  assert.deepEqual(settingsSelectionPatch('videoMuted', 'true'), { videoAudioMode: 'muted', videoMuted: true });
+});
+
+test('Video Audio is available to admins but excluded from public TV controls', () => {
+  const publicPanels = settingsPanelsForCapabilities(SHARED_SETTINGS_PANELS);
+  const adminPanels = settingsPanelsForCapabilities(SHARED_SETTINGS_PANELS, { showAdminOnlyControls: true });
+
+  assert.equal(publicPanels.some((panel) => panel.id === 'video-audio'), false);
+  assert.equal(adminPanels.some((panel) => panel.id === 'video-audio'), true);
+});
