@@ -24,6 +24,8 @@ interface DbDocument {
   order: string[];
   /** Google OAuth tokens (kept server-side only). */
   googleTokens?: { accessToken: string; refreshToken?: string; expiresAt: number };
+  /** Random secret signing admin session cookies when no FRAME_AUTH_SECRET/password is set. */
+  authSecret?: string;
 }
 
 let doc: DbDocument | null = null;
@@ -44,6 +46,7 @@ export async function initStore(): Promise<void> {
       items: parsed.items ?? [],
       order: parsed.order ?? (parsed.items ?? []).map((i) => i.id),
       googleTokens: parsed.googleTokens,
+      authSecret: parsed.authSecret,
     };
   } catch {
     doc = { config: defaultConfig(), items: [], order: [] };
@@ -136,5 +139,16 @@ export function getGoogleTokens(): DbDocument['googleTokens'] {
 
 export async function setGoogleTokens(tokens: DbDocument['googleTokens']): Promise<void> {
   db().googleTokens = tokens;
+  await flush();
+}
+
+// --- Auth secret ---
+
+export function getAuthSecret(): string | undefined {
+  return db().authSecret;
+}
+
+export async function setAuthSecret(secret: string): Promise<void> {
+  db().authSecret = secret;
   await flush();
 }

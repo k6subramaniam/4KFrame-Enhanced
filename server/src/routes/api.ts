@@ -33,6 +33,7 @@ import {
 } from '../slideshow.js';
 import { hub } from '../hub.js';
 import * as gphotos from '../integrations/googlePhotos.js';
+import * as gauth from '../integrations/googleAuth.js';
 import { computeStorage } from '../storage.js';
 import * as auth from '../auth.js';
 
@@ -49,7 +50,14 @@ function safeUploadId(id: unknown): string | null {
 /** /api/* paths reachable without a login (display/TV needs these; plus the login flow). */
 const OPEN_API = new Set([
   '/api/health', '/api/current', '/api/qr', '/api/login', '/api/logout', '/api/me',
+  '/api/auth/google/start', '/api/auth/google/callback',
 ]);
+
+/** Where Google should send the admin back after sign-in. Must be registered on the OAuth client. */
+function adminRedirectUri(req: { protocol: string; headers: { host?: string } }): string {
+  return process.env.FRAME_ADMIN_GOOGLE_REDIRECT_URI
+    || `${req.protocol}://${req.headers.host ?? 'localhost'}/api/auth/google/callback`;
+}
 
 export async function registerApi(app: FastifyInstance): Promise<void> {
   // Gate management/control API behind the admin password (when one is set). Static assets,
@@ -77,7 +85,42 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
   app.get('/api/me', async (req) => ({
     required: auth.authRequired(),
     authed: auth.isAuthed(req.headers.cookie),
+    methods: { password: auth.passwordEnabled(), google: auth.googleLoginEnabled() },
   }));
+
+  // --- Google sign-in for the admin (identity only; Photos has its own flow below) ---
+  app.get('/api/auth/google/start', async (req, reply) => {
+    if (!auth.googleLoginEnabled()) return reply.code(404).send({ error: 'Google sign-in not configured' });
+    const state = auth.issueStateToken();
+    reply.header('set-cookie', auth.setStateCookie(state, req.protocol === 'https'));
+    return reply.redirect(gauth.adminAuthUrl(state, adminRedirectUri(req)));
+  });
+
+  app.get('/api/auth/google/callback', async (req, reply) => {
+    if (!auth.googleLoginEnabled()) return reply.code(404).send({ error: 'Google sign-in not configured' });
+    const q = req.query as { code?: string; state?: string };
+    const cookieState = auth.stateCookieFromHeader(req.headers.cookie);
+    if (!q.code || !q.state || q.state !== cookieState || !auth.verifyStateToken(q.state)) {
+      reply.header('set-cookie', auth.clearStateCookie());
+      return reply.redirect('/admin/?error=login');
+    }
+    try {
+      const { email, emailVerified } = await gauth.exchangeCodeForEmail(q.code, adminRedirectUri(req));
+      if (!emailVerified || !auth.isEmailAllowed(email)) {
+        reply.header('set-cookie', auth.clearStateCookie());
+        return reply.redirect('/admin/?error=forbidden');
+      }
+      reply.header('set-cookie', [
+        auth.setCookie(auth.issueToken(), req.protocol === 'https'),
+        auth.clearStateCookie(),
+      ]);
+      return reply.redirect('/admin/');
+    } catch (err) {
+      app.log.error({ err }, 'Google sign-in failed');
+      reply.header('set-cookie', auth.clearStateCookie());
+      return reply.redirect('/admin/?error=login');
+    }
+  });
 
   // --- Playback control (original) ---
   app.get('/api/progress', async () => { progress(); return { ok: true }; });

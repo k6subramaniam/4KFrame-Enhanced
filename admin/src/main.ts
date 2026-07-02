@@ -9,7 +9,7 @@ import type { MediaItem } from '@4kframe/shared';
 import {
   fetchItems, fetchData, castItem, deleteItem, upload, thumbUrl,
   skipNext, skipPrev, getPlayback, setPaused, setHold, toggleEnabled,
-  me, login, logout,
+  me, login, logout, type AuthState,
 } from './api.js';
 import { renderSettings } from './settings.js';
 import { initCastSender, isCastReady, castControl, toggleCastSession } from './cast-sender.js';
@@ -289,13 +289,28 @@ async function start(): Promise<void> {
   await refresh();
 }
 
-function showLogin(): void {
+function showLogin(auth: AuthState): void {
   const overlay = document.getElementById('login') as HTMLElement;
   const form = document.getElementById('login-form') as HTMLFormElement;
   const pw = document.getElementById('login-pw') as HTMLInputElement;
+  const submit = document.getElementById('login-submit') as HTMLButtonElement;
   const err = document.getElementById('login-err') as HTMLElement;
+  const google = document.getElementById('login-google') as HTMLAnchorElement;
+  const divider = document.getElementById('login-divider') as HTMLElement;
+
+  // Older servers omit `methods`; they only support the password.
+  const methods = auth.methods ?? { password: true, google: false };
+  google.classList.toggle('hidden', !methods.google);
+  divider.classList.toggle('hidden', !(methods.google && methods.password));
+  pw.classList.toggle('hidden', !methods.password);
+  submit.classList.toggle('hidden', !methods.password);
+
+  const oauthError = new URLSearchParams(location.search).get('error');
+  if (oauthError === 'forbidden') err.textContent = "This Google account isn't authorized.";
+  else if (oauthError === 'login') err.textContent = 'Google sign-in failed — please try again.';
+
   overlay.classList.remove('hidden');
-  pw.focus();
+  if (methods.password) pw.focus();
   form.onsubmit = async (e) => {
     e.preventDefault();
     err.textContent = '';
@@ -317,9 +332,9 @@ function wireLogout(show: boolean): void {
 }
 
 async function init(): Promise<void> {
-  const auth = await me().catch(() => ({ required: false, authed: true }));
+  const auth = await me().catch((): AuthState => ({ required: false, authed: true }));
   if (auth.required && !auth.authed) {
-    showLogin();
+    showLogin(auth);
     return;
   }
   wireLogout(auth.required && auth.authed);

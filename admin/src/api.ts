@@ -27,7 +27,12 @@ export async function deleteItem(id: string): Promise<void> {
   await fetch(`/api/delete/${id}`);
 }
 
-export interface AuthState { required: boolean; authed: boolean; }
+export interface AuthState {
+  required: boolean;
+  authed: boolean;
+  /** Which login methods the server offers (older servers omit this). */
+  methods?: { password: boolean; google: boolean };
+}
 export async function me(): Promise<AuthState> {
   const res = await fetch('/api/me');
   return (await res.json()) as AuthState;

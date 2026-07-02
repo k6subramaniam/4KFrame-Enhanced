@@ -64,11 +64,26 @@ show a one-time "not trusted" warning. To use your own (trusted) certificate, se
 HTTPS is required for PWA install and to serve the display as a publicly reachable Cast
 receiver.
 
-### Admin password
-Set **`FRAME_ADMIN_PASSWORD`** to lock the admin: the admin UI and all management/control
-APIs then require that password (one login per browser, 30-day cookie), while the **display
-and TVs need no login**. Strongly recommended for any **public/cloud** deployment — without it
-the admin and your library are open to anyone with the URL. On a private LAN it's optional.
+### Admin authentication
+Locking the admin protects the admin UI and all management/control APIs (one login per
+browser, 30-day cookie), while the **display and TVs need no login**. Strongly recommended
+for any **public/cloud** deployment — without it the admin and your library are open to
+anyone with the URL. On a private LAN it's optional. Two methods, usable together:
+
+- **Google sign-in (recommended):** set **`FRAME_ADMIN_EMAILS`** to a comma-separated list
+  of allowed Google accounts (e.g. `FRAME_ADMIN_EMAILS=you@gmail.com`). Reuses the same
+  `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` as the Google Photos integration — just add
+  `<frame-url>/api/auth/google/callback` as a second **Authorized redirect URI** on that
+  OAuth client (e.g. `https://4k.up.railway.app/api/auth/google/callback`). The admin login
+  screen then shows **"Sign in with Google"**; only allowlisted, verified emails get in.
+- **Password fallback:** set **`FRAME_ADMIN_PASSWORD`** to also (or only) allow a shared
+  password. Keeping it set alongside Google sign-in means a misconfigured OAuth client
+  can't lock you out; unset it to make Google sign-in the only way in.
+
+Optional: `FRAME_AUTH_SECRET` pins the cookie-signing secret (otherwise it's derived from
+the password, or auto-generated and persisted in the data volume), and
+`FRAME_ADMIN_GOOGLE_REDIRECT_URI` overrides the sign-in callback URL if the frame runs
+behind a proxy that rewrites `Host`.
 
 ### Runtime dependencies
 - **ffmpeg** (in the Docker image) — video posters & transcoding. Videos that aren't already
