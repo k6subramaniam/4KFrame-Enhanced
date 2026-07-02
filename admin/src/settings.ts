@@ -80,6 +80,7 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload): P
   const motion = data.motion ?? 'off';
   const smartFraming = (data.smartFraming ?? 'false') === 'true';
   const qr = (data.showQr ?? 'true') === 'true';
+  const videoMuted = (data.videoMuted ?? 'false') === 'true';
   const aspectLabels: Record<string, string> = { auto: 'Auto', '16:9': '16:9', '9:16': '9:16 ↕', '4:3': '4:3', '3:4': '3:4 ↕', '1:1': '1:1', '21:9': '21:9' };
   const motionLabels: Record<string, string> = { off: 'Off', zoom: 'Zoom', pan: 'Pan', zoompan: 'Zoom + Pan' };
   const transition = data.transition ?? 'fade.glsl';
@@ -144,6 +145,16 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload): P
       ])}
       <div class="muted" style="margin-top:.4rem">When available, face metadata keeps people near the center of cropped photos and video posters. Manual zoom or pan overrides it.</div>`,
       isPanelOpen('zoom-pan', panelState),
+    ),
+    panel(
+      'video-audio',
+      'Video Audio',
+      `${seg('videoMuted', [
+        { label: '🔊 Sound on', value: 'false', active: !videoMuted },
+        { label: '🔇 Muted', value: 'true', active: videoMuted },
+      ])}
+      <div class="muted" style="margin-top:.4rem">Plays video sound through the TV. Applies live to the video that's showing.</div>`,
+      isPanelOpen('video-audio', panelState),
     ),
     panel(
       'qr-code',

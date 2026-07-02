@@ -46,6 +46,14 @@ test('fromApiData prefers explicit fillMode, supports legacy frameFill, validate
   assert.equal(fromApiData(base, { fillMode: 'stretch' }).fillMode, 'stretch');
 });
 
+test('video sound defaults on (through the TV) and round-trips', () => {
+  const base = defaultConfig();
+  assert.equal(base.videoMuted, false);
+  assert.equal(fromApiData(base, { videoMuted: 'true' }).videoMuted, true);
+  assert.equal(fromApiData({ ...base, videoMuted: true }, { videoMuted: 'false' }).videoMuted, false);
+  assert.equal(toApiData({ ...base, videoMuted: true }).videoMuted, 'true');
+});
+
 test('zoom/pan are clamped and motion is validated', () => {
   const base = defaultConfig();
   assert.equal(fromApiData(base, { zoom: '1.5' }).zoom, 1.5);

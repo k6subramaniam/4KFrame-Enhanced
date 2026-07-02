@@ -159,7 +159,7 @@ export function defaultConfig(): FrameConfig {
     frameHeight: 2160,
     showInfo: true,
     showQr: true,
-    videoMuted: true,
+    videoMuted: false, // video sound plays through the TV; mute from the admin/display controls
     videoLoop: true,
     googlePhotos: {
       connected: false,

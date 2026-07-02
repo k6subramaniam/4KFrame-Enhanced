@@ -139,7 +139,17 @@ async function renderVideo(item: MediaItem): Promise<void> {
   video.onerror = () => handleVideoError(item);
   video.src = `/photos/${item.file}`;
   video.classList.add('visible');
-  try { await video.play(); } catch { /* autoplay may require muted; already muted */ }
+  try {
+    await video.play();
+  } catch {
+    // Browser tabs may block unmuted autoplay until a user gesture (Cast receivers on a TV
+    // allow it). Fall back to muted playback instead of freezing; the 🔊 control unmutes.
+    if (!video.muted) {
+      video.muted = true;
+      setStatus('Video sound blocked by the browser — open Controls and tap 🔊 to unmute.');
+      try { await video.play(); } catch { /* decode errors handled by onerror */ }
+    }
+  }
   setCaption([item], config);
 }
 
@@ -218,6 +228,8 @@ function hideVideo(): void {
 async function rerender(): Promise<void> {
   stopMotion();
   if (showingVideo && lastVideoItem) {
+    video.muted = config.videoMuted;
+    video.loop = config.videoLoop || holding;
     layoutVideo(lastVideoItem);
     return;
   }
