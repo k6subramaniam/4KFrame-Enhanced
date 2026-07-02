@@ -23,6 +23,28 @@
       #qr img { width: 100%; height: 100%; display: block; }
       #status { bottom: 3vh; left: 4vw; font-size: 2.4vh; opacity: 0.6; }
       .hidden { display: none !important; }
+
+      /* --- Frame Controls (open/close overlay; revealed on pointer activity) --- */
+      body.ui-active { cursor: default; }
+      #controls { position: absolute; right: 3vh; bottom: 3vh; z-index: 10;
+        font-family: system-ui, sans-serif; color: #fff; cursor: default;
+        opacity: 0; pointer-events: none; transition: opacity .25s ease; }
+      body.ui-active #controls, #controls.open { opacity: 1; pointer-events: auto; }
+      #controls button { font: inherit; color: #fff; background: rgba(20,22,28,.82);
+        border: 1px solid rgba(255,255,255,.18); border-radius: .6em; padding: .5em .9em;
+        cursor: pointer; min-width: 2.6em; min-height: 2.6em; font-size: 2.2vh; }
+      #controls button:hover, #controls button:focus-visible { border-color: #4c8dff; outline: none; }
+      #controls button.active { border-color: #4c8dff; color: #4c8dff; }
+      #controls-open { box-shadow: 0 .3em 1.2em rgba(0,0,0,.5); }
+      #control-panel { display: none; margin-top: .6em; background: rgba(12,14,18,.9);
+        border: 1px solid rgba(255,255,255,.15); border-radius: 1em; padding: 1em;
+        box-shadow: 0 .6em 2.4em rgba(0,0,0,.6); backdrop-filter: blur(6px); }
+      #controls.open #controls-open { display: none; }
+      #controls.open #control-panel { display: block; }
+      #control-panel .panel-head { display: flex; align-items: center; justify-content: space-between;
+        gap: 1.5em; margin-bottom: .8em; font-size: 2.2vh; font-weight: 600; }
+      #control-panel .panel-row { display: flex; gap: .5em; margin-bottom: .6em; }
+      #control-panel .gesture-hint { font-size: 1.7vh; opacity: .65; margin: .2em 0 0; }
     </style>
   </head>
   <body>
@@ -34,6 +56,26 @@
       <div id="caption" class="overlay hidden"></div>
       <div id="qr" class="overlay hidden"><img alt="Scan to manage" /></div>
       <div id="status" class="overlay">Connecting…</div>
+      <div id="controls" data-control>
+        <button id="controls-open" type="button" aria-controls="control-panel" aria-expanded="false">☰ Controls</button>
+        <div id="control-panel" role="group" aria-label="Frame controls">
+          <div class="panel-head"><span>Frame Controls</span>
+            <button id="controls-close" type="button" aria-label="Close controls">✕</button>
+          </div>
+          <div class="panel-row">
+            <button id="c-prev" title="Previous">⏮</button>
+            <button id="c-play" title="Play / Pause">⏸</button>
+            <button id="c-next" title="Next">⏭</button>
+            <button id="c-mute" title="Mute / unmute video sound">🔊</button>
+          </div>
+          <div class="panel-row">
+            <button id="c-zoom-out" title="Zoom out">−</button>
+            <button id="c-zoom-reset" title="Reset zoom">1×</button>
+            <button id="c-zoom-in" title="Zoom in">+</button>
+          </div>
+          <p class="gesture-hint">Double-tap to zoom · drag to pan</p>
+        </div>
+      </div>
     </div>
     <!-- Load the Cast receiver framework only on Chromecast/Android TV (CrKey) devices, so
          regular TV browsers never block on an external dependency. The receiver bridge in

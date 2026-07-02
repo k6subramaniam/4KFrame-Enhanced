@@ -15,6 +15,7 @@ import { GLRenderer } from './gl.js';
 import { compose, contentRect } from './compositor.js';
 import { applyOverlays, setCaption, setStatus } from './overlays.js';
 import { initCastReceiver } from './cast.js';
+import { attachMediaGestures } from './gestures.js';
 
 const canvas = document.getElementById('gl') as HTMLCanvasElement;
 const video = document.getElementById('video') as HTMLVideoElement;
@@ -187,6 +188,12 @@ function layoutVideo(item: MediaItem): void {
   video.style.objectFit = config.fillMode === 'cover' ? 'cover' : config.fillMode === 'stretch' ? 'fill' : 'contain';
   video.style.objectPosition = smartVideoObjectPosition(item, r);
 
+  // Manual zoom/pan on videos: scale the element and shift so pan ±1 reaches the edges.
+  const z = config.zoom;
+  video.style.transform = z > 1.001
+    ? `scale(${z}) translate(${(-config.panX * (z - 1) * 50 / z).toFixed(3)}%, ${(-config.panY * (z - 1) * 50 / z).toFixed(3)}%)`
+    : '';
+
   // Opaque backdrop hides the stale photo behind any bars; blurred poster in blur mode.
   videoBg.classList.add('visible');
   if (config.fillMode === 'blur' && item.poster) {
@@ -231,8 +238,11 @@ function statusText(): string {
 function handleEvent(event: FrameEvent): void {
   switch (event.type) {
     case 'config':
-      config = event.config;
+      // A config echo can arrive while a local gesture is still ahead of the server;
+      // keep the not-yet-broadcast local changes on top so the image doesn't jump back.
+      config = pendingPatch ? { ...event.config, ...pendingPatch } : event.config;
       applyOverlays(config);
+      syncControlsUi();
       rerender().catch((err) => console.error(err));
       break;
     case 'show':
@@ -252,6 +262,7 @@ function handleEvent(event: FrameEvent): void {
         motionAnim?.play();
       }
       setStatus(statusText());
+      syncControlsUi();
       break;
     case 'hold':
       holding = event.holding;
@@ -276,6 +287,101 @@ function clampN(v: number, lo: number, hi: number): number {
 }
 function adjustConfig(patch: Partial<FrameConfig>): void {
   sendControl({ type: 'config', patch });
+}
+
+// --- Local config changes (gestures / on-screen controls) ---
+// Apply immediately for responsive feedback, rerender on the next frame, and debounce the
+// WebSocket broadcast so a drag doesn't flood the server with per-frame patches.
+
+let pendingPatch: Partial<FrameConfig> | null = null;
+let sendTimer: ReturnType<typeof setTimeout> | undefined;
+let rerenderQueued = false;
+
+function scheduleRerender(): void {
+  if (rerenderQueued) return;
+  rerenderQueued = true;
+  requestAnimationFrame(() => {
+    rerenderQueued = false;
+    rerender().catch((err) => console.error(err));
+  });
+}
+
+function applyLocal(patch: Partial<FrameConfig>): void {
+  config = { ...config, ...patch };
+  pendingPatch = { ...(pendingPatch ?? {}), ...patch };
+  scheduleRerender();
+  syncControlsUi();
+  clearTimeout(sendTimer);
+  sendTimer = setTimeout(() => {
+    if (pendingPatch) adjustConfig(pendingPatch);
+    pendingPatch = null;
+  }, 200);
+}
+
+function setZoomPan(zoom: number, panX: number, panY: number): void {
+  applyLocal({
+    zoom: clampN(zoom, 1, 3),
+    panX: clampN(panX, -1, 1),
+    panY: clampN(panY, -1, 1),
+  });
+}
+
+function resetZoomPan(): void {
+  applyLocal({ zoom: 1, panX: 0, panY: 0 });
+}
+
+// --- Frame Controls overlay (open/close panel + reveal-on-activity) ---
+
+const controlsRoot = document.getElementById('controls');
+let uiTimer: ReturnType<typeof setTimeout> | undefined;
+
+function setControlsOpen(open: boolean): void {
+  controlsRoot?.classList.toggle('open', open);
+  document.getElementById('controls-open')?.setAttribute('aria-expanded', String(open));
+}
+
+function controlsOpenNow(): boolean {
+  return controlsRoot?.classList.contains('open') ?? false;
+}
+
+/** Any pointer activity reveals the controls toggle (the display normally hides the cursor). */
+function showUi(): void {
+  document.body.classList.add('ui-active');
+  clearTimeout(uiTimer);
+  uiTimer = setTimeout(() => document.body.classList.remove('ui-active'), 3500);
+}
+
+function syncControlsUi(): void {
+  const play = document.getElementById('c-play');
+  if (play) play.textContent = paused ? '▶' : '⏸';
+  const mute = document.getElementById('c-mute');
+  if (mute) {
+    mute.textContent = config.videoMuted ? '🔇' : '🔊';
+    mute.classList.toggle('active', config.videoMuted);
+  }
+  const reset = document.getElementById('c-zoom-reset');
+  if (reset) reset.textContent = config.zoom > 1.01 ? `${config.zoom.toFixed(1)}×` : '1×';
+}
+
+function wireControls(): void {
+  const byId = (id: string) => document.getElementById(id);
+  byId('controls-open')?.addEventListener('click', () => setControlsOpen(true));
+  byId('controls-close')?.addEventListener('click', () => setControlsOpen(false));
+  byId('c-prev')?.addEventListener('click', () => sendControl({ type: 'previous' }));
+  byId('c-next')?.addEventListener('click', () => sendControl({ type: 'next' }));
+  byId('c-play')?.addEventListener('click', () => sendControl({ type: paused ? 'resume' : 'pause' }));
+  byId('c-mute')?.addEventListener('click', () => applyLocal({ videoMuted: !config.videoMuted }));
+  byId('c-zoom-in')?.addEventListener('click', () => setZoomPan(config.zoom + 0.25, config.panX, config.panY));
+  byId('c-zoom-out')?.addEventListener('click', () => {
+    const z = config.zoom - 0.25;
+    if (z <= 1.001) resetZoomPan();
+    else setZoomPan(z, config.panX, config.panY);
+  });
+  byId('c-zoom-reset')?.addEventListener('click', () => resetZoomPan());
+
+  window.addEventListener('pointermove', showUi);
+  window.addEventListener('pointerdown', showUi);
+  syncControlsUi();
 }
 
 function wireRemote(): void {
@@ -320,6 +426,10 @@ function wireRemote(): void {
       case 'MediaPlayPause': case 'MediaPlay': case 'MediaPause':
         sendControl({ type: paused ? 'resume' : 'pause' });
         break;
+      case 'Escape':
+        if (!controlsOpenNow()) return;
+        setControlsOpen(false);
+        break;
       default:
         return;
     }
@@ -351,5 +461,12 @@ window.addEventListener('resize', () => {
 });
 
 wireRemote();
+wireControls();
+attachMediaGestures(document.getElementById('app') as HTMLElement, {
+  getZoom: () => config.zoom,
+  getPan: () => ({ panX: config.panX, panY: config.panY }),
+  setZoomPan,
+  resetZoomPan,
+});
 initCastReceiver(sendControl);
 connect();
