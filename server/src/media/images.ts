@@ -22,7 +22,11 @@ export const PREVIEW_MAX = 858;
 export const THUMB_MAX = 352;
 
 // Lazy, cached handle to sharp so a missing binary never crashes startup.
-type SharpModule = typeof import('sharp');
+// `typeof import('sharp')` is a module-namespace type and is never callable per TS
+// semantics, even though sharp's default export is a callable factory function — use a
+// type-only default import to get the correct (callable) type instead.
+import type SharpFactory from 'sharp';
+type SharpModule = typeof SharpFactory;
 let sharpPromise: Promise<SharpModule | null> | undefined;
 async function loadSharp(): Promise<SharpModule | null> {
   if (!sharpPromise) {
