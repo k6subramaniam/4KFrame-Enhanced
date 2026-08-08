@@ -34,6 +34,9 @@ const selectedIds = new Set<string>();
 const selectedMediaIds = new Set<string>();
 let activeItem: MediaItem | undefined;
 let activeConfig: Partial<FrameConfig> = {};
+// Which item id "Now playing crop" last rendered — guards the 'show' handler below against
+// rebuilding it (and restarting any playing video) when the live item hasn't actually changed.
+let renderedCropPreviewItemId: string | undefined;
 let phonePreview: HTMLVideoElement | null = null;
 let phonePreviewItemId: string | null = null;
 let phonePreviewUserPaused = false;
@@ -299,11 +302,18 @@ function wirePlaybackPreviewSocket(): void {
           void renderPhonePreview();
           // Keep "Now playing crop" tracking what's actually live on the display — it
           // otherwise only re-renders on the next full refresh() (upload/delete/etc.),
-          // which can leave it showing a stale item while the slideshow moves on.
-          renderActiveCropPreview(settingsRoot, activeItem, activeConfig, async (patch) => {
-            Object.assign(activeConfig, patch);
-            await updateData(patch);
-          });
+          // which can leave it showing a stale item while the slideshow moves on. But
+          // 'show' can re-fire for the *same* item (e.g. a single-item rotation re-selects
+          // it every photoPeriod tick), so only rebuild when the item actually changed —
+          // otherwise a playing video would restart from frame 0 on every tick, and any
+          // in-progress drag/pinch gesture on the preview would get cut off for nothing.
+          if (activeItem?.id !== renderedCropPreviewItemId) {
+            renderedCropPreviewItemId = activeItem?.id;
+            renderActiveCropPreview(settingsRoot, activeItem, activeConfig, async (patch) => {
+              Object.assign(activeConfig, patch);
+              await updateData(patch);
+            });
+          }
         }
       } catch {
         // Ignore malformed/non-frame messages.
@@ -449,6 +459,7 @@ async function refresh(): Promise<void> {
   const current = await fetchCurrent();
   activeItem = items.find((item) => current.current.includes(item.file));
   activeConfig = current.data as Partial<FrameConfig>;
+  renderedCropPreviewItemId = activeItem?.id;
   await renderSettings(settingsRoot, current.data, activeItem);
   await renderPhonePreview();
   updatePlaybackLabels();
