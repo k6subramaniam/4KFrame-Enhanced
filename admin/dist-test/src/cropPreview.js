@@ -66,6 +66,28 @@ export function renderCropPreview(item, config) {
     <div class="muted crop-preview-help">Drag to pan · pinch, wheel, double tap, or buttons to zoom · arrow buttons pan · sliders below remain available for keyboard users.</div>
   </div>`;
 }
+/** Markup for the "Now playing crop" section, including its heading. */
+export function activeCropPreviewSectionHtml(item, config) {
+    return `<section class="active-crop-preview" aria-label="Current media zoom and pan controls">
+      <h2>Now playing crop</h2>
+      ${renderCropPreview(item, config)}
+    </section>`;
+}
+/**
+ * Rebuild and rewire just the "Now playing crop" section within an already-rendered
+ * settings root, without touching the other panels. Used to keep the preview tracking
+ * the item actually playing on the display (e.g. on a WebSocket 'show' event) without
+ * the flicker/cost of a full renderSettings() pass.
+ */
+export function renderActiveCropPreview(settingsRoot, item, config, updateConfig) {
+    const section = settingsRoot.querySelector('.active-crop-preview');
+    if (!section)
+        return;
+    section.outerHTML = activeCropPreviewSectionHtml(item, config);
+    const refreshed = settingsRoot.querySelector('.active-crop-preview');
+    if (refreshed)
+        wireCropPreview(refreshed, updateConfig);
+}
 export function wireCropPreview(root, updateConfig) {
     const previews = [...root.querySelectorAll('[data-crop-preview]')];
     const syncers = previews.map((preview) => wireSingleCropPreview(preview, updateConfig));
@@ -270,13 +292,21 @@ function wireSingleCropPreview(preview, updateConfig) {
         if (next)
             void patch(next);
     });
+    // Browsers don't reliably start (or resume) autoplay on a <video> that was inserted, or
+    // becomes visible, while its ancestor is display:none — the attempt at insertion time is
+    // dropped and never retried. Explicitly (re)issue play() once the frame is actually shown.
+    const ensurePlaying = () => {
+        if (media instanceof HTMLVideoElement)
+            media.play().catch(() => { });
+    };
     // The preview frame is 0x0 while the Controls sheet is closed (display:none), so the
     // initial applyTransform() below fits the media into a 1px box — effectively invisible.
     // Re-measure whenever the frame's real size becomes available (sheet opens, window
     // resizes, orientation changes) instead of only on the next zoom/pan interaction.
     if (typeof ResizeObserver !== 'undefined') {
-        new ResizeObserver(() => applyTransform()).observe(frame);
+        new ResizeObserver(() => { applyTransform(); ensurePlaying(); }).observe(frame);
     }
+    ensurePlaying();
     syncConfig({});
     return syncConfig;
 }

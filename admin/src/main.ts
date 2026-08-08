@@ -12,8 +12,10 @@ import {
   me, login, logout, type AuthState,
   patchMediaTransforms,
   setItemsEnabled, deleteItems, playSequence,
+  updateData,
 } from './api.js';
 import { renderSettings } from './settings.js';
+import { renderActiveCropPreview } from './cropPreview.js';
 import { initCastSender, isCastReady, castControl, toggleCastSession } from './cast-sender.js';
 import { createMultiActivationRecognizer } from './multiActivation.js';
 import { playbackNavigationState, VIDEO_SEEK_SECONDS } from './playbackState.js';
@@ -295,6 +297,13 @@ function wirePlaybackPreviewSocket(): void {
         } else if (msg.type === 'show') {
           activeItem = msg.items.find((item) => item.kind === 'video') ?? msg.items[0];
           void renderPhonePreview();
+          // Keep "Now playing crop" tracking what's actually live on the display — it
+          // otherwise only re-renders on the next full refresh() (upload/delete/etc.),
+          // which can leave it showing a stale item while the slideshow moves on.
+          renderActiveCropPreview(settingsRoot, activeItem, activeConfig, async (patch) => {
+            Object.assign(activeConfig, patch);
+            await updateData(patch);
+          });
         }
       } catch {
         // Ignore malformed/non-frame messages.

@@ -19,7 +19,7 @@ import {
   pollPickerSession,
   importPickerSession,
 } from './api.js';
-import { renderCropPreview, wireCropPreview } from './cropPreview.js';
+import { activeCropPreviewSectionHtml, wireCropPreview } from './cropPreview.js';
 
 const SETTINGS_PANEL_STATE_KEY = '4kframe.settings.panels';
 const MOBILE_PANEL_QUERY = '(max-width: 700px)';
@@ -88,10 +88,7 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload, cu
   const smartFraming = sharedById.get('smart-framing');
 
   root.innerHTML = [
-    `<section class="active-crop-preview" aria-label="Current media zoom and pan controls">
-      <h2>Now playing crop</h2>
-      ${renderCropPreview(currentItem, data)}
-    </section>`,
+    activeCropPreviewSectionHtml(currentItem, data),
     renderSharedPanel('scaling'),
     zoomPan ? settingsPanel(
       'zoom-pan',
