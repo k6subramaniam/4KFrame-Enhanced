@@ -68,10 +68,13 @@ export function renderCropPreview(item: MediaItem | undefined, config: CropPrevi
   const frameAspect = String(config.frameAspect ?? 'auto');
   const safeAspect = (FRAME_ASPECTS as readonly string[]).includes(frameAspect) ? frameAspect as FrameAspect : 'auto';
   const ratio = aspectRatio(safeAspect) ?? (16 / 9);
+  const media = item.kind === 'video'
+    ? `<video class="crop-preview-media" data-crop-media src="/photos/${item.file}" muted loop autoplay playsinline></video>`
+    : `<img class="crop-preview-media" data-crop-media src="${thumbUrl(item)}" alt="Current media crop preview" />`;
   return `<div class="crop-preview" data-crop-preview data-media-width="${item.width}" data-media-height="${item.height}" data-fill-mode="${fillMode}" data-zoom="${zoom}" data-pan-x="${panX}" data-pan-y="${panY}" style="--crop-aspect:${ratio}">
     <div class="crop-preview-frame" data-crop-frame tabindex="0" role="application" aria-label="Crop preview: drag to pan; pinch, wheel, or double tap to zoom in; triple tap to zoom out">
       <img class="crop-preview-bg" src="${thumbUrl(item)}" alt="" aria-hidden="true"${fillMode === 'blur' ? '' : ' hidden'} />
-      <img class="crop-preview-media" data-crop-media src="${thumbUrl(item)}" alt="Current media crop preview" />
+      ${media}
       <div class="crop-preview-mask" aria-hidden="true"></div>
     </div>
     <div class="row crop-preview-actions" role="toolbar" aria-label="Crop preview controls">
@@ -101,7 +104,7 @@ function wireSingleCropPreview(
   updateConfig: (patch: Record<string, string>) => void | Promise<void>,
 ): CropPreviewUpdater {
   const frame = preview.querySelector<HTMLElement>('[data-crop-frame]');
-  const media = preview.querySelector<HTMLElement>('[data-crop-media]');
+  const media = preview.querySelector<HTMLImageElement | HTMLVideoElement>('[data-crop-media]');
   if (!frame || !media) return () => {};
   const background = preview.querySelector<HTMLElement>('.crop-preview-bg');
 
@@ -304,6 +307,14 @@ function wireSingleCropPreview(
     const next = cropPreviewControlPatch(action, { zoom, panX, panY });
     if (next) void patch(next);
   });
+
+  // The preview frame is 0x0 while the Controls sheet is closed (display:none), so the
+  // initial applyTransform() below fits the media into a 1px box — effectively invisible.
+  // Re-measure whenever the frame's real size becomes available (sheet opens, window
+  // resizes, orientation changes) instead of only on the next zoom/pan interaction.
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(() => applyTransform()).observe(frame);
+  }
 
   syncConfig({});
   return syncConfig;

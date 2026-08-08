@@ -92,11 +92,6 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload, cu
       <h2>Now playing crop</h2>
       ${renderCropPreview(currentItem, data)}
     </section>`,
-    renderSharedPanel('photo-period'),
-    renderSharedPanel('playback-media'),
-    renderSharedPanel('video-audio'),
-    renderSharedPanel('effects'),
-    renderSharedPanel('screen-orientation'),
     renderSharedPanel('scaling'),
     zoomPan ? settingsPanel(
       'zoom-pan',
@@ -107,6 +102,11 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload, cu
       ${smartFraming ? `<h3 class="panel-subheading">Smart face framing</h3>${smartFraming.render(data)}` : ''}`,
       isOpen('zoom-pan'),
     ) : '',
+    renderSharedPanel('photo-period'),
+    renderSharedPanel('playback-media'),
+    renderSharedPanel('video-audio'),
+    renderSharedPanel('effects'),
+    renderSharedPanel('screen-orientation'),
     renderSharedPanel('qr-code'),
     settingsPanel(
       'storage',
