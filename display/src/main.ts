@@ -335,6 +335,9 @@ function statusText(): string {
 // server keeps rotating underneath (and keeps sending 'show'), so ending a cast is just a
 // matter of hiding the overlay and repainting the last real payload.
 
+/** Upper bound for the local expiry timer — mirrors the server's MAX_TTL_SEC (300s). */
+const LIVE_CAST_MAX_MS = 300_000;
+
 const liveCastImg = document.getElementById('live-cast-img') as HTMLImageElement | null;
 const liveCastVideo = document.getElementById('live-cast-video') as HTMLVideoElement | null;
 let liveCastActive: LiveCastInfo | null = null;
@@ -346,6 +349,15 @@ function startLiveCast(info: LiveCastInfo): void {
   clearTimeout(liveCastTimer);
   liveCastActive = info;
   stopMotion();
+
+  // If the bytes can't be fetched (expired, replaced, auth), bail out immediately rather
+  // than holding a black layer over the slideshow for the rest of the window.
+  const onMediaError = (): void => {
+    setStatus('Live cast unavailable');
+    endLiveCast();
+  };
+  liveCastImg.onerror = onMediaError;
+  liveCastVideo.onerror = onMediaError;
 
   const url = `/api/live-cast/${encodeURIComponent(info.id)}`;
   if (info.kind === 'video') {
@@ -363,8 +375,11 @@ function startLiveCast(info: LiveCastInfo): void {
   }
 
   // Don't rely solely on the server's liveCastEnd broadcast — a display that reconnects
-  // mid-window would otherwise stay stuck on an expired cast.
-  liveCastTimer = setTimeout(endLiveCast, Math.max(0, info.expiresAt - Date.now()));
+  // mid-window would otherwise stay stuck on an expired cast. `expiresAt` is server-clock
+  // based, so clamp it: a skewed display clock could otherwise dismiss instantly or
+  // schedule past setTimeout's 32-bit ceiling (which also fires immediately).
+  const remaining = Math.min(LIVE_CAST_MAX_MS, Math.max(0, info.expiresAt - Date.now()));
+  liveCastTimer = setTimeout(endLiveCast, remaining);
 }
 
 function endLiveCast(): void {
@@ -372,8 +387,10 @@ function endLiveCast(): void {
   clearTimeout(liveCastTimer);
   liveCastActive = null;
   for (const el of [liveCastImg, liveCastVideo]) {
-    el?.classList.remove('visible');
-    el?.removeAttribute('src');
+    if (!el) continue;
+    el.onerror = null; // detach first: clearing src can itself fire `error`
+    el.classList.remove('visible');
+    el.removeAttribute('src');
   }
   liveCastVideo?.pause();
   if (lastShowEvent) renderItems(lastShowEvent.items, false).catch((err) => console.error(err));
@@ -642,12 +659,6 @@ function setControlsOpen(open: boolean, revealController = true): void {
   if (revealController) registerPublicControlActivity();
 }
 
-function configValueForControl(key: PublicConfigKey): string {
-  const value = config[key];
-  if (key === 'zoom' || key === 'panX' || key === 'panY') return String(Math.round(Number(value) * 100));
-  return String(value);
-}
-
 function publicConfigPatch(key: string | undefined, rawValue: string): Partial<FrameConfig> | null {
   if (!key) return null;
   const publicKey = key as PublicConfigKey;
@@ -862,27 +873,9 @@ function syncPublicControls(): void {
     button.setAttribute('aria-pressed', String(paused));
   });
 
-  publicControls?.querySelectorAll<HTMLSelectElement>('select[data-config-key]').forEach((select) => {
-    const key = select.dataset.configKey as PublicConfigKey | undefined;
-    if (key) select.value = configValueForControl(key);
-  });
-
-  publicControls?.querySelectorAll<HTMLInputElement>('input[type=range][data-config-key]').forEach((input) => {
-    const key = input.dataset.configKey as PublicConfigKey | undefined;
-    if (key) input.value = configValueForControl(key);
-  });
-
-  publicControls?.querySelectorAll<HTMLElement>('[role=group][data-config-key]').forEach((group) => {
-    const key = group.dataset.configKey as PublicConfigKey | undefined;
-    if (!key) return;
-    const currentValue = configValueForControl(key);
-    group.querySelectorAll<HTMLButtonElement>('button[data-value]').forEach((button) => {
-      const selected = button.dataset.value === currentValue;
-      button.classList.toggle('is-selected', selected);
-      button.setAttribute('aria-pressed', String(selected));
-    });
-  });
-
+  // The shared settings panel renders its own controls and wires them via
+  // wireSharedSettings(); it emits `data-range-key`, never `data-config-key`, so there is
+  // nothing here to sync by hand. Values re-sync when renderPublicSettings() re-renders.
   if (publicControls) syncQuickActions(publicControls);
 }
 
@@ -917,35 +910,8 @@ function wirePublicControls(): void {
     wireQuickActions(publicControls);
   }
 
-  publicControlsRoot.querySelectorAll<HTMLSelectElement>('select[data-config-key]').forEach((select) => {
-    select.addEventListener('change', () => {
-      registerPublicControlActivity();
-      const patch = publicConfigPatch(select.dataset.configKey, select.value);
-      if (patch) adjustConfig(patch);
-    });
-  });
-
-  publicControlsRoot.querySelectorAll<HTMLInputElement>('input[type=range][data-config-key]').forEach((input) => {
-    input.addEventListener('change', () => {
-      registerPublicControlActivity();
-      const patch = publicConfigPatch(input.dataset.configKey, input.value);
-      if (patch) adjustConfig(patch);
-    });
-  });
-
-  publicControlsRoot.querySelectorAll<HTMLElement>('[role=group][data-config-key]').forEach((group) => {
-    const key = group.dataset.configKey;
-    if (!key) return;
-    group.querySelectorAll<HTMLButtonElement>('button[data-value]').forEach((button) => {
-      button.addEventListener('click', () => {
-        registerPublicControlActivity();
-        const value = button.dataset.value;
-        if (value === undefined) return;
-        const patch = publicConfigPatch(key, value);
-        if (patch) adjustConfig(patch);
-      });
-    });
-  });
+  // Selects/ranges/groups inside the shared settings panel are wired by
+  // wireSharedSettings() (called from renderSharedSettings), so they need no wiring here.
 
   window.addEventListener('pointermove', registerPublicControlActivity, { passive: true });
   window.addEventListener('pointerdown', registerPublicControlActivity, { passive: true });

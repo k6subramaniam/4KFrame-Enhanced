@@ -101,6 +101,9 @@
       .crop-preview-empty { border:1px dashed var(--line); border-radius:.75rem; padding:1rem; text-align:center; }
       .crop-preview-actions { flex-wrap:wrap; }
       .crop-preview-actions button { min-width:2.5rem; }
+      /* The sheet is a fixed-height flex column with overflow:hidden at every width, so
+         #settings must scroll at every width too — not only on phones. */
+      #settings { min-height:0; overflow:auto; -webkit-overflow-scrolling:touch; }
       #live-cast { border:1px solid var(--line); border-radius:.8rem; padding:.75rem 1rem; margin-bottom:1rem; }
       #live-cast .row { gap:.6rem; }
       #live-cast-active { margin-top:.6rem; }
@@ -138,7 +141,7 @@
         .playback-description { align-self:center; }
         .playback-controls { flex-direction:column; justify-self:end; }
         #playback button { padding:.45rem .7rem; }
-        #settings { order:2; min-height:0; overflow:auto; -webkit-overflow-scrolling:touch; padding-bottom:.25rem; }
+        #settings { order:2; padding-bottom:.25rem; }
         #settings .panel:last-child { margin-bottom:0; }
         .grid { grid-template-columns:repeat(auto-fill,minmax(112px,1fr)); gap:.5rem; }
         #bulk-toolbar { position:sticky; top:4.25rem; z-index:15; align-items:stretch; }
@@ -180,7 +183,9 @@
         <div class="row">
           <button id="live-cast-btn" type="button">📷 Live Cast</button>
           <span class="muted">Show a photo or short clip on the frame now — not saved to the library.</span>
-          <input id="live-cast-file" type="file" accept="image/*,video/*" capture hidden />
+          <!-- No `capture` attribute: it would force the camera and hide the gallery,
+               so an already-taken photo could not be chosen. -->
+          <input id="live-cast-file" type="file" accept="image/*,video/*" hidden />
         </div>
         <div class="row hidden" id="live-cast-active">
           <span class="muted" id="live-cast-status"></span>
@@ -236,6 +241,7 @@
         <button id="media-flip-horizontal" type="button" aria-label="Flip selected media horizontally">↔ Flip horizontal</button>
         <button id="media-flip-vertical" type="button" aria-label="Flip selected media vertically">↕ Flip vertical</button>
         <span id="media-selection-count" class="muted">Current item</span>
+      </div>
       <div id="bulk-toolbar" role="toolbar" aria-label="Selected media actions">
         <span id="selection-count" aria-live="polite">0 selected</span>
         <button id="select-visible" type="button">Select all visible</button>
