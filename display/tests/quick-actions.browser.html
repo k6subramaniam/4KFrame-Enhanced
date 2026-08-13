@@ -2,32 +2,34 @@
 <html lang="en">
   <head><meta charset="UTF-8"><title>RUNNING</title></head>
   <body>
-    <canvas id="gl"></canvas>
-    <div id="video-bg"></div>
-    <video id="video"></video>
-    <div id="clock"></div>
-    <div id="caption"></div>
-    <div id="qr"><img alt=""></div>
-    <div id="status"></div>
-    <section id="public-controls">
-      <nav id="public-bottom-controller"></nav>
-      <button id="public-controls-toggle" type="button">Controls</button>
-      <aside id="public-control-panel">
-        <section id="public-zoom-pan-section" data-collapsed="false">
-          <button id="public-zoom-pan-toggle" type="button" aria-controls="public-zoom-pan-body" aria-expanded="true">Zoom &amp; Pan</button>
-          <div id="public-zoom-pan-body">
-            <button id="public-zoom-in" type="button" data-quick-action="zoom-in">Zoom In</button>
-            <button id="public-zoom-out" type="button" data-quick-action="zoom-out">Zoom Out</button>
-            <button id="public-pan-up" type="button" data-quick-action="pan-up">Pan Up</button>
-            <button id="public-pan-down" type="button" data-quick-action="pan-down">Pan Down</button>
-            <button id="public-pan-left" type="button" data-quick-action="pan-left">Pan Left</button>
-            <button id="public-pan-right" type="button" data-quick-action="pan-right">Pan Right</button>
-          </div>
-        </section>
-        <button id="unknown-action" type="button" data-quick-action="not-an-action">Unknown</button>
-        <div id="public-settings"></div>
-      </aside>
-    </section>
+    <div id="app">
+      <canvas id="gl"></canvas>
+      <div id="video-bg"></div>
+      <video id="video"></video>
+      <div id="clock"></div>
+      <div id="caption"></div>
+      <div id="qr"><img alt=""></div>
+      <div id="status"></div>
+      <section id="public-controls">
+        <nav id="public-bottom-controller"></nav>
+        <button id="public-controls-toggle" type="button">Controls</button>
+        <aside id="public-control-panel">
+          <section id="public-zoom-pan-section" data-collapsed="false">
+            <button id="public-zoom-pan-toggle" type="button" aria-controls="public-zoom-pan-body" aria-expanded="true">Zoom &amp; Pan</button>
+            <div id="public-zoom-pan-body">
+              <button id="public-zoom-in" type="button" data-quick-action="zoom-in">Zoom In</button>
+              <button id="public-zoom-out" type="button" data-quick-action="zoom-out">Zoom Out</button>
+              <button id="public-pan-up" type="button" data-quick-action="pan-up">Pan Up</button>
+              <button id="public-pan-down" type="button" data-quick-action="pan-down">Pan Down</button>
+              <button id="public-pan-left" type="button" data-quick-action="pan-left">Pan Left</button>
+              <button id="public-pan-right" type="button" data-quick-action="pan-right">Pan Right</button>
+            </div>
+          </section>
+          <button id="unknown-action" type="button" data-quick-action="not-an-action">Unknown</button>
+          <div id="public-settings"></div>
+        </aside>
+      </section>
+    </div>
     <pre id="result"></pre>
     <script type="module">
       import { defaultConfig } from '@4kframe/shared';
