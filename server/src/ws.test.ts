@@ -8,6 +8,9 @@ import fastifyWebsocket from '@fastify/websocket';
 import type { FrameEvent, MediaItem, WsMessage } from '@4kframe/shared';
 
 process.env.FRAME_ADMIN_PASSWORD = 'test-ws-password';
+// Most tests in this file exercise the legacy unauthenticated display-receiver path.
+// Production deployments now require an explicit opt-in for that behavior.
+process.env.FRAME_ALLOW_UNAUTHENTICATED_DISPLAY_CONTROLS = '1';
 process.env.FRAME_DATA_DIR = await mkdtemp(path.join(tmpdir(), '4kframe-ws-test-'));
 
 const [{ registerWs }, store, slideshow, { hub }, auth, shared] = await Promise.all([

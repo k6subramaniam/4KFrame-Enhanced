@@ -50,8 +50,9 @@ type PublicConfigPatch = Partial<Pick<FrameConfig,
 >>;
 
 const ADMIN_CONTROL_TYPES = new Set<ControlMessage['type']>(['progress', 'cast', 'playSequence', 'clearQueue', 'config']);
-// These display-local controls remain public so unauthenticated display receivers can
-// keep working when the admin password gates the admin UI and management APIs.
+// Display-local controls are available without a login only when auth is disabled (private
+// LAN mode), or when the operator explicitly opts back into the legacy behavior. This keeps
+// a public/cloud deployment from exposing remote-control and config mutations over /ws.
 const PUBLIC_DISPLAY_CONTROL_TYPES = new Set<ControlMessage['type']>([
   'next', 'previous', 'pause', 'resume', 'seek', 'publicConfig', 'playbackState',
 ]);
@@ -72,6 +73,10 @@ const PUBLIC_CONFIG_KEYS = new Set([
   'screenFlipHorizontal',
   'screenFlipVertical',
 ]);
+
+function allowUnauthenticatedDisplayControls(): boolean {
+  return process.env.FRAME_ALLOW_UNAUTHENTICATED_DISPLAY_CONTROLS === '1';
+}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -190,6 +195,14 @@ async function applyConfigPatch(patch: Partial<FrameConfig>): Promise<void> {
 export async function registerWs(app: FastifyInstance): Promise<void> {
   app.get('/ws', { websocket: true }, (socket, req) => {
     const authed = auth.isAuthed(req.headers.cookie);
+
+    // With auth enabled, the WebSocket carries private frame state and can mutate playback.
+    // Secure cloud/public deployments by default; operators with a trusted unauthenticated
+    // receiver can deliberately restore the legacy behavior through the env flag.
+    if (auth.authRequired() && !authed && !allowUnauthenticatedDisplayControls()) {
+      socket.close(1008, 'authentication required');
+      return;
+    }
 
     const send = (event: FrameEvent) => {
       if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(event));
