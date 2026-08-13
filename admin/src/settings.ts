@@ -4,6 +4,7 @@
  */
 
 import {
+  GOOGLE_PHOTOS_RETENTION_PRESETS,
   SHARED_SETTINGS_PANELS,
   settingsPanel,
   wireSharedSettings,
@@ -18,6 +19,7 @@ import {
   createPickerSession,
   pollPickerSession,
   importPickerSession,
+  setGooglePhotosRetentionDays,
 } from './api.js';
 import { activeCropPreviewSectionHtml, wireCropPreview } from './cropPreview.js';
 
@@ -48,6 +50,37 @@ function isPanelOpen(id: string, state: PanelState): boolean {
   if (typeof state[id] === 'boolean') return state[id];
   const mobile = window.matchMedia?.(MOBILE_PANEL_QUERY).matches ?? false;
   return !(mobile && MOBILE_DEFAULT_COLLAPSED.has(id));
+}
+
+function retentionLabel(days: number): string {
+  if (days === 0) return 'Keep forever';
+  if (days === 365) return '1 year';
+  return `${days} days`;
+}
+
+/** Retention selector for the Google Photos panel (how long imported copies are kept). */
+function retentionField(data: ApiDataPayload): string {
+  const current = Number(data.googlePhotosRetentionDays ?? 30);
+  const options = GOOGLE_PHOTOS_RETENTION_PRESETS
+    .map((days) => `<option value="${days}"${days === current ? ' selected' : ''}>${retentionLabel(days)}</option>`)
+    .join('');
+  return `<h3 class="panel-subheading">Keep imported photos for</h3>
+    <label class="field">Retention
+      <select id="gp-retention">${options}</select>
+    </label>
+    <div class="muted" style="margin-top:.4rem">Imported photos and videos are copied onto this
+      frame, then deleted automatically after this long. Google only allows the frame to download
+      a picked item once, so expired items must be picked again to come back.</div>`;
+}
+
+/** Wire the retention selector. Separate from wireSharedSettings — this field is admin-only. */
+function wireRetention(root: HTMLElement, data: ApiDataPayload): void {
+  const select = root.querySelector<HTMLSelectElement>('#gp-retention');
+  select?.addEventListener('change', () => {
+    const days = Number(select.value);
+    data.googlePhotosRetentionDays = String(days); // keep local copy in sync, as updateConfig does
+    setGooglePhotosRetentionDays(days).catch(() => {});
+  });
 }
 
 export async function renderSettings(root: HTMLElement, data: ApiDataPayload, currentItem?: MediaItem): Promise<void> {
@@ -121,7 +154,8 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload, cu
           + '<div class="muted" id="gpick-status"></div>'
         : gp.configured
           ? '<div class="row"><a href="/api/google/auth"><button>Connect Google Photos</button></a></div>'
-          : '<div class="muted">Set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET on the server to enable Google Photos import.</div>'}`,
+          : '<div class="muted">Set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET on the server to enable Google Photos import.</div>'}
+      ${gp.configured ? retentionField(data) : ''}`,
       isOpen('google-photos'),
     ),
   ].join('');
@@ -145,6 +179,7 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload, cu
   wireSharedSettings(root, adapter);
   syncCropPreview = wireCropPreview(root, updateConfig);
   wirePickerImport(root);
+  wireRetention(root, data);
 }
 
 /**

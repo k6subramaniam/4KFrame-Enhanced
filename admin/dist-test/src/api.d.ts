@@ -5,6 +5,15 @@ export declare function fetchCurrent(): Promise<CurrentResponse>;
 export declare function fetchData(): Promise<ApiDataPayload>;
 export declare function sendControl(message: ControlMessage): Promise<boolean>;
 export declare function updateData(patch: Record<string, string>): Promise<void>;
+/**
+ * Set the Google Photos retention window (days; 0 = keep forever).
+ *
+ * Deliberately bypasses `updateData()`: that helper tries the WebSocket `publicConfig`
+ * channel first and resolves as soon as the message is *sent*, but the server drops any
+ * patch containing a key outside its `PUBLIC_CONFIG_KEYS` allowlist — so this field would
+ * be silently discarded and never fall through to REST.
+ */
+export declare function setGooglePhotosRetentionDays(days: number): Promise<void>;
 export declare function castItem(id: string): Promise<void>;
 export declare function deleteItem(id: string): Promise<void>;
 export declare function setItemsEnabled(ids: string[], enabled: boolean): Promise<void>;

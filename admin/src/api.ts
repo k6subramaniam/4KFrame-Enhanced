@@ -146,6 +146,18 @@ export async function updateData(patch: Record<string, string>): Promise<void> {
   await fetch(`/api/data?${qs}`);
 }
 
+/**
+ * Set the Google Photos retention window (days; 0 = keep forever).
+ *
+ * Deliberately bypasses `updateData()`: that helper tries the WebSocket `publicConfig`
+ * channel first and resolves as soon as the message is *sent*, but the server drops any
+ * patch containing a key outside its `PUBLIC_CONFIG_KEYS` allowlist — so this field would
+ * be silently discarded and never fall through to REST.
+ */
+export async function setGooglePhotosRetentionDays(days: number): Promise<void> {
+  await fetch(`/api/data?googlePhotosRetentionDays=${encodeURIComponent(String(days))}`);
+}
+
 export async function castItem(id: string): Promise<void> {
   await fetch(`/api/cast/${id}`);
 }

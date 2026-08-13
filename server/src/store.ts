@@ -43,8 +43,15 @@ export async function initStore(): Promise<void> {
   try {
     const raw = await fs.readFile(DB_FILE, 'utf8');
     const parsed = JSON.parse(raw) as Partial<DbDocument>;
+    // The spread is shallow, so nested objects persisted before a new sub-field existed
+    // would replace the defaults wholesale and drop it — merge those explicitly.
     doc = {
-      config: { ...defaultConfig(), ...(parsed.config ?? {}) },
+      config: {
+        ...defaultConfig(),
+        ...(parsed.config ?? {}),
+        googlePhotos: { ...defaultConfig().googlePhotos, ...(parsed.config?.googlePhotos ?? {}) },
+        overlays: { ...defaultConfig().overlays, ...(parsed.config?.overlays ?? {}) },
+      },
       items: (parsed.items ?? []).map((item) => ({ ...item, ...normalizeTransform(item) })),
       order: parsed.order ?? (parsed.items ?? []).map((i) => i.id),
       googleTokens: parsed.googleTokens,

@@ -28,6 +28,7 @@ import { initStore, getConfig, setConfig } from './store.js';
 import { registerApi } from './routes/api.js';
 import { registerWs } from './ws.js';
 import { startSlideshow } from './slideshow.js';
+import { startRetentionSweep } from './retention.js';
 import { imageProcessingAvailable } from './media/images.js';
 import { videoProcessingAvailable } from './media/video.js';
 import { setFaceDetector } from './media/faceMatch.js';
@@ -141,6 +142,7 @@ async function main(): Promise<void> {
   }
 
   startSlideshow();
+  startRetentionSweep();
 
   if (!(await imageProcessingAvailable())) {
     httpApp.log.warn('sharp not available — image variants will not be generated (originals served as-is).');

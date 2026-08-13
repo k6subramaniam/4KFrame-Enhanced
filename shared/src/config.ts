@@ -42,7 +42,18 @@ export interface GooglePhotosConfig {
   account?: string;
   /** Epoch ms of the last successful Picker import. */
   lastImportAt?: number;
+  /**
+   * Days an imported `google-photos` item is kept before the server sweep deletes it.
+   * `0` keeps them forever (same "0 disables" convention as {@link FrameConfig.photoPeriod}).
+   */
+  retentionDays: number;
 }
+
+/** Retention windows offered in the admin UI. `0` = keep forever. */
+export const GOOGLE_PHOTOS_RETENTION_PRESETS = [0, 7, 14, 30, 60, 90, 180, 365] as const;
+
+/** Fallback used wherever a persisted config predates {@link GooglePhotosConfig.retentionDays}. */
+export const DEFAULT_GOOGLE_PHOTOS_RETENTION_DAYS = 30;
 
 /**
  * How a photo/video is fitted to the frame when its aspect differs from the screen:
@@ -188,6 +199,7 @@ export function defaultConfig(): FrameConfig {
     videoLoop: true,
     googlePhotos: {
       connected: false,
+      retentionDays: DEFAULT_GOOGLE_PHOTOS_RETENTION_DAYS,
     },
     overlays: { clock: false, weather: false, caption: false },
     lanAddress: '',
@@ -227,10 +239,21 @@ export function toApiData(c: FrameConfig): ApiDataPayload {
     videoMuted: String(c.videoAudioMode === 'muted'),
     videoAudioMode: c.videoAudioMode,
     videoLoop: String(c.videoLoop),
+    // Only the retention window round-trips through the flat payload; the rest of
+    // `googlePhotos` (connected/account/lastImportAt) is served by /api/google/status.
+    googlePhotosRetentionDays: String(googlePhotosRetentionDays(c)),
     lanAddress: c.lanAddress,
     storageUsed: String(c.storageUsed),
     storageFree: String(c.storageFree),
   };
+}
+
+/** Retention window for a config, tolerating older persisted configs that predate the field. */
+export function googlePhotosRetentionDays(c: FrameConfig): number {
+  const days = c.googlePhotos?.retentionDays;
+  return typeof days === 'number' && Number.isFinite(days) && days >= 0
+    ? days
+    : DEFAULT_GOOGLE_PHOTOS_RETENTION_DAYS;
 }
 
 const truthy = (v: string | undefined, fallback: boolean) =>
@@ -303,6 +326,13 @@ export function fromApiData(current: FrameConfig, patch: ApiDataPayload): FrameC
     videoMuted: videoAudioMode === 'muted',
     videoAudioMode,
     videoLoop: truthy(patch.videoLoop, current.videoLoop),
+    googlePhotos: {
+      ...current.googlePhotos,
+      retentionDays: Math.max(
+        0,
+        Math.round(num(patch.googlePhotosRetentionDays, googlePhotosRetentionDays(current))),
+      ),
+    },
     lanAddress: patch.lanAddress ?? current.lanAddress,
   };
 }

@@ -151,6 +151,17 @@ test('authenticated requests can read protected display state and raw media', as
   });
 });
 
+test('google photos retention round-trips through /api/data', async () => {
+  await withApp(undefined, async (app) => {
+    const set = await app.inject({ method: 'GET', url: '/api/data?googlePhotosRetentionDays=45' });
+    assert.equal(set.statusCode, 200);
+    assert.equal((set.json() as Record<string, string>).googlePhotosRetentionDays, '45');
+
+    const read = await app.inject({ method: 'GET', url: '/api/data' });
+    assert.equal((read.json() as Record<string, string>).googlePhotosRetentionDays, '45');
+  });
+});
+
 test('health and login/session endpoints stay open when auth is required', async () => {
   await withApp('test-index-password', async (app) => {
     const health = await app.inject({ method: 'GET', url: '/api/health' });

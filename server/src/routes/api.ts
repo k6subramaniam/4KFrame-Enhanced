@@ -18,7 +18,7 @@ import {
   type DisplayTransform,
   type SetItemsEnabledPayload,
 } from '@4kframe/shared';
-import { MEDIA_DIR, DATA_DIR } from '../env.js';
+import { DATA_DIR } from '../env.js';
 import {
   getConfig,
   setConfig,
@@ -35,6 +35,7 @@ import { ingestImage } from '../media/images.js';
 import { ingestVideo } from '../media/video.js';
 import { enqueueTranscode } from '../media/transcode.js';
 import { enqueueFaceDetection } from '../media/faceJob.js';
+import { deleteAssets, deleteAssetsForItems } from '../media/assets.js';
 import {
   cast, next, previous, progress, getCurrent, refresh,
   setPaused, setHold, isPaused, isHolding,
@@ -445,27 +446,6 @@ async function redirectToAsset(
   return reply.redirect(`/photos/${item[field]}`);
 }
 
-async function deleteAssets(item: MediaItem): Promise<void> {
-  const names = new Set([item.file, item.preview, item.thumb, item.poster].filter(Boolean) as string[]);
-  await Promise.all(
-    [...names].map((n) => fs.rm(path.join(MEDIA_DIR, n)).catch(() => undefined)),
-  );
-}
-
-async function deleteAssetsForItems(items: MediaItem[]): Promise<{ id: string; asset: string; error: string }[]> {
-  const failures: { id: string; asset: string; error: string }[] = [];
-  await Promise.all(items.flatMap((item) => {
-    const names = new Set([item.file, item.preview, item.thumb, item.poster].filter(Boolean) as string[]);
-    return [...names].map(async (asset) => {
-      try {
-        await fs.rm(path.join(MEDIA_DIR, asset), { force: true });
-      } catch (error) {
-        failures.push({ id: item.id, asset, error: (error as Error).message });
-      }
-    });
-  }));
-  return failures;
-}
 
 function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
   return new Promise((resolve, reject) => {

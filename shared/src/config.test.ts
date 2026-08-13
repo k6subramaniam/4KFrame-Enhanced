@@ -1,6 +1,43 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { aspectRatio, defaultConfig, toApiData, fromApiData, type FrameConfig } from './config.js';
+import {
+  aspectRatio,
+  defaultConfig,
+  toApiData,
+  fromApiData,
+  googlePhotosRetentionDays,
+  type FrameConfig,
+} from './config.js';
+
+test('google photos retention defaults to 30 days and round-trips', () => {
+  const base = defaultConfig();
+  assert.equal(base.googlePhotos.retentionDays, 30);
+  assert.equal(toApiData(base).googlePhotosRetentionDays, '30');
+
+  const patched = fromApiData(base, { googlePhotosRetentionDays: '90' });
+  assert.equal(patched.googlePhotos.retentionDays, 90);
+  assert.equal(toApiData(patched).googlePhotosRetentionDays, '90');
+
+  // 0 means "keep forever" and must survive the round trip rather than falling back.
+  assert.equal(fromApiData(base, { googlePhotosRetentionDays: '0' }).googlePhotos.retentionDays, 0);
+
+  // Patching retention must not clobber the rest of the nested googlePhotos object.
+  const connected = { ...base, googlePhotos: { ...base.googlePhotos, connected: true, account: 'a@b.c' } };
+  const after = fromApiData(connected, { googlePhotosRetentionDays: '7' });
+  assert.equal(after.googlePhotos.connected, true);
+  assert.equal(after.googlePhotos.account, 'a@b.c');
+  assert.equal(after.googlePhotos.retentionDays, 7);
+});
+
+test('invalid retention values fall back instead of expiring everything', () => {
+  const base = defaultConfig();
+  assert.equal(fromApiData(base, { googlePhotosRetentionDays: 'soon' }).googlePhotos.retentionDays, 30);
+  assert.equal(fromApiData(base, { googlePhotosRetentionDays: '-5' }).googlePhotos.retentionDays, 0);
+
+  // A config persisted before the field existed reads as the default, not 0/undefined.
+  const legacy = { ...base, googlePhotos: { connected: true } } as unknown as typeof base;
+  assert.equal(googlePhotosRetentionDays(legacy), 30);
+});
 
 test('aspectRatio maps presets and returns null for auto', () => {
   assert.equal(aspectRatio('auto'), null);
