@@ -40,6 +40,9 @@
       #qr { bottom: 3vh; right: 3vw; width: 12vh; height: 12vh; background: #fff; padding: 1vh; border-radius: 1vh; }
       #qr img { width: 100%; height: 100%; display: block; }
       #status { bottom: 3vh; left: 4vw; font-size: 2.4vh; opacity: 0.6; }
+      .live-cast-layer { position: absolute; inset: 0; width: 100%; height: 100%;
+        object-fit: contain; background: #000; z-index: 15; display: none; }
+      .live-cast-layer.visible { display: block; }
       #public-controls { position: absolute; inset: 0; z-index: 20; pointer-events: none;
         font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #fff; }
       #public-controls, #public-controls * { box-sizing: border-box; }
@@ -176,6 +179,10 @@
       <canvas id="gl"></canvas>
       <div id="video-bg"></div>
       <video id="video" autoplay playsinline></video>
+      <!-- Live Cast overlay: a one-off push from the phone, shown above the slideshow but
+           below #public-controls (z-index 20) so the controls stay usable. -->
+      <img id="live-cast-img" class="live-cast-layer" alt="" />
+      <video id="live-cast-video" class="live-cast-layer" muted playsinline loop></video>
       <div id="clock" class="overlay hidden"></div>
       <div id="caption" class="overlay hidden"></div>
       <div id="qr" class="overlay hidden"><img alt="Scan to manage" /></div>

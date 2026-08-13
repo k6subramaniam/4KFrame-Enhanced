@@ -29,6 +29,7 @@ import { registerApi } from './routes/api.js';
 import { registerWs } from './ws.js';
 import { startSlideshow } from './slideshow.js';
 import { startRetentionSweep } from './retention.js';
+import { registerLiveCast } from './routes/liveCast.js';
 import { imageProcessingAvailable } from './media/images.js';
 import { videoProcessingAvailable } from './media/video.js';
 import { setFaceDetector } from './media/faceMatch.js';
@@ -88,6 +89,9 @@ export async function buildApp(https?: TlsMaterial): Promise<FastifyInstance> {
   }
 
   await registerApi(app);
+  // After registerApi so its `/api/*` auth hook (registered on the same root instance)
+  // already covers these routes.
+  await registerLiveCast(app);
   await registerWs(app);
 
   // Health check.

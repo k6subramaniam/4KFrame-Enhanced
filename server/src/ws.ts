@@ -29,6 +29,7 @@ import { getConfig, setConfig } from './store.js';
 import { cast, next, previous, progress, getCurrent, refresh, setPaused, playSequence, clearQueue } from './slideshow.js';
 import * as auth from './auth.js';
 import { clearDisplayPlayback, reportDisplayPlayback } from './displayPlayback.js';
+import { getActiveLiveCast } from './liveCast.js';
 
 type PublicConfigPatch = Partial<Pick<FrameConfig,
   | 'photoPeriod'
@@ -201,6 +202,10 @@ export async function registerWs(app: FastifyInstance): Promise<void> {
     send({ type: 'config', config: getConfig() });
     const current = getCurrent();
     if (current.length) send({ type: 'show', items: current, interactive: false });
+    // A display joining mid-cast should show it immediately rather than waiting for the
+    // next push (it would otherwise miss the one-off broadcast entirely).
+    const liveCast = getActiveLiveCast();
+    if (liveCast) send({ type: 'liveCast', liveCast });
 
     socket.on('message', async (raw: Buffer) => {
       let msg: ControlMessage;

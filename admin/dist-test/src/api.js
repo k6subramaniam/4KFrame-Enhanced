@@ -154,6 +154,30 @@ export async function updateData(patch) {
 export async function setGooglePhotosRetentionDays(days) {
     await fetch(`/api/data?googlePhotosRetentionDays=${encodeURIComponent(String(days))}`);
 }
+/**
+ * Push a photo/clip to show on the frame right now. The server holds it in memory only —
+ * it never joins the library or touches disk — and drops it when the TTL expires.
+ */
+export async function pushLiveCast(file, ttlSec) {
+    const kind = file.type.startsWith('video/') ? 'video' : 'photo';
+    const params = new URLSearchParams({ kind, mimeType: file.type || '' });
+    if (ttlSec)
+        params.set('ttlSec', String(ttlSec));
+    const res = await fetch(`/api/live-cast?${params.toString()}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/octet-stream' },
+        body: file,
+    });
+    if (res.status === 413)
+        throw new Error('That file is too large to live cast — try a shorter clip.');
+    if (!res.ok)
+        throw new Error(`Live cast failed (${res.status})`);
+    return (await res.json());
+}
+/** Stop the active live cast so the frame resumes its slideshow immediately. */
+export async function stopLiveCast() {
+    await fetch('/api/live-cast/stop', { method: 'POST' });
+}
 export async function castItem(id) {
     await fetch(`/api/cast/${id}`);
 }

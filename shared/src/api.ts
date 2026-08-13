@@ -162,7 +162,22 @@ export type FrameEvent =
   | { type: 'hold'; holding: boolean }
   | { type: 'queue'; queue: QueueState }
   | { type: 'seek'; itemId: string; deltaSec: number }
+  | { type: 'liveCast'; liveCast: LiveCastInfo }
+  | { type: 'liveCastEnd' }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; message: string };
+
+/**
+ * A one-off "show this right now" push from the companion app. The bytes live only in
+ * server memory under {@link LiveCastInfo.id} until `expiresAt`, and are never added to
+ * the library or written to disk — displays fetch them from `/api/live-cast/:id`.
+ */
+export interface LiveCastInfo {
+  id: string;
+  kind: MediaKind;
+  mimeType: string;
+  /** Epoch ms after which the server drops the bytes and displays resume the slideshow. */
+  expiresAt: number;
+}
 
 export type WsMessage = ControlMessage | FrameEvent;
 

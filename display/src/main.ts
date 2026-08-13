@@ -16,6 +16,7 @@ import {
   type FrameConfig,
   type FillMode,
   type FrameEvent,
+  type LiveCastInfo,
   renderSharedSettings,
   type MediaItem,
   type SettingsPatch,
@@ -329,6 +330,56 @@ function statusText(): string {
   return '';
 }
 
+// --- Live Cast overlay ---------------------------------------------------------------
+// A one-off push from the companion app, shown over the slideshow until it expires. The
+// server keeps rotating underneath (and keeps sending 'show'), so ending a cast is just a
+// matter of hiding the overlay and repainting the last real payload.
+
+const liveCastImg = document.getElementById('live-cast-img') as HTMLImageElement | null;
+const liveCastVideo = document.getElementById('live-cast-video') as HTMLVideoElement | null;
+let liveCastActive: LiveCastInfo | null = null;
+let lastShowEvent: Extract<FrameEvent, { type: 'show' }> | null = null;
+let liveCastTimer: ReturnType<typeof setTimeout> | undefined;
+
+function startLiveCast(info: LiveCastInfo): void {
+  if (!liveCastImg || !liveCastVideo) return;
+  clearTimeout(liveCastTimer);
+  liveCastActive = info;
+  stopMotion();
+
+  const url = `/api/live-cast/${encodeURIComponent(info.id)}`;
+  if (info.kind === 'video') {
+    liveCastImg.classList.remove('visible');
+    liveCastImg.removeAttribute('src');
+    liveCastVideo.src = url;
+    liveCastVideo.classList.add('visible');
+    liveCastVideo.play().catch(() => {}); // muted, so this should not be blocked
+  } else {
+    liveCastVideo.classList.remove('visible');
+    liveCastVideo.pause();
+    liveCastVideo.removeAttribute('src');
+    liveCastImg.src = url;
+    liveCastImg.classList.add('visible');
+  }
+
+  // Don't rely solely on the server's liveCastEnd broadcast — a display that reconnects
+  // mid-window would otherwise stay stuck on an expired cast.
+  liveCastTimer = setTimeout(endLiveCast, Math.max(0, info.expiresAt - Date.now()));
+}
+
+function endLiveCast(): void {
+  if (!liveCastActive) return;
+  clearTimeout(liveCastTimer);
+  liveCastActive = null;
+  for (const el of [liveCastImg, liveCastVideo]) {
+    el?.classList.remove('visible');
+    el?.removeAttribute('src');
+  }
+  liveCastVideo?.pause();
+  if (lastShowEvent) renderItems(lastShowEvent.items, false).catch((err) => console.error(err));
+  else rerender().catch((err) => console.error(err));
+}
+
 function handleEvent(event: FrameEvent): void {
   switch (event.type) {
     case 'config':
@@ -342,7 +393,16 @@ function handleEvent(event: FrameEvent): void {
       rerender().catch((err) => console.error(err));
       break;
     case 'show':
-      renderItems(event.items, event.interactive).catch((err) => console.error(err));
+      // Always remember the latest real payload, even while a live cast covers the screen,
+      // so ending the cast can repaint instantly without waiting for the next rotation.
+      lastShowEvent = event;
+      if (!liveCastActive) renderItems(event.items, event.interactive).catch((err) => console.error(err));
+      break;
+    case 'liveCast':
+      startLiveCast(event.liveCast);
+      break;
+    case 'liveCastEnd':
+      endLiveCast();
       break;
     case 'seek':
       if ('offsetSec' in event) {

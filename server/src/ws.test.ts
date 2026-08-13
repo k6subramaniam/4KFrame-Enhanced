@@ -300,3 +300,25 @@ test('unauthenticated display receivers can forward validated Cast seek commands
   const collected = await waitForCollected(messages, beforeCount + 1);
   assert.deepEqual(collected.at(-1), { type: 'seek', offsetSec: 5 });
 });
+
+test('a display connecting mid live-cast is told about it immediately', async (t) => {
+  const liveCast = await import('./liveCast.js');
+  const app = await buildApp();
+  const info = liveCast.pushLiveCast({
+    kind: 'photo',
+    mimeType: 'image/jpeg',
+    bytes: Buffer.from('live'),
+  });
+  const { ws, messages } = await connectWs(app);
+  t.after(async () => {
+    liveCast.resetLiveCastForTests();
+    ws.terminate();
+    await app.close();
+  });
+
+  // config, show, then the in-flight live cast.
+  const collected = await waitForCollected(messages, 3);
+  const event = collected.find((m) => m.type === 'liveCast');
+  assert.ok(event, `expected a liveCast replay, got ${collected.map((m) => m.type).join(', ')}`);
+  assert.equal(event?.type === 'liveCast' ? event.liveCast.id : undefined, info.id);
+});

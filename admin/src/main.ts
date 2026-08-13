@@ -13,6 +13,7 @@ import {
   patchMediaTransforms,
   setItemsEnabled, deleteItems, playSequence,
   updateData,
+  pushLiveCast, stopLiveCast,
 } from './api.js';
 import { renderSettings } from './settings.js';
 import { renderActiveCropPreview } from './cropPreview.js';
@@ -569,6 +570,61 @@ async function handleUpload(files: FileList | File[]): Promise<void> {
   }
 }
 
+/**
+ * Live Cast: push a freshly-captured photo/clip to the frame for a few seconds without it
+ * joining the library. Deliberately separate from wireUpload() (which adds to the library)
+ * and wireCast() (which casts an existing item).
+ */
+function wireLiveCast(): void {
+  const btn = document.getElementById('live-cast-btn') as HTMLButtonElement | null;
+  const input = document.getElementById('live-cast-file') as HTMLInputElement | null;
+  const activeRow = document.getElementById('live-cast-active') as HTMLElement | null;
+  const status = document.getElementById('live-cast-status') as HTMLElement | null;
+  const stop = document.getElementById('live-cast-stop') as HTMLButtonElement | null;
+  if (!btn || !input || !activeRow || !status || !stop) return;
+
+  let countdown: ReturnType<typeof setInterval> | undefined;
+
+  const clearActive = (): void => {
+    clearInterval(countdown);
+    activeRow.classList.add('hidden');
+    status.textContent = '';
+  };
+
+  const showActive = (expiresAt: number): void => {
+    clearInterval(countdown);
+    activeRow.classList.remove('hidden');
+    const tick = (): void => {
+      const left = Math.ceil((expiresAt - Date.now()) / 1000);
+      if (left <= 0) { clearActive(); return; }
+      status.textContent = `Live casting — ${left}s left`;
+    };
+    tick();
+    countdown = setInterval(tick, 1000);
+  };
+
+  btn.addEventListener('click', () => input.click());
+  input.addEventListener('change', async () => {
+    const file = input.files?.[0];
+    input.value = ''; // allow re-picking the same file
+    if (!file) return;
+    btn.disabled = true; // guard against double-submits while the push is in flight
+    try {
+      const { expiresAt } = await pushLiveCast(file);
+      showActive(expiresAt);
+    } catch (err) {
+      alert((err as Error).message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  stop.addEventListener('click', async () => {
+    await stopLiveCast().catch(() => {});
+    clearActive();
+  });
+}
+
 function wireUpload(): void {
   const drop = document.getElementById('drop') as HTMLElement;
   const file = document.getElementById('file') as HTMLInputElement;
@@ -596,6 +652,7 @@ async function start(): Promise<void> {
     wireCast();
     wireModes();
     wireUpload();
+    wireLiveCast();
     wirePlayback();
     wirePlaybackPreviewSocket();
     wireControlSheet();

@@ -14,6 +14,17 @@ export declare function updateData(patch: Record<string, string>): Promise<void>
  * be silently discarded and never fall through to REST.
  */
 export declare function setGooglePhotosRetentionDays(days: number): Promise<void>;
+export interface LiveCastPush {
+    id: string;
+    expiresAt: number;
+}
+/**
+ * Push a photo/clip to show on the frame right now. The server holds it in memory only —
+ * it never joins the library or touches disk — and drops it when the TTL expires.
+ */
+export declare function pushLiveCast(file: File, ttlSec?: number): Promise<LiveCastPush>;
+/** Stop the active live cast so the frame resumes its slideshow immediately. */
+export declare function stopLiveCast(): Promise<void>;
 export declare function castItem(id: string): Promise<void>;
 export declare function deleteItem(id: string): Promise<void>;
 export declare function setItemsEnabled(ids: string[], enabled: boolean): Promise<void>;
