@@ -185,7 +185,13 @@ export async function compose(items: MediaItem[], opts: ComposeOptions): Promise
   const valid = imgs
     .map((img, i) => (img ? { img, item: photos[i] } : null))
     .filter((pair): pair is { img: HTMLImageElement; item: MediaItem } => Boolean(pair));
-  if (valid.length === 0) return canvas;
+  // Every image failed to load (deleted file, 404, decode error). Report it via the
+  // canvas so the caller can tell "black because empty" from "black because broken",
+  // rather than silently painting a blank screen forever.
+  if (valid.length === 0) {
+    if (photos.length) canvas.dataset.mediaFailed = 'true';
+    return canvas;
+  }
 
   // Blurred-fill: a blurred copy of the primary image covers the entire screen first.
   if (opts.fillMode === 'blur') drawBlurredBackground(ctx, valid[0].img, valid[0].item, canvas.width, canvas.height);

@@ -141,6 +141,20 @@ async function renderItems(items: MediaItem[], interactive: boolean): Promise<vo
   }
   prevFrame = toFrame;
   setCaption(items, config);
+
+  // Photos that fail to load produced a silent black screen with no status and no skip —
+  // unlike videos, which already self-skip. Treat them the same way.
+  if (toFrame.dataset.mediaFailed === 'true') {
+    setStatus('Photo unavailable — skipping…');
+    const failedIds = items.map((i) => i.id).join(',');
+    window.setTimeout(() => {
+      if (lastItems?.map((i) => i.id).join(',') !== failedIds) return; // already moved on
+      setStatus(statusText());
+      if (!paused) goNext();
+    }, 2500);
+    return;
+  }
+
   // Ken Burns motion only for single photos (not dual layout), and never while paused.
   if (items.length === 1 && !paused) startMotion();
 }
@@ -220,7 +234,11 @@ function handleVideoError(item: MediaItem): void {
   setStatus('Skipping unplayable video…');
   // Delay so several bad files in a row skip calmly rather than in a tight loop.
   window.setTimeout(() => {
-    if (lastVideoItem?.id === item.id && !paused) goNext();
+    if (lastVideoItem?.id !== item.id) return;
+    // Nothing else clears the status, so it would otherwise stay burned on screen —
+    // especially when paused, where the skip below never runs.
+    setStatus(statusText());
+    if (!paused) goNext();
   }, 2500);
 }
 
@@ -622,6 +640,11 @@ function clearControlIdleTimers(): void {
 
 function showBottomController(): void {
   bottomController?.classList.remove('is-hidden', 'is-dim');
+  // The Controls pill sits at low opacity and previously only brightened on hover or
+  // focus-visible — neither of which a TV remote produces, leaving it invisible. Tie it to
+  // the same activity signal as the bottom bar. Keeping it faint when idle also avoids
+  // burning a static bright element into a panel that runs 24/7.
+  controlsToggle?.classList.add('is-active');
 }
 
 function scheduleControlIdle(): void {
@@ -631,12 +654,67 @@ function scheduleControlIdle(): void {
     if (!bottomControllerHasFocus()) bottomController.classList.add('is-dim');
   }, CONTROL_DIM_TIMEOUT_MS);
   controlHideTimer = window.setTimeout(() => {
-    if (!bottomControllerHasFocus()) bottomController.classList.add('is-hidden');
+    if (bottomControllerHasFocus()) return;
+    bottomController.classList.add('is-hidden');
+    // Also fade the Controls pill and close an abandoned panel, so a 24/7 display isn't
+    // left with static bright UI burned into it.
+    if (!publicControls?.contains(document.activeElement)) {
+      controlsToggle?.classList.remove('is-active');
+      if (publicControls && !publicControls.hidden) setControlsOpen(false, false);
+    }
   }, CONTROL_HIDE_TIMEOUT_MS);
 }
 
 function registerPublicControlActivity(): void {
   showBottomController();
+  scheduleControlIdle();
+}
+
+/**
+ * Ordered list of on-screen controls a TV remote can land on.
+ *
+ * Chromecast's browser has no built-in spatial navigation and a remote sends no Tab, so
+ * without an explicit roving-focus implementation these controls are literally unreachable
+ * from the couch.
+ */
+function focusableControls(): HTMLElement[] {
+  const roots = [bottomController, controlsToggle, publicControls].filter(Boolean) as HTMLElement[];
+  const seen = new Set<HTMLElement>();
+  const out: HTMLElement[] = [];
+  for (const root of roots) {
+    if (root.hidden || root.classList.contains('is-hidden')) continue;
+    const candidates = root.matches('button, a[href], select, input')
+      ? [root]
+      : [...root.querySelectorAll<HTMLElement>('button, a[href], select, input, [tabindex]:not([tabindex="-1"])')];
+    for (const el of candidates) {
+      if (seen.has(el)) continue;
+      if ((el as HTMLButtonElement).disabled) continue;
+      if (el.offsetParent === null) continue; // not rendered
+      seen.add(el);
+      out.push(el);
+    }
+  }
+  return out;
+}
+
+/** Move focus by `delta` within the on-screen controls. Returns false if it can't. */
+function moveControlFocus(delta: number): boolean {
+  const list = focusableControls();
+  if (!list.length) return false;
+  const current = list.indexOf(document.activeElement as HTMLElement);
+  if (current < 0) {
+    list[0].focus({ preventScroll: true });
+    return true;
+  }
+  const next = current + delta;
+  if (next < 0 || next >= list.length) return false; // let the caller decide (e.g. exit)
+  list[next].focus({ preventScroll: true });
+  return true;
+}
+
+/** Leave the control layer and hand the remote back to slideshow navigation. */
+function exitControlFocus(): void {
+  (document.activeElement as HTMLElement | null)?.blur?.();
   scheduleControlIdle();
 }
 
@@ -647,6 +725,7 @@ function isDisplayRemoteKey(key: string): boolean {
     'PageUp', 'MediaTrackPrevious', 'p', 'P',
     '+', '=', 'Add', '-', '_', 'Subtract', '0',
     'Enter', ' ', 'Spacebar', 'MediaPlayPause', 'MediaPlay', 'MediaPause',
+    'Escape', 'Backspace', 'BrowserBack', 'GoBack',
   ].includes(key);
 }
 
@@ -940,7 +1019,35 @@ function wirePublicControls(): void {
 function wireRemote(): void {
   window.addEventListener('keydown', (e) => {
     const target = e.target as HTMLElement | null;
-    if (target?.closest('#public-settings') || isPublicControlTarget(target)) return;
+    const inControls = Boolean(target?.closest('#public-settings')) || isPublicControlTarget(target);
+
+    // --- Focus is on a control: arrows rove between controls, Back/Up leaves. ---
+    if (inControls) {
+      switch (e.key) {
+        case 'ArrowRight': case 'ArrowDown':
+          if (moveControlFocus(1)) e.preventDefault();
+          registerPublicControlActivity();
+          return;
+        case 'ArrowLeft':
+          if (moveControlFocus(-1)) e.preventDefault();
+          registerPublicControlActivity();
+          return;
+        case 'ArrowUp':
+          // At the top of the list, Up returns to the slideshow rather than trapping.
+          if (!moveControlFocus(-1)) exitControlFocus();
+          e.preventDefault();
+          return;
+        case 'Escape': case 'Backspace': case 'BrowserBack': case 'GoBack':
+          // Chromecast's Back would otherwise exit the whole app.
+          exitControlFocus();
+          if (publicControls && !publicControls.hidden) setControlsOpen(false);
+          e.preventDefault();
+          return;
+        default:
+          return; // Enter/Space etc. fall through to native activation
+      }
+    }
+
     const zoomed = config.zoom > 1.01;
     switch (e.key) {
       case 'ArrowRight':
@@ -952,12 +1059,17 @@ function wireRemote(): void {
         else goPrevious();
         break;
       case 'ArrowDown':
+        // When zoomed, Down pans. Otherwise it enters the on-screen controls — the usual
+        // TV convention, and nothing is lost because Left/Right already do prev/next.
         if (zoomed) setPan(config.panX, config.panY + PAN_STEP);
-        else goNext();
+        else { registerPublicControlActivity(); moveControlFocus(1); }
         break;
       case 'ArrowUp':
         if (zoomed) setPan(config.panX, config.panY - PAN_STEP);
         else goPrevious();
+        break;
+      case 'Backspace': case 'BrowserBack': case 'GoBack':
+        if (publicControls && !publicControls.hidden) setControlsOpen(false);
         break;
       case 'PageDown': case 'MediaTrackNext': case 'n': case 'N':
         goNext();
@@ -1010,7 +1122,10 @@ function connect(): void {
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
   socket = ws;
   ws.onopen = () => {
-    setStatus('');
+    // Restore the real indicator rather than blanking it — setStatus('') used to wipe the
+    // Paused/Loop badge on every reconnect.
+    setStatus(statusText());
+    updateControlStates();
   };
   ws.onmessage = (ev) => {
     try { handleEvent(JSON.parse(ev.data) as FrameEvent); } catch { /* ignore */ }
@@ -1018,6 +1133,9 @@ function connect(): void {
   ws.onclose = () => {
     if (socket === ws) socket = null;
     setStatus('Reconnecting…');
+    // Controls send over this socket, so leaving them enabled while it's down means
+    // presses silently do nothing.
+    updateControlStates();
     setTimeout(connect, 2000);
   };
   ws.onerror = () => ws.close();

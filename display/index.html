@@ -24,6 +24,12 @@
       }
 
       html, body { margin: 0; height: 100%; background: var(--display-bg); overflow: hidden; cursor: none; }
+      /* Ten-foot UI: the on-screen controls are sized in rem, so on a 4K panel they render
+         around 12px — unreadable from a couch. Scale the root on TV-sized viewports and
+         every rem-based control grows with it, leaving the phone/tablet layout untouched. */
+      @media (min-width: 1600px) {
+        :root { font-size: clamp(16px, 0.85vw, 30px); }
+      }
       #app { position: fixed; inset: 0; overflow: hidden; }
       #gl { position: absolute; inset: 0; width: 100%; height: 100%; }
       /* Backdrop behind videos: opaque black base + optional blurred poster (blur mode). */
@@ -51,7 +57,10 @@
       #public-controls, #public-controls * { box-sizing: border-box; }
       #public-controls button, #public-controls input, #public-controls select { font: inherit; }
       #public-controls button:focus-visible, #public-controls input:focus-visible, #public-controls select:focus-visible {
-        outline: 3px solid var(--display-ring); outline-offset: 3px; box-shadow: 0 0 0 6px rgba(14,165,233,0.22);
+        /* Sized in vmin as well as px: a 3px ring is essentially invisible across a room,
+           and this is the only cue a remote user has for where focus is. */
+        outline: max(3px, 0.35vmin) solid var(--display-ring); outline-offset: max(3px, 0.3vmin);
+        box-shadow: 0 0 0 max(6px, 0.7vmin) rgba(14,165,233,0.22);
       }
       #public-bottom-controller { position: absolute; left: 50%; bottom: max(1.25rem, env(safe-area-inset-bottom));
         display: flex; align-items: center; justify-content: center; gap: 0.8rem; padding: 0.7rem;
@@ -77,6 +86,7 @@
         border-radius: 999px; padding: 0.48rem 0.72rem; color: rgba(255,255,255,0.82); background: rgba(10,10,14,0.18);
         box-shadow: 0 8px 24px rgba(0,0,0,0.22); backdrop-filter: blur(14px); opacity: 0.22; font-size: 0.86rem;
         transition: opacity 180ms ease, background 180ms ease, border-color 180ms ease, transform 180ms ease; }
+      #public-controls-toggle.is-active,
       #public-controls-toggle:hover, #public-controls-toggle:focus-visible, #public-controls-toggle[aria-expanded="true"] {
         opacity: 0.88; color: #fff; border-color: rgba(255,255,255,0.3); background: rgba(20,20,26,0.72); transform: translateY(-1px); }
       #public-control-panel { position: absolute; right: max(1rem, env(safe-area-inset-right));

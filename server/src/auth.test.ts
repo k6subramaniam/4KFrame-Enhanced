@@ -57,7 +57,12 @@ test('oauth state tokens verify and expire', () => {
   process.env.FRAME_AUTH_SECRET = 'test-secret';
   const state = issueStateToken();
   assert.equal(verifyStateToken(state), true);
-  assert.equal(verifyStateToken(state.slice(0, -1) + '0'), false);
+  // Flip the last signature character to a *different* one. Appending a fixed '0' made
+  // this flaky: when the hex signature already ended in '0' the "tampered" token was
+  // identical to the original and verified correctly (~1 run in 16).
+  const tampered = state.slice(0, -1) + (state.endsWith('0') ? '1' : '0');
+  assert.notEqual(tampered, state);
+  assert.equal(verifyStateToken(tampered), false);
   assert.equal(verifyStateToken(undefined), false);
 });
 
