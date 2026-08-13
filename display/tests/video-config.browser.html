@@ -2,20 +2,22 @@
 <html lang="en">
   <head><meta charset="UTF-8"><title>RUNNING</title></head>
   <body>
-    <canvas id="gl"></canvas>
-    <div id="video-bg"></div>
-    <video id="video" autoplay playsinline></video>
-    <div id="clock"></div>
-    <div id="caption"></div>
-    <div id="qr"><img alt=""></div>
-    <div id="status"></div>
-    <section id="public-controls">
-      <nav id="public-bottom-controller">
-        <button id="next" type="button" data-control="next">Next</button>
-      </nav>
-      <button id="public-controls-toggle" type="button">Controls</button>
-      <aside id="public-control-panel"><div id="public-settings"></div></aside>
-    </section>
+    <div id="app">
+      <canvas id="gl"></canvas>
+      <div id="video-bg"></div>
+      <video id="video" autoplay playsinline></video>
+      <div id="clock"></div>
+      <div id="caption"></div>
+      <div id="qr"><img alt=""></div>
+      <div id="status"></div>
+      <section id="public-controls">
+        <nav id="public-bottom-controller">
+          <button id="next" type="button" data-control="next">Next</button>
+        </nav>
+        <button id="public-controls-toggle" type="button">Controls</button>
+        <aside id="public-control-panel"><div id="public-settings"></div></aside>
+      </section>
+    </div>
     <pre id="result"></pre>
     <script type="module">
       import { defaultConfig } from '@4kframe/shared';
