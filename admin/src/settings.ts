@@ -22,6 +22,7 @@ import {
   setGooglePhotosRetentionDays,
 } from './api.js';
 import { activeCropPreviewSectionHtml, wireCropPreview } from './cropPreview.js';
+import { toast } from './toast.js';
 
 const SETTINGS_PANEL_STATE_KEY = '4kframe.settings.panels';
 const MOBILE_PANEL_QUERY = '(max-width: 700px)';
@@ -78,8 +79,14 @@ function wireRetention(root: HTMLElement, data: ApiDataPayload): void {
   const select = root.querySelector<HTMLSelectElement>('#gp-retention');
   select?.addEventListener('change', () => {
     const days = Number(select.value);
+    const previous = data.googlePhotosRetentionDays;
     data.googlePhotosRetentionDays = String(days); // keep local copy in sync, as updateConfig does
-    setGooglePhotosRetentionDays(days).catch(() => {});
+    setGooglePhotosRetentionDays(days).catch((err: Error) => {
+      // Revert rather than leaving a rejected setting looking applied.
+      data.googlePhotosRetentionDays = previous;
+      if (previous !== undefined) select.value = previous;
+      toast(`Could not change retention: ${err.message}`, { error: true });
+    });
   });
 }
 
@@ -119,6 +126,10 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload, cu
   const zoomPan = sharedById.get('zoom-pan');
   const motion = sharedById.get('motion');
   const smartFraming = sharedById.get('smart-framing');
+
+  // refresh() re-renders this whole panel on every favourite/rotate/upload, which would
+  // otherwise dump the user back to the top and drop keyboard focus mid-interaction.
+  const restore = captureFocusAndScroll(root);
 
   root.innerHTML = [
     activeCropPreviewSectionHtml(currentItem, data),
@@ -180,6 +191,30 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload, cu
   syncCropPreview = wireCropPreview(root, updateConfig);
   wirePickerImport(root);
   wireRetention(root, data);
+  restore();
+}
+
+/**
+ * Snapshot the scroll position and which control had focus, keyed by a stable identifier
+ * that survives the innerHTML replacement. Returns a function that puts both back.
+ */
+function captureFocusAndScroll(root: HTMLElement): () => void {
+  const scroller = root.closest<HTMLElement>('#settings') ?? root;
+  const scrollTop = scroller.scrollTop;
+  const active = document.activeElement;
+  const key = active instanceof HTMLElement && root.contains(active)
+    ? active.id || active.dataset.rangeKey || active.dataset.panelId
+      || active.closest<HTMLElement>('[data-panel-id]')?.dataset.panelId
+    : undefined;
+
+  return () => {
+    scroller.scrollTop = scrollTop;
+    if (!key) return;
+    const target = root.querySelector<HTMLElement>(
+      `#${CSS.escape(key)}, [data-range-key="${key}"], [data-panel-id="${key}"] .panel-toggle`,
+    );
+    target?.focus({ preventScroll: true });
+  };
 }
 
 /**

@@ -17,6 +17,7 @@ import {
 } from './api.js';
 import { renderSettings } from './settings.js';
 import { renderActiveCropPreview } from './cropPreview.js';
+import { toast, confirmToast } from './toast.js';
 import { initCastSender, isCastReady, castControl, toggleCastSession } from './cast-sender.js';
 import { createMultiActivationRecognizer } from './multiActivation.js';
 import { playbackNavigationState, VIDEO_SEEK_SECONDS } from './playbackState.js';
@@ -72,6 +73,18 @@ function renderGrid(): void {
   grid.innerHTML = '';
   const visibleItems = sortItems(filterPeople(items));
   renderPeopleSummary(visibleItems);
+  if (!visibleItems.length) {
+    // Distinguish "nothing uploaded yet" from "your filter hid everything" — otherwise a
+    // too-narrow people filter just looks like an empty library.
+    const empty = document.createElement('div');
+    empty.id = 'grid-empty';
+    empty.textContent = items.length
+      ? 'No media matches the current filter. Try “All media” above.'
+      : 'No photos or videos yet — drag some in, or use browse above to add your first.';
+    grid.appendChild(empty);
+    renderBulkToolbar();
+    return;
+  }
   for (const item of visibleItems) {
     const tile = document.createElement('div');
     const excluded = item.enabled === false;
@@ -108,8 +121,12 @@ function renderGrid(): void {
     });
     tile.querySelector('.incl')?.addEventListener('click', async (e) => {
       e.stopPropagation();
-      await toggleEnabled(item.id);
-      await refresh();
+      try {
+        await toggleEnabled(item.id);
+        await refresh();
+      } catch (err) {
+        toast(`Could not update Favorites: ${(err as Error).message}`, { error: true });
+      }
     });
     grid.appendChild(tile);
   }
@@ -340,30 +357,54 @@ function wirePlayback(): void {
   );
   previous?.addEventListener('click', () => previousTap.activate());
   next?.addEventListener('click', () => nextTap.activate());
-  byId('pb-play')?.addEventListener('click', async () => {
-    const p = await getPlayback().catch(() => null);
-    await setPaused(!(p?.paused)).catch(() => {});
+  const play = byId('pb-play');
+  const loop = byId('pb-loop');
+  play?.addEventListener('click', () => void withBusy(play, async () => {
+    const p = await getPlayback();
+    await setPaused(!p.paused);
     await syncPlayback();
-  });
-  byId('pb-loop')?.addEventListener('click', async () => {
-    const p = await getPlayback().catch(() => null);
-    await setHold(!(p?.holding)).catch(() => {});
+  }));
+  loop?.addEventListener('click', () => void withBusy(loop, async () => {
+    const p = await getPlayback();
+    await setHold(!p.holding);
     await syncPlayback();
-  });
+  }));
+}
+
+/**
+ * Run an async control action with its button disabled, surfacing failures instead of
+ * swallowing them. Re-entry while in flight is ignored, so a double-tap can't race two
+ * round-trips against each other.
+ */
+async function withBusy(btn: HTMLButtonElement | null, action: () => Promise<void>): Promise<void> {
+  if (btn?.disabled) return;
+  if (btn) btn.disabled = true;
+  try {
+    await action();
+  } catch (err) {
+    toast((err as Error).message || 'That action failed.', { error: true });
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 async function skipPlayback(direction: -1 | 1): Promise<void> {
-  await (direction < 0 ? skipPrev() : skipNext()).catch(() => {});
+  try {
+    await (direction < 0 ? skipPrev() : skipNext());
+  } catch (err) {
+    toast((err as Error).message || 'Could not skip.', { error: true });
+  }
   await syncPlayback();
 }
 
 async function navigatePlayback(direction: -1 | 1): Promise<void> {
-  const playback = await getPlayback().catch(() => null);
-  const state = playback ? playbackNavigationState(playback) : null;
-  if (state?.action === 'video-seek') {
-    await seekBy(direction * VIDEO_SEEK_SECONDS).catch(() => {});
-  } else {
-    await (direction < 0 ? skipPrev() : skipNext()).catch(() => {});
+  try {
+    const playback = await getPlayback();
+    const state = playbackNavigationState(playback);
+    if (state?.action === 'video-seek') await seekBy(direction * VIDEO_SEEK_SECONDS);
+    else await (direction < 0 ? skipPrev() : skipNext());
+  } catch (err) {
+    toast((err as Error).message || 'Could not change what is playing.', { error: true });
   }
   await syncPlayback();
 }
@@ -404,9 +445,14 @@ async function onTileClick(item: MediaItem): Promise<void> {
   } else if (mode === 'view') {
     window.open(`/photos/${item.file}`, '_blank');
   } else if (mode === 'delete') {
-    if (confirm('Delete this item permanently from the frame?')) {
-      await deleteItem(item.id);
-      await refresh();
+    if (await confirmToast('Delete this item permanently from the frame?', { confirmLabel: 'Delete', danger: true })) {
+      try {
+        await deleteItem(item.id);
+        await refresh();
+        toast('Item deleted.');
+      } catch (err) {
+        toast(`Delete failed: ${(err as Error).message}`, { error: true });
+      }
     }
   }
 }
@@ -484,12 +530,17 @@ function wireBulkActions(): void {
       if (successClears) selectedMediaIds.clear();
       await refresh();
     } catch (error) {
-      alert((error as Error).message);
+      toast((error as Error).message, { error: true });
     }
   };
-  document.getElementById('bulk-delete')?.addEventListener('click', () => {
+  document.getElementById('bulk-delete')?.addEventListener('click', async () => {
     const ids = [...selectedMediaIds];
-    if (ids.length && confirm(`Delete ${ids.length} selected item(s) permanently?`)) void run(() => deleteItems(ids), true);
+    if (!ids.length) return;
+    const ok = await confirmToast(`Delete ${ids.length} selected item(s) permanently?`, {
+      confirmLabel: `Delete ${ids.length}`,
+      danger: true,
+    });
+    if (ok) await run(() => deleteItems(ids), true);
   });
   document.getElementById('bulk-favorite')?.addEventListener('click', () => void run(() => setItemsEnabled([...selectedMediaIds], true)));
   document.getElementById('bulk-unfavorite')?.addEventListener('click', () => void run(() => setItemsEnabled([...selectedMediaIds], false)));
@@ -558,13 +609,15 @@ async function handleUpload(files: FileList | File[]): Promise<void> {
     const result = await upload(files, (p) => { drop.dataset.status = `Uploading ${Math.round(p * 100)}%`; });
     await refresh();
     if (result.errors?.length) {
-      alert(
-        'Some files could not be added:\n' +
-          result.errors.map((e) => `• ${e.filename || 'file'}: ${e.error}`).join('\n'),
-      );
+      for (const e of result.errors) {
+        toast(`${e.filename || 'File'} could not be added: ${e.error}`, { error: true });
+      }
+    }
+    if (result.added.length) {
+      toast(`Added ${result.added.length} item${result.added.length === 1 ? '' : 's'}.`);
     }
   } catch (err) {
-    alert(`Upload failed: ${(err as Error).message}`);
+    toast(`Upload failed: ${(err as Error).message}`, { error: true });
   } finally {
     drop.classList.remove('busy');
   }
@@ -609,13 +662,17 @@ function wireLiveCast(): void {
     input.value = ''; // allow re-picking the same file
     if (!file) return;
     btn.disabled = true; // guard against double-submits while the push is in flight
+    const previousLabel = btn.textContent;
+    btn.textContent = 'Sending…';
     try {
       const { expiresAt } = await pushLiveCast(file);
       showActive(expiresAt);
+      toast('Live casting to the frame.');
     } catch (err) {
-      alert((err as Error).message);
+      toast((err as Error).message, { error: true });
     } finally {
       btn.disabled = false;
+      btn.textContent = previousLabel;
     }
   });
 

@@ -155,7 +155,7 @@ export async function updateData(patch: Record<string, string>): Promise<void> {
  * be silently discarded and never fall through to REST.
  */
 export async function setGooglePhotosRetentionDays(days: number): Promise<void> {
-  await fetch(`/api/data?googlePhotosRetentionDays=${encodeURIComponent(String(days))}`);
+  await requestJson(`/api/data?googlePhotosRetentionDays=${encodeURIComponent(String(days))}`);
 }
 
 export interface LiveCastPush {
@@ -187,11 +187,11 @@ export async function stopLiveCast(): Promise<void> {
 }
 
 export async function castItem(id: string): Promise<void> {
-  await fetch(`/api/cast/${id}`);
+  await requestJson(`/api/cast/${id}`);
 }
 
 export async function deleteItem(id: string): Promise<void> {
-  await fetch(`/api/delete/${id}`);
+  await requestJson(`/api/delete/${id}`);
 }
 
 export async function setItemsEnabled(ids: string[], enabled: boolean): Promise<void> {
@@ -234,8 +234,10 @@ export async function logout(): Promise<void> {
   await fetch('/api/logout', { method: 'POST' });
 }
 
-export async function skipNext(): Promise<void> { await fetch('/api/next'); }
-export async function skipPrev(): Promise<void> { await fetch('/api/previous'); }
+// These go through requestJson so a 401/500 rejects instead of resolving as success —
+// otherwise a failed control silently does nothing and the UI looks like it worked.
+export async function skipNext(): Promise<void> { await requestJson('/api/next'); }
+export async function skipPrev(): Promise<void> { await requestJson('/api/previous'); }
 
 export interface Playback {
   paused: boolean;
@@ -245,23 +247,21 @@ export interface Playback {
   display: DisplayPlaybackState | null;
 }
 export async function getPlayback(): Promise<Playback> {
-  const res = await fetch('/api/playback');
-  return (await res.json()) as Playback;
+  return requestJson<Playback>('/api/playback');
 }
 export async function setPaused(paused: boolean): Promise<void> {
-  await fetch(paused ? '/api/pause' : '/api/resume');
+  await requestJson(paused ? '/api/pause' : '/api/resume');
 }
 export async function setHold(holding: boolean): Promise<void> {
-  await fetch(holding ? '/api/hold' : '/api/unhold');
+  await requestJson(holding ? '/api/hold' : '/api/unhold');
 }
 export async function seekBy(deltaSec: number): Promise<void> {
-  await fetch(`/api/seek?delta=${encodeURIComponent(deltaSec)}`);
+  await requestJson(`/api/seek?delta=${encodeURIComponent(deltaSec)}`);
 }
 
 /** Include/exclude an item from rotation; returns the new enabled state. */
 export async function toggleEnabled(id: string): Promise<boolean> {
-  const res = await fetch(`/api/toggle/${id}`);
-  const json = (await res.json()) as { enabled: boolean };
+  const json = await requestJson<{ enabled: boolean }>(`/api/toggle/${id}`);
   return json.enabled;
 }
 

@@ -152,7 +152,7 @@ export async function updateData(patch) {
  * be silently discarded and never fall through to REST.
  */
 export async function setGooglePhotosRetentionDays(days) {
-    await fetch(`/api/data?googlePhotosRetentionDays=${encodeURIComponent(String(days))}`);
+    await requestJson(`/api/data?googlePhotosRetentionDays=${encodeURIComponent(String(days))}`);
 }
 /**
  * Push a photo/clip to show on the frame right now. The server holds it in memory only —
@@ -179,10 +179,10 @@ export async function stopLiveCast() {
     await fetch('/api/live-cast/stop', { method: 'POST' });
 }
 export async function castItem(id) {
-    await fetch(`/api/cast/${id}`);
+    await requestJson(`/api/cast/${id}`);
 }
 export async function deleteItem(id) {
-    await fetch(`/api/delete/${id}`);
+    await requestJson(`/api/delete/${id}`);
 }
 export async function setItemsEnabled(ids, enabled) {
     await requestJson('/api/items/enabled', {
@@ -214,25 +214,25 @@ export async function login(password) {
 export async function logout() {
     await fetch('/api/logout', { method: 'POST' });
 }
-export async function skipNext() { await fetch('/api/next'); }
-export async function skipPrev() { await fetch('/api/previous'); }
+// These go through requestJson so a 401/500 rejects instead of resolving as success —
+// otherwise a failed control silently does nothing and the UI looks like it worked.
+export async function skipNext() { await requestJson('/api/next'); }
+export async function skipPrev() { await requestJson('/api/previous'); }
 export async function getPlayback() {
-    const res = await fetch('/api/playback');
-    return (await res.json());
+    return requestJson('/api/playback');
 }
 export async function setPaused(paused) {
-    await fetch(paused ? '/api/pause' : '/api/resume');
+    await requestJson(paused ? '/api/pause' : '/api/resume');
 }
 export async function setHold(holding) {
-    await fetch(holding ? '/api/hold' : '/api/unhold');
+    await requestJson(holding ? '/api/hold' : '/api/unhold');
 }
 export async function seekBy(deltaSec) {
-    await fetch(`/api/seek?delta=${encodeURIComponent(deltaSec)}`);
+    await requestJson(`/api/seek?delta=${encodeURIComponent(deltaSec)}`);
 }
 /** Include/exclude an item from rotation; returns the new enabled state. */
 export async function toggleEnabled(id) {
-    const res = await fetch(`/api/toggle/${id}`);
-    const json = (await res.json());
+    const json = await requestJson(`/api/toggle/${id}`);
     return json.enabled;
 }
 export async function patchMediaTransforms(ids, transform) {
