@@ -64,6 +64,9 @@ const HINTS: Record<Mode, string> = {
   delete: 'Delete mode: click to permanently remove from the frame.',
 };
 
+/** What Enter does on a tile in each mode — announced in the tile's accessible name. */
+const MODE_VERBS: Record<Mode, string> = { cast: 'cast', view: 'open', delete: 'delete' };
+
 function fmtDuration(sec: number): string {
   const s = Math.round(sec);
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -91,9 +94,14 @@ function renderGrid(): void {
     const selected = selectedMediaIds.has(item.id);
     tile.className = `tile ${mode}${excluded ? ' excluded' : ''}${selected ? ' selected' : ''}`;
     tile.tabIndex = 0;
-    tile.setAttribute('role', 'option');
-    tile.setAttribute('aria-selected', String(selected));
-    tile.setAttribute('aria-label', `${selected ? 'Selected' : 'Not selected'}: ${item.file}`);
+    // role=option requires a listbox ancestor, which #grid isn't — these behave as
+    // buttons, with selection expressed by aria-pressed.
+    tile.setAttribute('role', 'button');
+    tile.setAttribute('aria-pressed', String(selected));
+    tile.setAttribute(
+      'aria-label',
+      `${item.file}${selected ? ' (selected)' : ''} — Enter to ${MODE_VERBS[mode]}, Space to select`,
+    );
     // Videos only have an image thumb once a poster exists; otherwise show a placeholder.
     const hasImageThumb = item.kind === 'photo' || !!item.poster;
     const dur = item.kind === 'video' && item.durationSec
@@ -109,10 +117,17 @@ function renderGrid(): void {
       `<button class="select-control" type="button" aria-label="${selected ? 'Deselect' : 'Select'} ${escapeHtml(item.file)}">${selected ? '✓' : ''}</button>` +
       `<button class="incl" title="${excluded ? 'Not a Favorite — tap to add to automatic playback' : 'Favorite — participates in automatic playback'}" aria-label="${excluded ? 'Add to Favorites' : 'Remove from Favorites'}">${excluded ? '☆' : '★'}</button>`;
     tile.addEventListener('click', () => selectionMode ? toggleSelection(item.id) : onTileClick(item));
+    // Keyboard parity with pointer input: Enter performs the current mode's action
+    // (cast/view/delete), Space selects. Previously both only selected, so a keyboard
+    // user could never actually cast or delete anything.
     tile.addEventListener('keydown', (event) => {
-      if (event.key === ' ' || event.key === 'Enter') {
+      if (event.key === ' ') {
         event.preventDefault();
         toggleSelection(item.id);
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        if (selectionMode) toggleSelection(item.id);
+        else void onTileClick(item);
       }
     });
     tile.querySelector('.select-control')?.addEventListener('click', (e) => {
@@ -414,8 +429,18 @@ async function syncPlayback(): Promise<void> {
     paused: false, holding: false, itemId: null, kind: null, display: null,
   }));
   const play = document.getElementById('pb-play');
-  if (play) { play.textContent = p.paused ? '▶' : '⏸'; play.classList.toggle('active', p.paused); }
-  document.getElementById('pb-loop')?.classList.toggle('active', p.holding);
+  if (play) {
+    play.textContent = p.paused ? '▶' : '⏸';
+    play.classList.toggle('active', p.paused);
+    // The glyph alone is meaningless to a screen reader, and it flips meaning — keep the
+    // accessible name describing what pressing it will do.
+    play.setAttribute('aria-label', p.paused ? 'Resume slideshow' : 'Pause slideshow');
+  }
+  const loop = document.getElementById('pb-loop');
+  if (loop) {
+    loop.classList.toggle('active', p.holding);
+    loop.setAttribute('aria-pressed', String(p.holding));
+  }
   const nav = playbackNavigationState(p);
   const previous = document.getElementById('pb-prev') as HTMLButtonElement | null;
   const next = document.getElementById('pb-next') as HTMLButtonElement | null;

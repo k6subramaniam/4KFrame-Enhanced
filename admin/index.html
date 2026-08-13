@@ -181,7 +181,7 @@
         <button data-mode="delete">Delete</button>
       </div>
       <button id="cast-device" class="hidden" title="Cast the frame to a TV" style="margin-left:.5rem">▶ Cast device</button>
-      <button id="logout" class="hidden" title="Lock the admin" style="margin-left:.5rem">🔒</button>
+      <button id="logout" class="hidden" title="Lock the admin" aria-label="Lock the admin" style="margin-left:.5rem">🔒</button>
     </header>
     <div id="login" class="hidden">
       <form id="login-form">
@@ -216,7 +216,7 @@
       </section>
       <button id="controls-toggle" type="button" aria-controls="control-sheet" aria-expanded="false">Controls</button>
       <div id="controls-backdrop" aria-hidden="true"></div>
-      <section id="control-sheet" aria-label="Frame controls" aria-hidden="true" hidden inert>
+      <section id="control-sheet" role="dialog" aria-modal="true" aria-label="Frame controls" aria-hidden="true" hidden inert>
         <div id="control-sheet-header">
           <h2>Controls</h2>
           <button id="controls-close" type="button" aria-label="Close controls">✕</button>
@@ -224,9 +224,9 @@
         <div id="settings"></div>
         <div id="playback" class="row">
           <button id="pb-prev" title="Previous slideshow item" aria-label="Previous slideshow item">⏮</button>
-          <button id="pb-play" title="Play / Pause">⏸</button>
+          <button id="pb-play" title="Play / Pause" aria-label="Pause slideshow">⏸</button>
           <button id="pb-next" title="Next slideshow item" aria-label="Next slideshow item">⏭</button>
-          <button id="pb-loop" title="Loop the current item">🔁</button>
+          <button id="pb-loop" title="Loop the current item" aria-label="Loop the current item" aria-pressed="false">🔁</button>
           <span class="muted" style="margin-left:.25rem">Skip / pause / loop the frame</span>
         </div>
       </section>

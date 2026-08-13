@@ -49,7 +49,7 @@ export function renderCropPreview(item, config) {
         ? `<video class="crop-preview-media" data-crop-media src="/photos/${item.file}" muted loop autoplay playsinline></video>`
         : `<img class="crop-preview-media" data-crop-media src="${thumbUrl(item)}" alt="Current media crop preview" />`;
     return `<div class="crop-preview" data-crop-preview data-media-width="${item.width}" data-media-height="${item.height}" data-fill-mode="${fillMode}" data-zoom="${zoom}" data-pan-x="${panX}" data-pan-y="${panY}" style="--crop-aspect:${ratio}">
-    <div class="crop-preview-frame" data-crop-frame tabindex="0" role="application" aria-label="Crop preview: drag to pan; pinch, wheel, or double tap to zoom in; triple tap to zoom out">
+    <div class="crop-preview-frame" data-crop-frame tabindex="0" role="group" aria-label="Crop preview. Arrow keys pan, plus and minus zoom, 0 resets. Drag, pinch or double tap also work.">
       <img class="crop-preview-bg" src="${thumbUrl(item)}" alt="" aria-hidden="true"${fillMode === 'blur' ? '' : ' hidden'} />
       ${media}
       <div class="crop-preview-mask" aria-hidden="true"></div>

@@ -1,3 +1,4 @@
+const FOCUSABLE = 'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
 export function wireControlSheet(elements, initialOpen = false) {
     const { toggle = null, close = null, sheet = null, backdrop = null, body = globalThis.document?.body ?? null, document: doc = globalThis.document ?? null, } = elements;
     let controlsOpen = initialOpen;
@@ -26,6 +27,26 @@ export function wireControlSheet(elements, initialOpen = false) {
         if (ev.key === 'Escape' && controlsOpen) {
             setOpen(false);
             toggle?.focus({ preventScroll: true });
+            return;
+        }
+        // The sheet is modal (it has a backdrop and locks body scroll), so Tab must not walk
+        // behind it into the page underneath.
+        if (ev.key !== 'Tab' || !controlsOpen || !sheet)
+            return;
+        const focusable = [...sheet.querySelectorAll(FOCUSABLE)]
+            .filter((el) => !el.hasAttribute('disabled') && el.offsetParent !== null);
+        if (!focusable.length)
+            return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        const active = doc.activeElement;
+        if (ev.shiftKey && (active === first || !sheet.contains(active))) {
+            ev.preventDefault();
+            last.focus({ preventScroll: true });
+        }
+        else if (!ev.shiftKey && active === last) {
+            ev.preventDefault();
+            first.focus({ preventScroll: true });
         }
     });
     setOpen(controlsOpen);
