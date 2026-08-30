@@ -74,6 +74,15 @@ test('defaultConfig enables TV speaker video audio by default', () => {
   assert.equal(defaultConfig().videoMuted, false);
 });
 
+test('video speed defaults, round-trips, and is bounded', () => {
+  const base = defaultConfig();
+  assert.equal(base.videoSpeed, 1);
+  assert.equal(toApiData({ ...base, videoSpeed: 1.5 }).videoSpeed, '1.5');
+  assert.equal(fromApiData(base, { videoSpeed: '0.5' }).videoSpeed, 0.5);
+  assert.equal(fromApiData(base, { videoSpeed: '99' }).videoSpeed, 4);
+  assert.equal(fromApiData(base, { videoSpeed: 'invalid' }).videoSpeed, 1);
+});
+
 test('videoAudioMode serialises and parses explicit audio output choices', () => {
   const base = defaultConfig();
 

@@ -6,6 +6,7 @@ import {
   PLAYBACK_MEDIA_MODES,
   TRANSITIONS,
   VIDEO_AUDIO_MODES,
+  VIDEO_SPEED_PRESETS,
   type ApiDataPayload,
   type FrameConfig,
 } from './config.js';
@@ -263,6 +264,17 @@ export const SHARED_SETTINGS_PANELS: SettingsPanelMetadata[] = [
         active: m === mode,
       })))}
       <div class="muted" style="margin-top:.4rem">Choose TV speakers, mute videos, or play audio in this admin browser. Phone / Browser audio depends on browser autoplay permissions and may require tapping Play.</div>`;
+    },
+  },
+  {
+    id: 'video-speed',
+    title: 'Video Speed',
+    render: (config) => {
+      const speed = numeric(config, 'videoSpeed', 1);
+      return `${segmentButtons('videoSpeed', VIDEO_SPEED_PRESETS.map((value) => ({
+        label: `${value}×`, value: String(value), active: value === speed,
+      })))}
+      <div class="muted" style="margin-top:.4rem">Changes video picture and sound speed on every connected display.</div>`;
     },
   },
   {

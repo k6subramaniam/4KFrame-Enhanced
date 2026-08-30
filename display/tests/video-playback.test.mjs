@@ -17,6 +17,8 @@ test('synchronizes muted and loop properties immediately without restarting unch
     defaultMuted: true,
     volume: 0,
     loop: true,
+    playbackRate: 1,
+    defaultPlaybackRate: 1,
     play: () => {
       playCalls += 1;
       return Promise.resolve();
@@ -26,6 +28,7 @@ test('synchronizes muted and loop properties immediately without restarting unch
   syncVideoPlaybackProperties(video, {
     muted: true,
     loop: false,
+    playbackRate: 1.5,
     restartAfterUnmute: true,
     onPlaybackRejected: assert.fail,
   });
@@ -34,7 +37,22 @@ test('synchronizes muted and loop properties immediately without restarting unch
   assert.equal(video.defaultMuted, true);
   assert.equal(video.volume, 1);
   assert.equal(video.loop, false);
+  assert.equal(video.playbackRate, 1.5);
+  assert.equal(video.defaultPlaybackRate, 1.5);
   assert.equal(playCalls, 0);
+});
+
+test('video speed falls back safely and clamps hostile persisted values', () => {
+  const video = {
+    muted: true, defaultMuted: true, volume: 0, loop: false,
+    playbackRate: 1, defaultPlaybackRate: 1,
+    play: () => Promise.resolve(),
+  };
+  const options = { muted: true, loop: false, onPlaybackRejected: assert.fail };
+  syncVideoPlaybackProperties(video, { ...options, playbackRate: 99 });
+  assert.equal(video.playbackRate, 4);
+  syncVideoPlaybackProperties(video, { ...options, playbackRate: Number.NaN });
+  assert.equal(video.playbackRate, 1);
 });
 
 test('seeks active metadata-ready videos by 5 and 15 seconds with boundary clamping', () => {

@@ -204,6 +204,7 @@ function syncActiveVideoPlaybackProperties(restartAfterUnmute = false): void {
   syncVideoPlaybackProperties(video, {
     muted: config.videoAudioMode !== 'tv',
     loop: config.videoLoop || holding,
+    playbackRate: config.videoSpeed ?? 1,
     restartAfterUnmute: restartAfterUnmute && showingVideo && !paused,
     onPlaybackRejected: reportPlaybackBlocked,
   });

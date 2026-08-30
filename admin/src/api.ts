@@ -137,6 +137,14 @@ export async function sendControl(message: ControlMessage): Promise<boolean> {
 }
 
 export async function updateData(patch: Record<string, string>): Promise<void> {
+  // videoSpeed is intentionally not accepted by the unauthenticated publicConfig
+  // WebSocket message. Persist it through the authenticated REST endpoint instead;
+  // that endpoint also broadcasts the resulting config to connected displays.
+  if ('videoSpeed' in patch) {
+    const qs = new URLSearchParams(patch).toString();
+    await requestJson(`/api/data?${qs}`);
+    return;
+  }
   if ('videoAudioMode' in patch || 'videoMuted' in patch) {
     const typedPatch: Record<string, string | boolean> = { ...patch };
     if ('videoMuted' in typedPatch) typedPatch.videoMuted = typedPatch.videoMuted === 'true';
@@ -276,6 +284,17 @@ export async function patchMediaTransforms(
   });
   if (!res.ok) throw new Error((await res.json() as { error?: string }).error ?? 'transform update failed');
   return ((await res.json()) as { items: MediaItem[] }).items;
+}
+
+/** Assign app-owned names to detected faces. Images and biometric data never leave the frame. */
+export async function updateFaceLabels(id: string, labels: (string | null)[]): Promise<MediaItem> {
+  const res = await fetch(`/api/media/${encodeURIComponent(id)}/faces`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ labels }),
+  });
+  if (!res.ok) throw new Error((await res.json() as { error?: string }).error ?? 'face label update failed');
+  return ((await res.json()) as { item: MediaItem }).item;
 }
 
 export interface UploadResult {
