@@ -358,6 +358,73 @@ function wirePlaybackPreviewSocket(): void {
   window.setInterval(() => { pollPreviewPlayback().catch(() => {}); }, 1500);
 }
 
+
+function isAppleTouchDevice(): boolean {
+  return /iP(?:hone|ad|od)/.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+/**
+ * Add tactile feedback to a control.
+ *
+ * Android/compatible browsers use the Vibration API. iOS Safari does not expose
+ * navigator.vibrate(), so on Apple touch devices we layer an invisible native
+ * <input type="checkbox" switch> over the button. Safari gives trusted taps on
+ * that native switch a system haptic, then its change event forwards the action
+ * to the real button. Keyboard activation still goes directly through the button.
+ */
+function installHapticFeedback(button: HTMLButtonElement | null, durationMs = 12): void {
+  if (!button || button.dataset.hapticReady === 'true') return;
+  button.dataset.hapticReady = 'true';
+
+  button.addEventListener('click', () => {
+    try {
+      navigator.vibrate?.(durationMs);
+    } catch {
+      // Haptics are enhancement-only; never block the control action.
+    }
+  });
+
+  if (!isAppleTouchDevice()) return;
+
+  const parent = button.parentNode;
+  if (!parent) return;
+
+  const wrapper = document.createElement('span');
+  wrapper.className = 'haptic-button-target';
+  wrapper.style.cssText = 'position:relative;display:grid;min-width:0;align-self:stretch;';
+  parent.insertBefore(wrapper, button);
+  wrapper.appendChild(button);
+  button.style.width = '100%';
+
+  const switchInput = document.createElement('input');
+  switchInput.type = 'checkbox';
+  switchInput.setAttribute('switch', '');
+  switchInput.setAttribute('aria-hidden', 'true');
+  switchInput.tabIndex = -1;
+  switchInput.style.cssText = [
+    'position:absolute',
+    'inset:0',
+    'width:100%',
+    'height:100%',
+    'margin:0',
+    'opacity:0',
+    'cursor:pointer',
+    'z-index:1',
+  ].join(';');
+  wrapper.appendChild(switchInput);
+
+  const syncDisabled = (): void => {
+    switchInput.disabled = button.disabled;
+  };
+  syncDisabled();
+  new MutationObserver(syncDisabled).observe(button, { attributes: true, attributeFilter: ['disabled'] });
+
+  switchInput.addEventListener('change', () => {
+    if (!button.disabled) button.click();
+  });
+}
+
 function wirePlayback(): void {
   const byId = (id: string) => document.getElementById(id) as HTMLButtonElement | null;
   const previous = byId('pb-prev');
@@ -384,6 +451,8 @@ function wirePlayback(): void {
     await setHold(!p.holding);
     await syncPlayback();
   }));
+
+  [previous, play, next, loop, controlsClose].forEach((button) => installHapticFeedback(button));
 }
 
 /**
