@@ -146,6 +146,7 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload, cu
     renderSharedPanel('photo-period'),
     renderSharedPanel('playback-media'),
     renderSharedPanel('video-audio'),
+    renderSharedPanel('video-speed'),
     renderSharedPanel('effects'),
     renderSharedPanel('screen-orientation'),
     renderSharedPanel('qr-code'),

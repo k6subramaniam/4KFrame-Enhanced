@@ -13,6 +13,7 @@ import {
   patchMediaTransforms,
   setItemsEnabled, deleteItems, playSequence,
   updateData,
+  updateFaceLabels,
   pushLiveCast, stopLiveCast,
 } from './api.js';
 import { renderSettings } from './settings.js';
@@ -110,7 +111,7 @@ function renderGrid(): void {
       (hasImageThumb ? `<img loading="lazy" src="${thumbUrl(item)}" alt="" />` : '<div class="ph">🎞️</div>') +
       (item.kind === 'video' ? '<span class="badge">▶ video</span>' : '') +
       (item.transcoding ? '<span class="badge badge-proc">⏳ processing</span>' : '') +
-      (item.faces?.length ? `<span class="badge badge-face">☺ ${item.faces.length}</span>` : '') +
+      (item.faces?.length ? `<button type="button" class="badge badge-face face-label" title="Identify faces" aria-label="Identify ${item.faces.length} face${item.faces.length === 1 ? '' : 's'}">☺ ${item.faces.length}</button>` : '') +
       ((item.rotation || item.flipHorizontal || item.flipVertical)
         ? `<span class="badge badge-transform">${item.rotation ?? 0}°${item.flipHorizontal ? ' ↔' : ''}${item.flipVertical ? ' ↕' : ''}</span>` : '') +
       dur +
@@ -143,9 +144,32 @@ function renderGrid(): void {
         toast(`Could not update Favorites: ${(err as Error).message}`, { error: true });
       }
     });
+    tile.querySelector('.face-label')?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await identifyFaces(item);
+    });
     grid.appendChild(tile);
   }
   renderBulkToolbar();
+}
+
+async function identifyFaces(item: MediaItem): Promise<void> {
+  const faces = item.faces ?? [];
+  const labels: (string | null)[] = [];
+  for (let index = 0; index < faces.length; index += 1) {
+    const entered = window.prompt(`Name face ${index + 1} of ${faces.length} (leave blank to remove its name)`, faces[index].label ?? '');
+    if (entered === null) return;
+    labels.push(entered.trim() || null);
+  }
+  try {
+    const updated = await updateFaceLabels(item.id, labels);
+    items = items.map((candidate) => candidate.id === updated.id ? updated : candidate);
+    syncPeopleLabels();
+    renderGrid();
+    toast('Face names saved locally on this frame.');
+  } catch (error) {
+    toast(`Could not save face names: ${(error as Error).message}`, { error: true });
+  }
 }
 
 function toggleSelection(id: string): void {
@@ -303,6 +327,7 @@ async function renderPhonePreview(display: DisplayPlaybackState | null = null): 
     video.loop = Boolean(activeConfig.videoLoop);
     video.load();
   }
+  video.playbackRate = activeConfig.videoSpeed ?? 1;
   syncPhonePreviewToDisplay(display);
   if (!phonePreviewUserPaused) {
     try {

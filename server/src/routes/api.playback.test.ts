@@ -124,3 +124,29 @@ test('GET /api/seek only broadcasts bounded seeks for an active video', async (t
   assert.equal(response.statusCode, 200);
   assert.deepEqual(await event, { type: 'seek', itemId: 'route-video', deltaSec: 300 });
 });
+
+test('PATCH /api/media/:id/faces assigns and clears local face names safely', async (t) => {
+  const app = Fastify({ logger: false });
+  await registerApi(app);
+  await app.ready();
+  t.after(async () => app.close());
+
+  const identified = item('identified-photo', 'photo');
+  identified.faces = [
+    { box: { x: 1, y: 2, width: 3, height: 4 } },
+    { box: { x: 5, y: 6, width: 7, height: 8 }, label: 'Old name' },
+  ];
+  await store.addItem(identified);
+
+  let response = await app.inject({
+    method: 'PATCH', url: '/api/media/identified-photo/faces', payload: { labels: ['Ada', null] },
+  });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json().item.faces.map((face: { label?: string }) => face.label), ['Ada', undefined]);
+  assert.deepEqual(store.getItem('identified-photo')?.faces?.map((face) => face.label), ['Ada', undefined]);
+
+  response = await app.inject({
+    method: 'PATCH', url: '/api/media/identified-photo/faces', payload: { labels: ['only one'] },
+  });
+  assert.equal(response.statusCode, 400);
+});

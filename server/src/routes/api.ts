@@ -214,6 +214,27 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
     return { ok: true, items: updated };
   });
 
+  app.patch('/api/media/:id/faces', async (req, reply) => {
+    const item = getItem((req.params as { id: string }).id);
+    if (!item) return reply.code(404).send({ error: 'media not found' });
+    if (!item.faces?.length) return reply.code(409).send({ error: 'media has no detected faces' });
+    const labels = (req.body as { labels?: unknown } | null)?.labels;
+    if (!Array.isArray(labels) || labels.length !== item.faces.length
+      || labels.some((label) => label !== null && (typeof label !== 'string' || label.trim().length > 80))) {
+      return reply.code(400).send({ error: 'labels must contain one name (or null) per detected face, up to 80 characters each' });
+    }
+    const faces = item.faces.map((face, index) => {
+      const label = labels[index] === null ? '' : (labels[index] as string).trim();
+      return { ...face, ...(label ? { label } : {}), ...(!label && face.label ? { label: undefined } : {}) };
+    });
+    const focusRegions = item.focusRegions?.map((region) => region.source === 'face'
+      ? { ...region, label: faces.find((face) => face.box.x === region.box.x && face.box.y === region.box.y)?.label }
+      : region);
+    const updated = await updateItem(item.id, { faces, ...(focusRegions ? { focusRegions } : {}) });
+    hub.emitEvent({ type: 'library', items: listItems() });
+    return { ok: true, item: updated };
+  });
+
   app.post('/api/items/enabled', async (req, reply) => {
     const ids = mediaIds(req.body);
     const enabled = (req.body as Partial<SetItemsEnabledPayload> | null)?.enabled;

@@ -73,7 +73,7 @@
         await import('/src/main.ts');
         await new Promise((resolve) => setTimeout(resolve, 0));
 
-        emit({ type: 'config', config: { ...defaultConfig(), videoMuted: true, videoLoop: true } });
+        emit({ type: 'config', config: { ...defaultConfig(), videoMuted: true, videoLoop: true, videoSpeed: 0.75 } });
         emit({ type: 'paused', paused: false });
         emit({
           type: 'show',
@@ -95,12 +95,14 @@
         const initialMutedPlayback = video.muted === true
           && video.defaultMuted === true
           && video.volume === 1
+          && video.playbackRate === 0.75
           && playCalls === 1;
         rejectNextPlay = true;
-        emit({ type: 'config', config: { ...defaultConfig(), videoMuted: false, videoLoop: false } });
+        emit({ type: 'config', config: { ...defaultConfig(), videoMuted: false, videoLoop: false, videoSpeed: 1.5 } });
         const propertiesUpdatedImmediately = video.muted === false
           && video.defaultMuted === false
           && video.volume === 1
+          && video.playbackRate === 1.5
           && video.loop === false;
         await new Promise((resolve) => setTimeout(resolve, 0));
 

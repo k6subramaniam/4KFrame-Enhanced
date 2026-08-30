@@ -190,6 +190,9 @@ of different shapes can run at once, each framed correctly. In **Admin → Scali
 - **Include / exclude** any item from the rotation with the **✓ / 🚫** toggle on its tile — excluded
   items are dimmed and skipped by the slideshow, but can still be cast explicitly.
 - **Video tiles** show their **duration** (m:ss).
+- **Video speed** presets from 0.5× to 2× keep picture and audio synchronized on displays.
+- **Face identification** lets an administrator assign local names to detected faces, then filter
+  the library by those names. Names and face metadata remain on the frame device.
 
 ## API (original-compatible)
 

@@ -278,6 +278,17 @@ export async function patchMediaTransforms(
   return ((await res.json()) as { items: MediaItem[] }).items;
 }
 
+/** Assign app-owned names to detected faces. Images and biometric data never leave the frame. */
+export async function updateFaceLabels(id: string, labels: (string | null)[]): Promise<MediaItem> {
+  const res = await fetch(`/api/media/${encodeURIComponent(id)}/faces`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ labels }),
+  });
+  if (!res.ok) throw new Error((await res.json() as { error?: string }).error ?? 'face label update failed');
+  return ((await res.json()) as { item: MediaItem }).item;
+}
+
 export interface UploadResult {
   ok: boolean;
   added: MediaItem[];
