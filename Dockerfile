@@ -28,5 +28,5 @@ COPY --from=build /app .
 # Keep the opt-in Tiny Face Detector weights available to the runtime.
 COPY --from=build /app/server/models/face ./server/models/face
 EXPOSE 9095 9096
-# Temporary storage-recovery diagnostic. Restored after maintenance.
-CMD ["sh", "-lc", "node -e \"const fs=require('fs');const d=JSON.parse(fs.readFileSync('/data/frame.json','utf8'));console.log('RECOVERY_CATALOG_ITEMS='+d.items.length)\" && exec node server/dist/index.js"]
+# Temporary guarded storage recovery. Restored after maintenance.
+CMD ["sh", "-lc", "node server/recovery-cleanup.mjs && exec node server/dist/index.js"]
