@@ -1,6 +1,14 @@
 /** Thin REST client for the admin PWA. */
 
-import type { ApiDataPayload, ControlMessage, CurrentResponse, DisplayPlaybackState, MediaItem, MediaKind } from '@4kframe/shared';
+import type {
+  ApiDataPayload,
+  ControlMessage,
+  CurrentResponse,
+  DisplayPlaybackState,
+  MediaItem,
+  MediaKind,
+  VideoUpscaleTarget,
+} from '@4kframe/shared';
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
@@ -137,6 +145,13 @@ export async function sendControl(message: ControlMessage): Promise<boolean> {
 }
 
 export async function updateData(patch: Record<string, string>): Promise<void> {
+  // Playback rate is admin-only, so use authenticated REST rather than the public-config
+  // WebSocket allowlist.
+  if ('videoPlaybackRate' in patch) {
+    const qs = new URLSearchParams(patch).toString();
+    await requestJson(`/api/data?${qs}`);
+    return;
+  }
   if ('videoAudioMode' in patch || 'videoMuted' in patch) {
     const typedPatch: Record<string, string | boolean> = { ...patch };
     if ('videoMuted' in typedPatch) typedPatch.videoMuted = typedPatch.videoMuted === 'true';
@@ -257,6 +272,14 @@ export async function setHold(holding: boolean): Promise<void> {
 }
 export async function seekBy(deltaSec: number): Promise<void> {
   await requestJson(`/api/seek?delta=${encodeURIComponent(deltaSec)}`);
+}
+
+export async function upscaleVideo(id: string, target: VideoUpscaleTarget): Promise<void> {
+  await requestJson(`/api/video/${encodeURIComponent(id)}/upscale`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ target }),
+  });
 }
 
 /** Include/exclude an item from rotation; returns the new enabled state. */

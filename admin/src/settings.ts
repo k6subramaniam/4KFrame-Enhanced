@@ -12,6 +12,7 @@ import {
   type MediaItem,
   type SettingsPatch,
   type SettingsUiAdapter,
+  type VideoUpscaleTarget,
 } from '@4kframe/shared';
 import {
   updateData,
@@ -20,6 +21,8 @@ import {
   pollPickerSession,
   importPickerSession,
   setGooglePhotosRetentionDays,
+  fetchItems,
+  upscaleVideo,
 } from './api.js';
 import { activeCropPreviewSectionHtml, wireCropPreview } from './cropPreview.js';
 import { toast } from './toast.js';
@@ -57,6 +60,145 @@ function retentionLabel(days: number): string {
   if (days === 0) return 'Keep forever';
   if (days === 365) return '1 year';
   return `${days} days`;
+}
+
+
+const VIDEO_SPEED_PRESETS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3] as const;
+
+function clampVideoSpeed(value: number): number {
+  return Math.min(3, Math.max(0.25, Number.isFinite(value) ? value : 1));
+}
+
+function videoSpeedPanel(data: ApiDataPayload): string {
+  const rate = clampVideoSpeed(Number(data.videoPlaybackRate ?? 1));
+  return `
+    <div style="text-align:center;font-size:2.2rem;font-weight:700;margin:.2rem 0 1rem" data-video-speed-value>${rate.toFixed(2)}×</div>
+    <div class="row" style="display:grid;grid-template-columns:52px minmax(0,1fr) 52px;gap:.75rem;align-items:center">
+      <button id="video-speed-minus" type="button" aria-label="Decrease video speed" style="font-size:1.7rem">−</button>
+      <input id="video-speed-range" type="range" min="25" max="300" step="25" value="${Math.round(rate * 100)}"
+        aria-label="Video playback speed" style="width:100%" />
+      <button id="video-speed-plus" type="button" aria-label="Increase video speed" style="font-size:1.7rem">＋</button>
+    </div>
+    <div class="row seg" style="margin-top:1rem" data-video-speed-presets>
+      ${VIDEO_SPEED_PRESETS.map((value) =>
+        `<button type="button" data-video-speed="${value}" class="${Math.abs(value - rate) < .001 ? 'active' : ''}">${value === 1 ? '1× Normal' : `${value}×`}</button>`
+      ).join('')}
+    </div>
+    <div class="muted" style="margin-top:.55rem">0.25×–0.75× creates slow motion. The selected speed applies immediately to videos on the frame and to the phone/browser audio preview.</div>`;
+}
+
+function upscaleSourceDimensions(item: MediaItem): { width: number; height: number } {
+  return {
+    width: item.upscaleSourceWidth ?? item.width,
+    height: item.upscaleSourceHeight ?? item.height,
+  };
+}
+
+function canUpscaleTo(item: MediaItem, target: VideoUpscaleTarget): boolean {
+  const source = upscaleSourceDimensions(item);
+  const landscape = source.width >= source.height;
+  const box = target === '4k'
+    ? (landscape ? { width: 3840, height: 2160 } : { width: 2160, height: 3840 })
+    : (landscape ? { width: 1920, height: 1080 } : { width: 1080, height: 1920 });
+  return Math.min(box.width / Math.max(1, source.width), box.height / Math.max(1, source.height)) > 1.001;
+}
+
+function videoQualityPanel(item: MediaItem): string {
+  const source = upscaleSourceDimensions(item);
+  const busy = Boolean(item.transcoding || item.upscaling);
+  const button = (target: VideoUpscaleTarget, label: string) => {
+    const available = canUpscaleTo(item, target);
+    const current = item.upscaleTarget === target;
+    const disabled = busy || !available || current;
+    const text = current ? `${label} ✓` : available ? `Upscale to ${label}` : `Already ≥ ${label}`;
+    return `<button type="button" data-upscale-target="${target}"${disabled ? ' disabled' : ''}>${text}</button>`;
+  };
+  return `
+    <div><strong>Current:</strong> ${item.width}×${item.height}</div>
+    <div class="muted" style="margin:.25rem 0 .85rem">Source: ${source.width}×${source.height}${item.upscaleTarget ? ` · Enhanced ${item.upscaleTarget.toUpperCase()}` : ''}</div>
+    <div class="row">${button('1080p', '1080p')}${button('4k', '4K')}</div>
+    <div class="muted" data-upscale-status style="margin-top:.6rem">${item.upscaling ? '✨ Upscaling in the background…' : item.transcoding ? 'Finish video processing before upscaling.' : 'High-quality Lanczos scaling with light sharpening. It increases output resolution, but cannot recreate detail that was never present in the source.'}</div>`;
+}
+
+function wireVideoSpeed(
+  root: HTMLElement,
+  data: ApiDataPayload,
+  updateConfig: (patch: SettingsPatch) => Promise<void>,
+): void {
+  const range = root.querySelector<HTMLInputElement>('#video-speed-range');
+  const valueLabel = root.querySelector<HTMLElement>('[data-video-speed-value]');
+  const minus = root.querySelector<HTMLButtonElement>('#video-speed-minus');
+  const plus = root.querySelector<HTMLButtonElement>('#video-speed-plus');
+  const presetButtons = [...root.querySelectorAll<HTMLButtonElement>('[data-video-speed]')];
+  if (!range || !valueLabel) return;
+
+  let current = clampVideoSpeed(Number(data.videoPlaybackRate ?? 1));
+  const render = (value: number): void => {
+    current = clampVideoSpeed(value);
+    range.value = String(Math.round(current * 100));
+    valueLabel.textContent = `${current.toFixed(2)}×`;
+    presetButtons.forEach((button) => {
+      button.classList.toggle('active', Math.abs(Number(button.dataset.videoSpeed) - current) < .001);
+    });
+  };
+  const commit = async (value: number): Promise<void> => {
+    render(value);
+    try { navigator.vibrate?.(10); } catch { /* enhancement only */ }
+    await updateConfig({ videoPlaybackRate: current });
+  };
+
+  range.addEventListener('input', () => render(Number(range.value) / 100));
+  range.addEventListener('change', () => void commit(Number(range.value) / 100));
+  minus?.addEventListener('click', () => void commit(current - 0.25));
+  plus?.addEventListener('click', () => void commit(current + 0.25));
+  presetButtons.forEach((button) => button.addEventListener('click', () => {
+    void commit(Number(button.dataset.videoSpeed));
+  }));
+}
+
+function wireVideoQuality(root: HTMLElement, item?: MediaItem): void {
+  if (!item || item.kind !== 'video') return;
+  const status = root.querySelector<HTMLElement>('[data-upscale-status]');
+  const buttons = [...root.querySelectorAll<HTMLButtonElement>('[data-upscale-target]')];
+  buttons.forEach((button) => {
+    button.addEventListener('click', async () => {
+      const target = button.dataset.upscaleTarget as VideoUpscaleTarget | undefined;
+      if (!target || (target !== '1080p' && target !== '4k')) return;
+      buttons.forEach((candidate) => { candidate.disabled = true; });
+      if (status) status.textContent = `✨ Upscaling to ${target === '4k' ? '4K' : '1080p'} in the background…`;
+      try {
+        await upscaleVideo(item.id, target);
+        item.upscaling = true;
+        toast(`Video upscale to ${target === '4k' ? '4K' : '1080p'} started.`);
+        void waitForUpscale(item.id, target, status);
+      } catch (error) {
+        buttons.forEach((candidate) => { candidate.disabled = false; });
+        if (status) status.textContent = (error as Error).message;
+        toast(`Could not upscale video: ${(error as Error).message}`, { error: true });
+      }
+    });
+  });
+}
+
+async function waitForUpscale(
+  id: string,
+  target: VideoUpscaleTarget,
+  status?: HTMLElement | null,
+): Promise<void> {
+  for (let attempt = 0; attempt < 180; attempt += 1) {
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 4000));
+    const item = (await fetchItems().catch(() => [])).find((candidate) => candidate.id === id);
+    if (!item) return;
+    if (item.upscaling) continue;
+    if (status?.isConnected) {
+      status.textContent = item.upscaleTarget === target
+        ? `✓ Upscale complete: ${item.width}×${item.height}`
+        : 'Upscale stopped before completion.';
+    }
+    if (item.upscaleTarget === target) toast(`Video upscale complete: ${item.width}×${item.height}.`);
+    return;
+  }
+  if (status?.isConnected) status.textContent = 'Upscale is still running in the background.';
 }
 
 /** Retention selector for the Google Photos panel (how long imported copies are kept). */
@@ -146,6 +288,10 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload, cu
     renderSharedPanel('photo-period'),
     renderSharedPanel('playback-media'),
     renderSharedPanel('video-audio'),
+    settingsPanel('video-speed', 'Video Speed', videoSpeedPanel(data), isOpen('video-speed')),
+    currentItem?.kind === 'video'
+      ? settingsPanel('video-quality', 'Video Quality', videoQualityPanel(currentItem), isOpen('video-quality'))
+      : '',
     renderSharedPanel('effects'),
     renderSharedPanel('screen-orientation'),
     renderSharedPanel('qr-code'),
@@ -188,6 +334,8 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload, cu
   });
 
   wireSharedSettings(root, adapter);
+  wireVideoSpeed(root, data, updateConfig);
+  wireVideoQuality(root, currentItem);
   syncCropPreview = wireCropPreview(root, updateConfig);
   wirePickerImport(root);
   wireRetention(root, data);

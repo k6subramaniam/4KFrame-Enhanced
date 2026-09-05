@@ -17,11 +17,15 @@ export function playbackBlockedStatusMessage(mode: VideoAudioMode): string {
 export interface VideoPlaybackSyncOptions {
   muted: boolean;
   loop: boolean;
+  playbackRate?: number;
   restartAfterUnmute?: boolean;
   onPlaybackRejected: (error: unknown) => void;
 }
 
-type VideoPlaybackElement = Pick<HTMLVideoElement, 'muted' | 'defaultMuted' | 'volume' | 'loop' | 'play'>;
+type VideoPlaybackElement = Pick<
+  HTMLVideoElement,
+  'muted' | 'defaultMuted' | 'volume' | 'loop' | 'play' | 'playbackRate' | 'defaultPlaybackRate'
+>;
 
 export const AUDIBLE_VIDEO_VOLUME = 1;
 type SeekableVideoElement = Pick<HTMLVideoElement, 'currentTime' | 'duration' | 'readyState'>;
@@ -36,6 +40,10 @@ export function syncVideoPlaybackProperties(
   video.defaultMuted = options.muted;
   video.volume = AUDIBLE_VIDEO_VOLUME;
   video.loop = options.loop;
+  const requestedRate = Number(options.playbackRate ?? 1);
+  const rate = Number.isFinite(requestedRate) ? Math.min(3, Math.max(0.25, requestedRate)) : 1;
+  video.playbackRate = rate;
+  video.defaultPlaybackRate = rate;
 
   if (options.restartAfterUnmute && becameAudible) {
     video.play().catch(options.onPlaybackRejected);

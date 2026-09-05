@@ -75,6 +75,11 @@ export type PlaybackMediaMode = (typeof PLAYBACK_MEDIA_MODES)[number];
 export const VIDEO_AUDIO_MODES = ['tv', 'muted', 'phone'] as const;
 export type VideoAudioMode = (typeof VIDEO_AUDIO_MODES)[number];
 
+/** Video playback speed limits used by the display and companion controls. */
+export const VIDEO_PLAYBACK_RATE_MIN = 0.25;
+export const VIDEO_PLAYBACK_RATE_MAX = 3;
+export const VIDEO_PLAYBACK_RATE_DEFAULT = 1;
+
 /**
  * Target frame aspect. `auto` matches each display's real screen (so the same library casts
  * correctly to 16:9 TVs, ultrawide, 4:3, square, and portrait frames simultaneously). Any
@@ -156,6 +161,8 @@ export interface FrameConfig {
    *  mutedForVideoAudioMode — `phone` keeps the TV element audible). Kept for original tooling. */
   videoMuted: boolean;
   videoLoop: boolean;
+  /** Playback speed for videos. 1 = normal, values below 1 are slow motion. */
+  videoPlaybackRate: number;
 
   // --- Enhanced: integrations & UX ---
   googlePhotos: GooglePhotosConfig;
@@ -197,6 +204,7 @@ export function defaultConfig(): FrameConfig {
     videoAudioMode: 'tv',
     videoMuted: false,
     videoLoop: true,
+    videoPlaybackRate: VIDEO_PLAYBACK_RATE_DEFAULT,
     googlePhotos: {
       connected: false,
       retentionDays: DEFAULT_GOOGLE_PHOTOS_RETENTION_DAYS,
@@ -239,6 +247,7 @@ export function toApiData(c: FrameConfig): ApiDataPayload {
     videoMuted: String(c.videoAudioMode === 'muted'),
     videoAudioMode: c.videoAudioMode,
     videoLoop: String(c.videoLoop),
+    videoPlaybackRate: String(c.videoPlaybackRate),
     // Only the retention window round-trips through the flat payload; the rest of
     // `googlePhotos` (connected/account/lastImportAt) is served by /api/google/status.
     googlePhotosRetentionDays: String(googlePhotosRetentionDays(c)),
@@ -326,6 +335,11 @@ export function fromApiData(current: FrameConfig, patch: ApiDataPayload): FrameC
     videoMuted: videoAudioMode === 'muted',
     videoAudioMode,
     videoLoop: truthy(patch.videoLoop, current.videoLoop),
+    videoPlaybackRate: clamp(
+      num(patch.videoPlaybackRate, current.videoPlaybackRate ?? VIDEO_PLAYBACK_RATE_DEFAULT),
+      VIDEO_PLAYBACK_RATE_MIN,
+      VIDEO_PLAYBACK_RATE_MAX,
+    ),
     googlePhotos: {
       ...current.googlePhotos,
       retentionDays: Math.max(

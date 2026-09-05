@@ -14,6 +14,8 @@ import {
   type CurrentResponse,
   type MediaIdsPayload,
   type MediaItem,
+  VIDEO_UPSCALE_TARGETS,
+  type VideoUpscaleTarget,
   isQuarterTurn,
   type DisplayTransform,
   type SetItemsEnabledPayload,
@@ -33,7 +35,7 @@ import {
 } from '../store.js';
 import { ingestImage } from '../media/images.js';
 import { ingestVideo } from '../media/video.js';
-import { enqueueTranscode } from '../media/transcode.js';
+import { enqueueTranscode, enqueueUpscale } from '../media/transcode.js';
 import { enqueueFaceDetection } from '../media/faceJob.js';
 import { deleteAssets, deleteAssetsForItems } from '../media/assets.js';
 import {
@@ -287,6 +289,24 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
   app.get('/api/photo/:id', async (req, reply) => redirectToAsset(reply, (req.params as { id: string }).id, 'file'));
   app.get('/api/preview/:id', async (req, reply) => redirectToAsset(reply, (req.params as { id: string }).id, 'preview'));
   app.get('/api/video/:id', async (req, reply) => redirectToAsset(reply, (req.params as { id: string }).id, 'file'));
+
+  app.post('/api/video/:id/upscale', async (req, reply) => {
+    const item = getItem((req.params as { id: string }).id);
+    if (!item) return reply.code(404).send({ error: 'video not found' });
+    if (item.kind !== 'video') return reply.code(400).send({ error: 'only videos can be upscaled' });
+
+    const target = (req.body as { target?: unknown } | undefined)?.target;
+    if (typeof target !== 'string' || !(VIDEO_UPSCALE_TARGETS as readonly string[]).includes(target)) {
+      return reply.code(400).send({ error: 'target must be 1080p or 4k' });
+    }
+
+    const result = await enqueueUpscale(item, target as VideoUpscaleTarget);
+    if (!result.queued) {
+      const unavailable = result.error?.includes('unavailable');
+      return reply.code(unavailable ? 503 : 409).send({ error: result.error ?? 'could not queue upscale' });
+    }
+    return reply.code(202).send({ ok: true, target });
+  });
 
   // --- QR code for the admin URL ---
   app.get('/api/qr', async (_req, reply) => {

@@ -108,8 +108,11 @@ function renderGrid(): void {
       ? `<span class="badge dur">${fmtDuration(item.durationSec)}</span>` : '';
     tile.innerHTML =
       (hasImageThumb ? `<img loading="lazy" src="${thumbUrl(item)}" alt="" />` : '<div class="ph">🎞️</div>') +
-      (item.kind === 'video' ? '<span class="badge">▶ video</span>' : '') +
+      (item.kind === 'video'
+        ? `<span class="badge">▶ video${item.upscaleTarget ? ` · ✨ ${item.upscaleTarget.toUpperCase()}` : ''}</span>`
+        : '') +
       (item.transcoding ? '<span class="badge badge-proc">⏳ processing</span>' : '') +
+      (item.upscaling ? '<span class="badge badge-proc">✨ upscaling</span>' : '') +
       (item.faces?.length ? `<span class="badge badge-face">☺ ${item.faces.length}</span>` : '') +
       ((item.rotation || item.flipHorizontal || item.flipVertical)
         ? `<span class="badge badge-transform">${item.rotation ?? 0}°${item.flipHorizontal ? ' ↔' : ''}${item.flipVertical ? ' ↕' : ''}</span>` : '') +
@@ -282,7 +285,12 @@ function syncPhonePreviewToDisplay(display: DisplayPlaybackState | null): void {
   if (!phonePreview || activeConfig.videoAudioMode !== 'phone' || activeItem?.kind !== 'video') return;
   if (!display || display.itemId !== activeItem.id) return;
   const elapsed = Math.max(0, (Date.now() - display.observedAt) / 1000);
-  const target = Math.min(display.duration || Number.POSITIVE_INFINITY, display.currentTime + elapsed);
+  const requestedRate = Number(activeConfig.videoPlaybackRate ?? 1);
+  const rate = Number.isFinite(requestedRate) ? Math.min(3, Math.max(0.25, requestedRate)) : 1;
+  const target = Math.min(
+    display.duration || Number.POSITIVE_INFINITY,
+    display.currentTime + elapsed * rate,
+  );
   if (Number.isFinite(target) && Math.abs(phonePreview.currentTime - target) > 1.25) {
     phonePreview.currentTime = target;
   }
@@ -303,6 +311,10 @@ async function renderPhonePreview(display: DisplayPlaybackState | null = null): 
     video.loop = Boolean(activeConfig.videoLoop);
     video.load();
   }
+  const requestedRate = Number(activeConfig.videoPlaybackRate ?? 1);
+  const rate = Number.isFinite(requestedRate) ? Math.min(3, Math.max(0.25, requestedRate)) : 1;
+  video.playbackRate = rate;
+  video.defaultPlaybackRate = rate;
   syncPhonePreviewToDisplay(display);
   if (!phonePreviewUserPaused) {
     try {

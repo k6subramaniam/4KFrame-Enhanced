@@ -44,6 +44,10 @@ export interface FocusRegion {
   label?: string;
 }
 
+/** Video quality targets supported by the server-side upscale pipeline. */
+export const VIDEO_UPSCALE_TARGETS = ['1080p', '4k'] as const;
+export type VideoUpscaleTarget = (typeof VIDEO_UPSCALE_TARGETS)[number];
+
 /** A single media item in the library. */
 export interface MediaItem {
   id: string;
@@ -74,6 +78,14 @@ export interface MediaItem {
   focusRegions?: FocusRegion[];
   /** True while a background H.264 transcode is in progress (video only). */
   transcoding?: boolean;
+  /** True while a requested higher-resolution video rendition is being generated. */
+  upscaling?: boolean;
+  /** Last successfully generated quality target. */
+  upscaleTarget?: VideoUpscaleTarget;
+  /** Preserved pre-upscale video used so later quality changes do not upscale an upscale. */
+  upscaleSourceFile?: string;
+  upscaleSourceWidth?: number;
+  upscaleSourceHeight?: number;
   /** Whether the item is included in automatic slideshow rotation (default true). */
   enabled?: boolean;
   /** Persisted display transform. Flips are applied before clockwise rotation. */

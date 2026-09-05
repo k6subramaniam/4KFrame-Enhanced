@@ -12,7 +12,13 @@ import { MEDIA_DIR } from '../env.js';
 
 /** Every distinct on-disk asset belonging to an item. */
 function assetNames(item: MediaItem): string[] {
-  return [...new Set([item.file, item.preview, item.thumb, item.poster].filter(Boolean) as string[])];
+  return [...new Set([
+    item.file,
+    item.preview,
+    item.thumb,
+    item.poster,
+    item.upscaleSourceFile,
+  ].filter(Boolean) as string[])];
 }
 
 /** Best-effort delete of one item's assets; missing files are ignored. */
