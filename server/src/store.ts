@@ -185,8 +185,9 @@ export async function restoreTrashItems(ids: string[]): Promise<MediaItem[]> {
   const restored: MediaItem[] = [];
   for (const item of restoring) {
     if (activeIds.has(item.id)) continue;
-    const { trashedAt: _trashedAt, trashExpiresAt: _trashExpiresAt, ...clean } = item;
-    const restoredItem = clean as MediaItem;
+    const restoredItem: MediaItem = { ...item };
+    delete restoredItem.trashedAt;
+    delete restoredItem.trashExpiresAt;
     d.items.push(restoredItem);
     d.order.push(restoredItem.id);
     activeIds.add(restoredItem.id);
