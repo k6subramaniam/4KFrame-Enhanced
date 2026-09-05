@@ -153,6 +153,50 @@
       #drop.busy { border-color:var(--accent); opacity:.7; pointer-events:none; }
       #drop.busy::after { content:attr(data-status); position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(11,13,18,.85); border-radius:.8rem; color:var(--fg); }
       .people-controls select { font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--line); border-radius:.6rem; padding:.45rem .7rem; }
+
+      .ops-dashboard { margin:0 0 1rem; padding:.9rem; border:1px solid var(--line); border-radius:1.05rem; background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,.025)); box-shadow:0 14px 34px rgba(0,0,0,.16); }
+      .ops-head { display:flex; align-items:center; justify-content:space-between; gap:.75rem; margin-bottom:.7rem; }
+      .ops-title { display:flex; align-items:center; gap:.55rem; min-width:0; }
+      .ops-title strong { font-size:.95rem; }
+      .ops-version { color:var(--muted); font-size:.72rem; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+      #ops-refresh { width:40px; height:40px; padding:0; border-radius:999px; }
+      .ops-cards { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.55rem; }
+      .ops-card { min-width:0; padding:.75rem; border:1px solid var(--line); border-radius:.9rem; background:rgba(0,0,0,.16); }
+      .ops-card-label { display:flex; align-items:center; gap:.4rem; color:var(--muted); font-size:.72rem; margin-bottom:.35rem; }
+      .ops-card-value { font-weight:750; font-size:1rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .ops-dot { width:.48rem; height:.48rem; border-radius:999px; background:#768091; box-shadow:0 0 0 4px rgba(118,128,145,.1); }
+      .ops-dot.online { background:#49d38a; box-shadow:0 0 0 4px rgba(73,211,138,.12); }
+      .ops-dot.offline { background:#ff7373; box-shadow:0 0 0 4px rgba(255,115,115,.1); }
+      .ops-storage-track { height:.32rem; margin-top:.5rem; background:rgba(255,255,255,.08); border-radius:999px; overflow:hidden; }
+      .ops-storage-fill { height:100%; width:0; background:var(--accent); border-radius:inherit; transition:width .25s ease; }
+      .ops-storage-fill.warning { background:#f3b84b; }
+      .ops-storage-fill.critical { background:#ff6b6b; }
+      .ops-now { display:grid; grid-template-columns:54px minmax(0,1fr); gap:.7rem; align-items:center; margin-top:.65rem; padding:.65rem; border:1px solid var(--line); border-radius:.9rem; background:rgba(0,0,0,.12); }
+      .ops-now img { width:54px; height:42px; object-fit:cover; border-radius:.55rem; background:#05070b; }
+      .ops-now-copy { min-width:0; }
+      .ops-now-copy strong { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .ops-now-copy span { display:block; color:var(--muted); font-size:.74rem; margin-top:.15rem; }
+      .ops-dashboard details { margin-top:.65rem; border-top:1px solid var(--line); padding-top:.55rem; }
+      .ops-dashboard summary { cursor:pointer; color:var(--muted); font-size:.78rem; font-weight:650; }
+      .ops-detail-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.65rem; margin-top:.65rem; }
+      .ops-section { min-width:0; padding:.7rem; border:1px solid var(--line); border-radius:.85rem; background:rgba(0,0,0,.13); }
+      .ops-section h3 { margin:0 0 .55rem; font-size:.8rem; }
+      .ops-list { display:grid; gap:.4rem; }
+      .ops-list-row { display:flex; align-items:center; justify-content:space-between; gap:.55rem; min-width:0; font-size:.75rem; }
+      .ops-list-row .name { min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .ops-job { padding:.5rem; border:1px solid var(--line); border-radius:.7rem; background:rgba(255,255,255,.025); }
+      .ops-job-top { display:flex; align-items:center; justify-content:space-between; gap:.5rem; }
+      .ops-job-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.76rem; font-weight:650; }
+      .ops-job-meta { color:var(--muted); font-size:.68rem; margin-top:.2rem; }
+      .ops-job-actions { display:flex; gap:.35rem; margin-top:.4rem; }
+      .ops-job-actions button { min-height:34px; padding:.28rem .55rem; font-size:.7rem; }
+      .ops-state { font-size:.66rem; padding:.13rem .38rem; border-radius:999px; background:rgba(255,255,255,.07); color:var(--muted); }
+      .ops-state.running { color:#a9c9ff; background:rgba(91,156,255,.14); }
+      .ops-state.completed { color:#82e1ae; background:rgba(73,211,138,.12); }
+      .ops-state.failed { color:#ff9b9b; background:rgba(255,107,107,.12); }
+      .ops-actions { display:flex; flex-wrap:wrap; gap:.4rem; }
+      .ops-actions button { flex:1 1 8rem; min-height:40px; padding:.4rem .65rem; font-size:.74rem; }
+      .ops-note { margin-top:.45rem; color:var(--muted); font-size:.68rem; line-height:1.35; }
       .library-panel-content { padding:1rem; }
       .library-panel-head { display:flex; align-items:center; justify-content:space-between; gap:.75rem; margin-bottom:.8rem; }
       .library-panel-head h2 { margin:0; font-size:1rem; }
@@ -185,6 +229,10 @@
         .modes button { padding:.5rem .65rem; }
         button { min-height:44px; }
         main { padding:.75rem .75rem 5.25rem; }
+        .ops-cards { grid-template-columns:repeat(2,minmax(0,1fr)); }
+        .ops-detail-grid { grid-template-columns:1fr; }
+        .ops-now { grid-template-columns:46px minmax(0,1fr); }
+        .ops-now img { width:46px; height:38px; }
         #drop { margin-bottom:.65rem; padding:1rem; }
         #hint { margin:.5rem 0 .75rem; }
         #playback { grid-template-columns:repeat(4,minmax(0,1fr)); }
@@ -224,6 +272,69 @@
     </div>
     <script async src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
     <main>
+
+      <section id="ops-dashboard" class="ops-dashboard" aria-label="Frame operations dashboard">
+        <div class="ops-head">
+          <div class="ops-title">
+            <strong>Frame status</strong>
+            <span id="ops-version" class="ops-version">—</span>
+          </div>
+          <button id="ops-refresh" type="button" aria-label="Refresh frame status">↻</button>
+        </div>
+        <div class="ops-cards">
+          <div class="ops-card">
+            <div class="ops-card-label"><span id="ops-frame-dot" class="ops-dot"></span>Frame</div>
+            <div id="ops-frame-state" class="ops-card-value">Checking…</div>
+          </div>
+          <div class="ops-card">
+            <div class="ops-card-label">Storage</div>
+            <div id="ops-storage-value" class="ops-card-value">—</div>
+            <div class="ops-storage-track" aria-hidden="true"><div id="ops-storage-fill" class="ops-storage-fill"></div></div>
+          </div>
+          <div class="ops-card">
+            <div class="ops-card-label">Library</div>
+            <div id="ops-library-value" class="ops-card-value">—</div>
+          </div>
+          <div class="ops-card">
+            <div class="ops-card-label">Processing</div>
+            <div id="ops-jobs-value" class="ops-card-value">—</div>
+          </div>
+        </div>
+        <div class="ops-now">
+          <img id="ops-now-thumb" alt="" hidden />
+          <div id="ops-now-placeholder" style="width:54px;height:42px;border-radius:.55rem;background:#05070b;display:grid;place-items:center;color:var(--muted)">—</div>
+          <div class="ops-now-copy">
+            <strong id="ops-now-title">Nothing playing</strong>
+            <span id="ops-now-meta">Waiting for frame state</span>
+          </div>
+        </div>
+        <details id="ops-details">
+          <summary>Storage, processing & backup</summary>
+          <div class="ops-detail-grid">
+            <section class="ops-section">
+              <h3>Largest media</h3>
+              <div id="ops-largest" class="ops-list"><span class="muted">No size data yet.</span></div>
+            </section>
+            <section class="ops-section">
+              <div class="row" style="justify-content:space-between;margin-bottom:.55rem">
+                <h3 style="margin:0">Processing jobs</h3>
+                <button id="ops-clear-jobs" type="button">Clear finished</button>
+              </div>
+              <div id="ops-jobs" class="ops-list"><span class="muted">No jobs.</span></div>
+            </section>
+            <section class="ops-section">
+              <h3>Backup & restore</h3>
+              <div class="ops-actions">
+                <button id="ops-download-backup" type="button">Download backup</button>
+                <button id="ops-snapshot" type="button">Save snapshot</button>
+                <button id="ops-restore-pick" type="button">Restore backup</button>
+              </div>
+              <input id="ops-restore-file" type="file" accept="application/json,.json" hidden />
+              <div id="ops-backup-meta" class="ops-note">Daily settings/catalog snapshots are stored on the Railway volume. Downloaded backups do not include media bytes or authentication secrets.</div>
+            </section>
+          </div>
+        </details>
+      </section>
       <div id="drop">Drag &amp; drop photos or videos here, or
         <label style="color:var(--accent);cursor:pointer">browse<input id="file" type="file" accept="image/*,video/*" multiple hidden /></label>
       </div>
@@ -346,6 +457,9 @@
               <option value="date-asc">Selected date — oldest first</option>
               <option value="filename-asc">Filename — A to Z</option>
               <option value="filename-desc">Filename — Z to A</option>
+              <option value="size-desc">File size — largest first</option>
+              <option value="size-asc">File size — smallest first</option>
+              <option value="resolution-desc">Resolution — highest first</option>
             </select>
           </label>
           <span class="muted" id="people-summary">Face matching is opt-in on the server.</span>

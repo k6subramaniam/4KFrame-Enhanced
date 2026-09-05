@@ -13,6 +13,8 @@ import {
   type ApiDataPayload,
   type CurrentResponse,
   type MediaIdsPayload,
+  type AdminStatus,
+  type FrameBackup,
   type MediaItem,
   VIDEO_UPSCALE_TARGETS,
   type VideoUpscaleTarget,
@@ -33,12 +35,19 @@ import {
   listTrashItems,
   getTrashItem,
   trashItems,
+  createSafeBackup,
+  restoreSafeBackup,
   restoreTrashItems,
   removeTrashItems,
 } from '../store.js';
 import { ingestImage } from '../media/images.js';
 import { ingestVideo } from '../media/video.js';
-import { enqueueTranscode, enqueueUpscale } from '../media/transcode.js';
+import {
+  cancelVideoProcessingJob,
+  enqueueTranscode,
+  enqueueUpscale,
+  retryVideoProcessingJob,
+} from '../media/transcode.js';
 import { enqueueFaceDetection } from '../media/faceJob.js';
 import { deleteAssetsForItems } from '../media/assets.js';
 import {
@@ -49,9 +58,14 @@ import {
 import { hub } from '../hub.js';
 import * as gphotos from '../integrations/googlePhotos.js';
 import * as gauth from '../integrations/googleAuth.js';
-import { computeStorage } from '../storage.js';
+import { computeStorage, invalidateStorageCache } from '../storage.js';
 import * as auth from '../auth.js';
 import { getDisplayPlayback } from '../displayPlayback.js';
+import { imageProcessingAvailable } from '../media/images.js';
+import { videoProcessingAvailable } from '../media/video.js';
+import { getDisplayPresence } from '../presence.js';
+import { clearFinishedProcessingJobs, listProcessingJobs } from '../processingJobs.js';
+import { getLastBackupSnapshotAt, writeBackupSnapshot } from '../backups.js';
 
 const VIDEO_EXT = new Set(['mp4', 'webm', 'mov', 'm4v', 'mkv']);
 const MAX_BULK_IDS = 500;
@@ -147,6 +161,100 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
       app.log.error({ err }, 'Google sign-in failed');
       reply.header('set-cookie', auth.clearStateCookie());
       return reply.redirect('/admin/?error=login');
+    }
+  });
+
+
+  // --- Admin operations dashboard / processing queue / safe backups ---
+  app.get('/api/admin/status', async (): Promise<AdminStatus> => {
+    const library = listItems();
+    const trash = listTrashItems();
+    const { used, free } = await computeStorage();
+    const total = Math.max(0, used + free);
+    const percentUsed = total > 0 ? (used / total) * 100 : 0;
+    const current = getCurrent()[0] ?? null;
+    const jobs = listProcessingJobs(30);
+    const activeJobs = jobs.filter((job) => job.state === 'queued' || job.state === 'running');
+    const largest = library
+      .filter((item) => Number(item.sizeBytes ?? 0) > 0)
+      .sort((a, b) => Number(b.sizeBytes ?? 0) - Number(a.sizeBytes ?? 0))
+      .slice(0, 5);
+
+    return {
+      generatedAt: Date.now(),
+      uptimeSec: Math.round(process.uptime()),
+      version: (process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || 'dev').slice(0, 12),
+      frame: getDisplayPresence(),
+      library: {
+        total: library.length,
+        photos: library.filter((item) => item.kind === 'photo').length,
+        videos: library.filter((item) => item.kind === 'video').length,
+        trash: trash.length,
+        favorites: library.filter((item) => item.enabled !== false).length,
+      },
+      storage: {
+        used,
+        free,
+        total,
+        percentUsed,
+        level: percentUsed >= 92 ? 'critical' : percentUsed >= 80 ? 'warning' : 'normal',
+      },
+      current,
+      processors: {
+        images: await imageProcessingAvailable(),
+        video: await videoProcessingAvailable(),
+      },
+      jobs: {
+        active: activeJobs.length,
+        queued: activeJobs.filter((job) => job.state === 'queued').length,
+        running: activeJobs.filter((job) => job.state === 'running').length,
+        recent: jobs,
+      },
+      largest,
+      backups: { lastSnapshotAt: getLastBackupSnapshotAt() },
+    };
+  });
+
+  app.get('/api/admin/jobs', async () => ({ jobs: listProcessingJobs(50) }));
+
+  app.post('/api/admin/jobs/:id/cancel', async (req, reply) => {
+    const result = await cancelVideoProcessingJob((req.params as { id: string }).id);
+    if (!result.ok) return reply.code(409).send(result);
+    return result;
+  });
+
+  app.post('/api/admin/jobs/:id/retry', async (req, reply) => {
+    const result = await retryVideoProcessingJob((req.params as { id: string }).id);
+    if (!result.ok) return reply.code(409).send(result);
+    return result;
+  });
+
+  app.delete('/api/admin/jobs', async () => ({ ok: true, cleared: clearFinishedProcessingJobs() }));
+
+  app.get('/api/admin/backup', async (_req, reply) => {
+    const backup = createSafeBackup();
+    reply.header('content-disposition', `attachment; filename="4kframe-backup-${new Date(backup.exportedAt).toISOString().slice(0, 10)}.json"`);
+    return reply.type('application/json').send(backup);
+  });
+
+  app.post('/api/admin/backup/snapshot', async () => {
+    const backup = await writeBackupSnapshot('manual');
+    return { ok: true, exportedAt: backup.exportedAt };
+  });
+
+  app.post('/api/admin/restore', async (req, reply) => {
+    const body = req.body as FrameBackup | undefined;
+    if (!body) return reply.code(400).send({ error: 'backup JSON is required' });
+    await writeBackupSnapshot('pre-restore');
+    try {
+      const result = await restoreSafeBackup(body);
+      invalidateStorageCache();
+      refresh();
+      hub.emitEvent({ type: 'config', config: getConfig() });
+      hub.emitEvent({ type: 'library', items: listItems() });
+      return { ok: true, ...result };
+    } catch (error) {
+      return reply.code(400).send({ error: (error as Error).message });
     }
   });
 
@@ -301,6 +409,7 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
     if (missing.length) return reply.code(404).send({ error: 'trash media not found', missing });
     const removed = await removeTrashItems(ids);
     const failures = await deleteAssetsForItems(removed);
+    invalidateStorageCache();
     if (failures.length) return reply.code(207).send({ ok: false, deleted: ids, failures });
     return { ok: true, deleted: ids, failures: [] };
   });
@@ -384,6 +493,7 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
         errors.push({ filename, error: (err as Error).message });
       }
     }
+    invalidateStorageCache();
     refresh();
     hub.emitEvent({ type: 'library', items: listItems() });
     return { ok: errors.length === 0, added, errors };
@@ -410,6 +520,7 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
       const buf = await fs.readFile(tmp).catch(() => null);
       if (!buf || buf.length === 0) return reply.code(400).send({ ok: false, error: 'no chunks received' });
       const item = await ingestUpload(buf, q.name || 'upload', q.type, parseOptionalTimestamp(q.createdAt));
+      invalidateStorageCache();
       refresh();
       hub.emitEvent({ type: 'library', items: listItems() });
       return { ok: true, item };

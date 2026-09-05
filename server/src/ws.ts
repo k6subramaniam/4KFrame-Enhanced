@@ -30,6 +30,7 @@ import { cast, next, previous, progress, getCurrent, refresh, setPaused, playSeq
 import * as auth from './auth.js';
 import { clearDisplayPlayback, reportDisplayPlayback } from './displayPlayback.js';
 import { getActiveLiveCast } from './liveCast.js';
+import { reportDisplayHeartbeat } from './presence.js';
 
 type PublicConfigPatch = Partial<Pick<FrameConfig,
   | 'photoPeriod'
@@ -54,7 +55,7 @@ const ADMIN_CONTROL_TYPES = new Set<ControlMessage['type']>(['progress', 'cast',
 // LAN mode), or when the operator explicitly opts back into the legacy behavior. This keeps
 // a public/cloud deployment from exposing remote-control and config mutations over /ws.
 const PUBLIC_DISPLAY_CONTROL_TYPES = new Set<ControlMessage['type']>([
-  'next', 'previous', 'pause', 'resume', 'seek', 'publicConfig', 'playbackState',
+  'next', 'previous', 'pause', 'resume', 'seek', 'publicConfig', 'playbackState', 'displayHeartbeat',
 ]);
 const PUBLIC_CONFIG_KEYS = new Set([
   'photoPeriod',
@@ -239,6 +240,9 @@ export async function registerWs(app: FastifyInstance): Promise<void> {
           break;
         case 'pause': setPaused(true); break;
         case 'resume': setPaused(false); break;
+        case 'displayHeartbeat':
+          reportDisplayHeartbeat();
+          break;
         case 'playbackState': {
           const current = getCurrent()[0];
           const currentTime = Number(msg.currentTime);

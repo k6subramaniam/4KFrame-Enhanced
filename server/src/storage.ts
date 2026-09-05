@@ -31,7 +31,19 @@ async function dirSize(dir: string): Promise<number> {
   return total;
 }
 
-export async function computeStorage(): Promise<{ used: number; free: number }> {
+let cached: { at: number; used: number; free: number } | null = null;
+const STORAGE_CACHE_MS = 15_000;
+
+export function invalidateStorageCache(): void {
+  cached = null;
+}
+
+export async function computeStorage(force = false): Promise<{ used: number; free: number }> {
+  const now = Date.now();
+  if (!force && cached && now - cached.at < STORAGE_CACHE_MS) {
+    return { used: cached.used, free: cached.free };
+  }
+
   const used = await dirSize(MEDIA_DIR);
   let free = 0;
   try {
@@ -40,5 +52,6 @@ export async function computeStorage(): Promise<{ used: number; free: number }> 
   } catch {
     free = 0;
   }
+  cached = { at: now, used, free };
   return { used, free };
 }

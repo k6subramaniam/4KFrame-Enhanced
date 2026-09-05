@@ -144,6 +144,72 @@ export interface DisplayPlaybackState {
   observedAt: number;
 }
 
+export type ProcessingJobKind = 'transcode' | 'upscale';
+export type ProcessingJobState = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+export interface ProcessingJob {
+  id: string;
+  kind: ProcessingJobKind;
+  mediaId: string;
+  label: string;
+  target?: VideoUpscaleTarget;
+  state: ProcessingJobState;
+  createdAt: number;
+  startedAt?: number;
+  finishedAt?: number;
+  error?: string;
+  /** Queued jobs can be cancelled. Running FFmpeg jobs finish atomically. */
+  cancellable: boolean;
+}
+
+export interface AdminStatus {
+  generatedAt: number;
+  uptimeSec: number;
+  version: string;
+  frame: {
+    online: boolean;
+    lastSeenAt: number | null;
+  };
+  library: {
+    total: number;
+    photos: number;
+    videos: number;
+    trash: number;
+    favorites: number;
+  };
+  storage: {
+    used: number;
+    free: number;
+    total: number;
+    percentUsed: number;
+    level: 'normal' | 'warning' | 'critical';
+  };
+  current: MediaItem | null;
+  processors: {
+    images: boolean;
+    video: boolean;
+  };
+  jobs: {
+    active: number;
+    queued: number;
+    running: number;
+    recent: ProcessingJob[];
+  };
+  largest: MediaItem[];
+  backups: {
+    lastSnapshotAt: number | null;
+  };
+}
+
+export interface FrameBackup {
+  version: 1;
+  exportedAt: number;
+  config: FrameConfig;
+  items: MediaItem[];
+  trash: MediaItem[];
+  order: string[];
+}
+
 // --- WebSocket protocol (`/ws`) ---
 
 /** Commands a controller (admin / cast sender / display remote) sends to the server. */
@@ -155,6 +221,7 @@ export type ControlMessage =
   | { type: 'pause' }
   | { type: 'resume' }
   | { type: 'playbackState'; itemId: string; currentTime: number; duration: number; seekable: boolean }
+  | { type: 'displayHeartbeat' }
   | { type: 'cast'; id: string }
   | { type: 'playSequence'; ids: string[] }
   | { type: 'clearQueue' }

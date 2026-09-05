@@ -5,7 +5,7 @@
  * of photos and videos, the settings panel, and Google Cast sender wiring.
  */
 
-import type { DisplayPlaybackState, FrameConfig, FrameEvent, MediaItem } from '@4kframe/shared';
+import type { AdminStatus, DisplayPlaybackState, FrameBackup, FrameConfig, FrameEvent, MediaItem, ProcessingJob } from '@4kframe/shared';
 import {
   fetchItems, fetchTrash, fetchCurrent, castItem, deleteItem, upload, thumbUrl,
   skipNext, skipPrev, getPlayback, setPaused, setHold, seekBy, toggleEnabled,
@@ -14,6 +14,8 @@ import {
   setItemsEnabled, deleteItems, restoreTrashItems, purgeTrashItems, emptyTrash, playSequence,
   updateData,
   pushLiveCast, stopLiveCast,
+  fetchAdminStatus, cancelProcessingJob, retryProcessingJob, clearFinishedProcessingJobs,
+  createBackupSnapshot, downloadBackup, restoreBackup,
 } from './api.js';
 import { renderSettings } from './settings.js';
 import { renderActiveCropPreview } from './cropPreview.js';
@@ -46,7 +48,11 @@ import {
 
 type Mode = 'cast' | 'view' | 'delete';
 type PeopleFilter = 'all' | 'has-faces' | 'similar-faces' | 'labeled';
-type SortMode = 'date-desc' | 'date-asc' | 'filename-asc' | 'filename-desc';
+type SortMode =
+  | 'date-desc' | 'date-asc'
+  | 'filename-asc' | 'filename-desc'
+  | 'size-desc' | 'size-asc'
+  | 'resolution-desc';
 let mode: Mode = 'cast';
 let peopleFilter: PeopleFilter = 'all';
 let sortMode: SortMode = 'date-desc';
@@ -103,6 +109,22 @@ const bulkToolbar = document.getElementById('bulk-toolbar') as HTMLElement | nul
 const selectionCount = document.getElementById('selection-count') as HTMLElement | null;
 const trashGrid = document.getElementById('trash-grid') as HTMLElement | null;
 const trashSummary = document.getElementById('trash-summary') as HTMLElement | null;
+const opsVersion = document.getElementById('ops-version') as HTMLElement | null;
+const opsFrameDot = document.getElementById('ops-frame-dot') as HTMLElement | null;
+const opsFrameState = document.getElementById('ops-frame-state') as HTMLElement | null;
+const opsStorageValue = document.getElementById('ops-storage-value') as HTMLElement | null;
+const opsStorageFill = document.getElementById('ops-storage-fill') as HTMLElement | null;
+const opsLibraryValue = document.getElementById('ops-library-value') as HTMLElement | null;
+const opsJobsValue = document.getElementById('ops-jobs-value') as HTMLElement | null;
+const opsNowThumb = document.getElementById('ops-now-thumb') as HTMLImageElement | null;
+const opsNowPlaceholder = document.getElementById('ops-now-placeholder') as HTMLElement | null;
+const opsNowTitle = document.getElementById('ops-now-title') as HTMLElement | null;
+const opsNowMeta = document.getElementById('ops-now-meta') as HTMLElement | null;
+const opsLargest = document.getElementById('ops-largest') as HTMLElement | null;
+const opsJobs = document.getElementById('ops-jobs') as HTMLElement | null;
+const opsDetails = document.getElementById('ops-details') as HTMLDetailsElement | null;
+const opsBackupMeta = document.getElementById('ops-backup-meta') as HTMLElement | null;
+let opsTimer: ReturnType<typeof window.setInterval> | undefined;
 
 const HINTS: Record<Mode, string> = {
   cast: 'Cast mode: click a photo to show it on the frame.',
@@ -116,6 +138,212 @@ const MODE_VERBS: Record<Mode, string> = { cast: 'cast', view: 'open', delete: '
 function fmtDuration(sec: number): string {
   const s = Math.round(sec);
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+
+function relativeTime(timestamp: number | null): string {
+  if (!timestamp) return 'never';
+  const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+  if (seconds < 5) return 'just now';
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
+
+function jobTitle(job: ProcessingJob): string {
+  if (job.kind === 'upscale') return `Upscale to ${job.target === '4k' ? '4K' : '1080p'}`;
+  return 'Compatibility transcode';
+}
+
+function renderOpsDashboard(status: AdminStatus): void {
+  if (opsVersion) opsVersion.textContent = status.version === 'dev' ? 'local' : `build ${status.version.slice(0, 8)}`;
+
+  opsFrameDot?.classList.toggle('online', status.frame.online);
+  opsFrameDot?.classList.toggle('offline', !status.frame.online);
+  if (opsFrameState) {
+    opsFrameState.textContent = status.frame.online ? 'Online' : 'Offline';
+    opsFrameState.title = status.frame.lastSeenAt ? `Last display heartbeat ${relativeTime(status.frame.lastSeenAt)}` : 'No display heartbeat received yet';
+  }
+
+  if (opsStorageValue) {
+    opsStorageValue.textContent = status.storage.total > 0
+      ? `${Math.round(status.storage.percentUsed)}% · ${formatBytes(status.storage.free)} free`
+      : 'Storage unavailable';
+  }
+  if (opsStorageFill) {
+    opsStorageFill.style.width = `${Math.min(100, Math.max(0, status.storage.percentUsed))}%`;
+    opsStorageFill.classList.toggle('warning', status.storage.level === 'warning');
+    opsStorageFill.classList.toggle('critical', status.storage.level === 'critical');
+  }
+
+  if (opsLibraryValue) {
+    opsLibraryValue.textContent = `${status.library.total} · ${status.library.photos}P / ${status.library.videos}V`;
+    opsLibraryValue.title = `${status.library.favorites} Favorites · ${status.library.trash} in Trash`;
+  }
+  if (opsJobsValue) {
+    opsJobsValue.textContent = status.jobs.active ? `${status.jobs.active} active` : 'Idle';
+    opsJobsValue.title = `${status.jobs.running} running · ${status.jobs.queued} queued`;
+  }
+
+  if (status.current) {
+    if (opsNowTitle) opsNowTitle.textContent = status.current.originalFilename ?? status.current.caption ?? status.current.file;
+    if (opsNowMeta) {
+      const resolution = status.current.width > 0 && status.current.height > 0
+        ? `${status.current.width}×${status.current.height}`
+        : 'resolution unknown';
+      const quality = status.current.upscaleTarget ? ` · ${status.current.upscaleTarget.toUpperCase()}` : '';
+      opsNowMeta.textContent = `${status.current.kind === 'video' ? 'Video' : 'Photo'} · ${resolution}${quality}`;
+    }
+    if (opsNowThumb) {
+      opsNowThumb.src = thumbUrl(status.current);
+      opsNowThumb.hidden = false;
+    }
+    if (opsNowPlaceholder) opsNowPlaceholder.style.display = 'none';
+  } else {
+    if (opsNowTitle) opsNowTitle.textContent = 'Nothing playing';
+    if (opsNowMeta) opsNowMeta.textContent = 'The slideshow has no active item.';
+    if (opsNowThumb) {
+      opsNowThumb.hidden = true;
+      opsNowThumb.removeAttribute('src');
+    }
+    if (opsNowPlaceholder) opsNowPlaceholder.style.display = 'grid';
+  }
+
+  if (opsLargest) {
+    opsLargest.innerHTML = status.largest.length
+      ? status.largest.map((item) => `
+          <div class="ops-list-row" title="${escapeHtml(item.originalFilename ?? item.file)}">
+            <span class="name">${escapeHtml(item.originalFilename ?? item.file)}</span>
+            <span class="muted">${formatBytes(item.sizeBytes)}</span>
+          </div>`).join('')
+      : '<span class="muted">Size metadata will appear as media is indexed.</span>';
+  }
+
+  if (opsJobs) {
+    const recent = status.jobs.recent.slice(0, 7);
+    opsJobs.innerHTML = recent.length
+      ? recent.map((job) => `
+          <div class="ops-job" data-job-id="${escapeHtml(job.id)}">
+            <div class="ops-job-top">
+              <span class="ops-job-name" title="${escapeHtml(job.label)}">${escapeHtml(job.label)}</span>
+              <span class="ops-state ${job.state}">${job.state}</span>
+            </div>
+            <div class="ops-job-meta">${jobTitle(job)} · ${relativeTime(job.startedAt ?? job.createdAt)}${job.error ? ` · ${escapeHtml(job.error)}` : ''}</div>
+            ${job.cancellable || job.state === 'failed' || job.state === 'cancelled'
+              ? `<div class="ops-job-actions">
+                  ${job.cancellable ? '<button type="button" data-job-action="cancel">Cancel queued</button>' : ''}
+                  ${job.state === 'failed' || job.state === 'cancelled' ? '<button type="button" data-job-action="retry">Retry</button>' : ''}
+                </div>`
+              : ''}
+          </div>`).join('')
+      : '<span class="muted">No processing jobs yet.</span>';
+
+    opsJobs.querySelectorAll<HTMLButtonElement>('[data-job-action]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const row = button.closest<HTMLElement>('[data-job-id]');
+        const id = row?.dataset.jobId;
+        if (!id) return;
+        button.disabled = true;
+        try {
+          if (button.dataset.jobAction === 'cancel') await cancelProcessingJob(id);
+          else await retryProcessingJob(id);
+          await refresh();
+        } catch (error) {
+          toast((error as Error).message, { error: true });
+        } finally {
+          button.disabled = false;
+        }
+      });
+    });
+  }
+
+  if (opsBackupMeta) {
+    const snapshot = status.backups.lastSnapshotAt ? relativeTime(status.backups.lastSnapshotAt) : 'pending';
+    opsBackupMeta.textContent =
+      `Last safe snapshot: ${snapshot} · FFmpeg ${status.processors.video ? 'ready' : 'unavailable'} · Images ${status.processors.images ? 'ready' : 'unavailable'}. Backups exclude media bytes and login secrets.`;
+  }
+
+  if (opsDetails && (status.jobs.active > 0 || status.storage.level !== 'normal')) opsDetails.open = true;
+}
+
+async function refreshOpsDashboard(): Promise<void> {
+  try {
+    renderOpsDashboard(await fetchAdminStatus());
+  } catch {
+    opsFrameDot?.classList.remove('online');
+    opsFrameDot?.classList.add('offline');
+    if (opsFrameState) opsFrameState.textContent = 'Unavailable';
+  }
+}
+
+function wireOpsDashboard(): void {
+  document.getElementById('ops-refresh')?.addEventListener('click', () => void refreshOpsDashboard());
+
+  document.getElementById('ops-clear-jobs')?.addEventListener('click', async () => {
+    try {
+      const cleared = await clearFinishedProcessingJobs();
+      toast(cleared ? `Cleared ${cleared} finished job${cleared === 1 ? '' : 's'}.` : 'No finished jobs to clear.');
+      await refreshOpsDashboard();
+    } catch (error) {
+      toast((error as Error).message, { error: true });
+    }
+  });
+
+  document.getElementById('ops-download-backup')?.addEventListener('click', async () => {
+    try {
+      const blob = await downloadBackup();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `4kframe-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      toast((error as Error).message, { error: true });
+    }
+  });
+
+  document.getElementById('ops-snapshot')?.addEventListener('click', async () => {
+    try {
+      await createBackupSnapshot();
+      toast('Safe settings/catalog snapshot saved.');
+      await refreshOpsDashboard();
+    } catch (error) {
+      toast((error as Error).message, { error: true });
+    }
+  });
+
+  const restorePick = document.getElementById('ops-restore-pick') as HTMLButtonElement | null;
+  const restoreFile = document.getElementById('ops-restore-file') as HTMLInputElement | null;
+  restorePick?.addEventListener('click', () => restoreFile?.click());
+  restoreFile?.addEventListener('change', async () => {
+    const file = restoreFile.files?.[0];
+    restoreFile.value = '';
+    if (!file) return;
+    try {
+      const backup = JSON.parse(await file.text()) as FrameBackup;
+      const confirmed = await confirmToast(
+        'Restore this settings/catalog backup? Current media is kept, and only catalog entries whose files still exist are merged.',
+        { confirmLabel: 'Restore backup' },
+      );
+      if (!confirmed) return;
+      const result = await restoreBackup(backup);
+      toast(
+        `Backup restored · ${result.restoredItems} library · ${result.restoredTrash} Trash${result.skippedMissingAssets ? ` · ${result.skippedMissingAssets} missing files skipped` : ''}.`,
+      );
+      await refresh();
+    } catch (error) {
+      toast(`Restore failed: ${(error as Error).message}`, { error: true });
+    }
+  });
+
+  window.clearInterval(opsTimer);
+  opsTimer = window.setInterval(() => { void refreshOpsDashboard(); }, 5000);
 }
 
 function renderGrid(): void {
@@ -224,6 +452,17 @@ function sortItems(source: MediaItem[]): MediaItem[] {
       const direction = sortMode === 'date-asc' ? 1 : -1;
       const dateCompare = (itemDate(a, mediaFilters.dateField) - itemDate(b, mediaFilters.dateField)) * direction;
       return dateCompare || filenameCollator.compare(a.file, b.file) || a.id.localeCompare(b.id);
+    }
+
+    if (sortMode === 'size-desc' || sortMode === 'size-asc') {
+      const direction = sortMode === 'size-asc' ? 1 : -1;
+      const sizeCompare = (Number(a.sizeBytes ?? 0) - Number(b.sizeBytes ?? 0)) * direction;
+      return sizeCompare || filenameCollator.compare(a.file, b.file) || a.id.localeCompare(b.id);
+    }
+    if (sortMode === 'resolution-desc') {
+      const aPixels = Math.max(0, a.width) * Math.max(0, a.height);
+      const bPixels = Math.max(0, b.width) * Math.max(0, b.height);
+      return (bPixels - aPixels) || filenameCollator.compare(a.file, b.file) || a.id.localeCompare(b.id);
     }
 
     const direction = sortMode === 'filename-asc' ? 1 : -1;
@@ -598,6 +837,7 @@ async function commitVideoScrub(): Promise<void> {
   }
   videoScrubbing = false;
   await syncPlayback();
+  await refreshOpsDashboard();
 }
 
 function wireVideoScrubber(): void {
@@ -1278,6 +1518,7 @@ async function start(): Promise<void> {
   if (!started) {
     started = true;
     wireCast();
+    wireOpsDashboard();
     wireModes();
     wireUpload();
     wireLiveCast();

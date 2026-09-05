@@ -35,6 +35,9 @@ import { videoProcessingAvailable } from './media/video.js';
 import { setFaceDetector } from './media/faceMatch.js';
 import { loadOrCreateTls, type TlsMaterial } from './tls.js';
 import * as auth from './auth.js';
+import { startBackupSnapshots } from './backups.js';
+import { getDisplayPresence } from './presence.js';
+import { listProcessingJobs } from './processingJobs.js';
 
 const FALLBACK_HTML = '<html><head><title>4KFrame</title></head><body></body></html>';
 
@@ -95,11 +98,17 @@ export async function buildApp(https?: TlsMaterial): Promise<FastifyInstance> {
   await registerWs(app);
 
   // Health check.
-  app.get('/api/health', async () => ({
-    ok: true,
-    imageProcessing: await imageProcessingAvailable(),
-    videoProcessing: await videoProcessingAvailable(),
-  }));
+  app.get('/api/health', async () => {
+    const jobs = listProcessingJobs(100);
+    return {
+      ok: true,
+      imageProcessing: await imageProcessingAvailable(),
+      videoProcessing: await videoProcessingAvailable(),
+      displayOnline: getDisplayPresence().online,
+      activeJobs: jobs.filter((job) => job.state === 'queued' || job.state === 'running').length,
+      uptimeSec: Math.round(process.uptime()),
+    };
+  });
 
   return app;
 }
@@ -147,6 +156,7 @@ async function main(): Promise<void> {
 
   startSlideshow();
   startRetentionSweep();
+  startBackupSnapshots();
 
   if (!(await imageProcessingAvailable())) {
     httpApp.log.warn('sharp not available — image variants will not be generated (originals served as-is).');

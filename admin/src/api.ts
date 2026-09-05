@@ -1,9 +1,12 @@
 /** Thin REST client for the admin PWA. */
 
 import type {
+  AdminStatus,
   ApiDataPayload,
   ControlMessage,
   CurrentResponse,
+  FrameBackup,
+  ProcessingJob,
   DisplayPlaybackState,
   MediaItem,
   MediaKind,
@@ -19,8 +22,50 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
-export async function fetchItems(): Promise<MediaItem[]> {
-  const res = await fetch('/api/thumbs');
+
+export async function fetchAdminStatus(): Promise<AdminStatus> {
+  return requestJson<AdminStatus>('/api/admin/status');
+}
+
+export async function fetchProcessingJobs(): Promise<ProcessingJob[]> {
+  return (await requestJson<{ jobs: ProcessingJob[] }>('/api/admin/jobs')).jobs;
+}
+
+export async function cancelProcessingJob(id: string): Promise<void> {
+  await requestJson(`/api/admin/jobs/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+}
+
+export async function retryProcessingJob(id: string): Promise<void> {
+  await requestJson(`/api/admin/jobs/${encodeURIComponent(id)}/retry`, { method: 'POST' });
+}
+
+export async function clearFinishedProcessingJobs(): Promise<number> {
+  return (await requestJson<{ ok: boolean; cleared: number }>('/api/admin/jobs', { method: 'DELETE' })).cleared;
+}
+
+export async function createBackupSnapshot(): Promise<number> {
+  return (await requestJson<{ ok: boolean; exportedAt: number }>('/api/admin/backup/snapshot', { method: 'POST' })).exportedAt;
+}
+
+export async function downloadBackup(): Promise<Blob> {
+  const res = await fetch('/api/admin/backup');
+  if (!res.ok) throw new Error(`Backup download failed (${res.status})`);
+  return res.blob();
+}
+
+export async function restoreBackup(backup: FrameBackup): Promise<{
+  restoredItems: number;
+  restoredTrash: number;
+  skippedMissingAssets: number;
+}> {
+  return requestJson('/api/admin/restore', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(backup),
+  });
+}
+
+export async function fetchItems(): Promise<MediaItem[]> {  const res = await fetch('/api/thumbs');
   const json = (await res.json()) as { items: MediaItem[] };
   return json.items;
 }

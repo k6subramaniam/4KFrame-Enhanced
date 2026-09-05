@@ -49,7 +49,9 @@ let holding = false;
 let receivedConfigEvent = false;
 let receivedPausedEvent = false;
 let lastPlaybackReportAt = 0;
+let displayHeartbeatTimer: ReturnType<typeof window.setInterval> | undefined;
 const PLAYBACK_REPORT_INTERVAL_MS = 1_000;
+const DISPLAY_HEARTBEAT_MS = 5_000;
 const VIDEO_SEEK_SECONDS = 10;
 
 /** Forward a control message to the backend (used to bridge Cast custom messages). */
@@ -1222,7 +1224,15 @@ function connect(): void {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
   socket = ws;
+  const heartbeat = (): void => {
+    if (socket === ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'displayHeartbeat' }));
+    }
+  };
   ws.onopen = () => {
+    window.clearInterval(displayHeartbeatTimer);
+    heartbeat();
+    displayHeartbeatTimer = window.setInterval(heartbeat, DISPLAY_HEARTBEAT_MS);
     // Restore the real indicator rather than blanking it — setStatus('') used to wipe the
     // Paused/Loop badge on every reconnect.
     setStatus(statusText());
@@ -1232,6 +1242,7 @@ function connect(): void {
     try { handleEvent(JSON.parse(ev.data) as FrameEvent); } catch { /* ignore */ }
   };
   ws.onclose = () => {
+    window.clearInterval(displayHeartbeatTimer);
     if (socket === ws) socket = null;
     setStatus('Reconnecting…');
     // Controls send over this socket, so leaving them enabled while it's down means

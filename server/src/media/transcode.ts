@@ -14,19 +14,38 @@ import { run, videoProcessingAvailable } from './video.js';
 import { getItem, updateItem, listItems } from '../store.js';
 import { hub } from '../hub.js';
 import { refresh } from '../slideshow.js';
+import {
+  cancelQueuedProcessingJob,
+  createProcessingJob,
+  getProcessingJob,
+  setProcessingJobState,
+} from '../processingJobs.js';
+import { invalidateStorageCache } from '../storage.js';
 
 let chain: Promise<void> = Promise.resolve();
 
 /** Queue a flagged video for background compatibility transcoding (no-op otherwise). */
-export function enqueueTranscode(item: MediaItem): void {
-  if (!item.transcoding) return;
-  chain = chain.then(() => transcodeOne(item)).catch(() => undefined);
+export function enqueueTranscode(item: MediaItem): string | null {
+  if (!item.transcoding) return null;
+  const job = createProcessingJob('transcode', item.id, item.originalFilename ?? item.file);
+  chain = chain.then(async () => {
+    if (getProcessingJob(job.id)?.state === 'cancelled') return;
+    setProcessingJobState(job.id, 'running');
+    try {
+      const error = await transcodeOne(item);
+      setProcessingJobState(job.id, error ? 'failed' : 'completed', error ?? undefined);
+    } catch (error) {
+      await updateItem(item.id, { transcoding: false });
+      setProcessingJobState(job.id, 'failed', (error as Error).message);
+    }
+  }).catch(() => undefined);
+  return job.id;
 }
 
-async function transcodeOne(item: MediaItem): Promise<void> {
+async function transcodeOne(item: MediaItem): Promise<string | null> {
   if (!(await videoProcessingAvailable())) {
     await updateItem(item.id, { transcoding: false });
-    return;
+    return 'ffmpeg video processing is unavailable';
   }
 
   const srcPath = path.join(MEDIA_DIR, item.file);
@@ -57,7 +76,7 @@ async function transcodeOne(item: MediaItem): Promise<void> {
     await fs.rm(outPath).catch(() => undefined);
     await updateItem(item.id, { transcoding: false });
     hub.emitEvent({ type: 'log', level: 'warn', message: `Transcode failed for ${item.file}; serving original.` });
-    return;
+    return 'transcode failed';
   }
 
   const oldFile = item.file;
@@ -65,8 +84,10 @@ async function transcodeOne(item: MediaItem): Promise<void> {
   if (oldFile !== outName) await fs.rm(path.join(MEDIA_DIR, oldFile)).catch(() => undefined);
 
   refresh();
+  invalidateStorageCache();
   hub.emitEvent({ type: 'library', items: listItems() });
   hub.emitEvent({ type: 'log', level: 'info', message: `Transcoded ${item.file} → ${outName}.` });
+  return null;
 }
 
 function targetDimensions(
@@ -108,19 +129,28 @@ export async function enqueueUpscale(
 
   await updateItem(item.id, { upscaling: true });
   hub.emitEvent({ type: 'library', items: listItems() });
+  const job = createProcessingJob('upscale', item.id, item.originalFilename ?? item.file, target);
   chain = chain
-    .then(() => upscaleOne(item.id, target))
-    .catch(async (error) => {
-      await updateItem(item.id, { upscaling: false });
-      hub.emitEvent({ type: 'library', items: listItems() });
-      hub.emitEvent({ type: 'log', level: 'error', message: `Upscale failed: ${(error as Error).message}` });
-    });
+    .then(async () => {
+      if (getProcessingJob(job.id)?.state === 'cancelled') return;
+      setProcessingJobState(job.id, 'running');
+      try {
+        const error = await upscaleOne(item.id, target);
+        setProcessingJobState(job.id, error ? 'failed' : 'completed', error ?? undefined);
+      } catch (error) {
+        await updateItem(item.id, { upscaling: false });
+        setProcessingJobState(job.id, 'failed', (error as Error).message);
+        hub.emitEvent({ type: 'library', items: listItems() });
+        hub.emitEvent({ type: 'log', level: 'error', message: `Upscale failed: ${(error as Error).message}` });
+      }
+    })
+    .catch(() => undefined);
   return { queued: true };
 }
 
-async function upscaleOne(id: string, target: VideoUpscaleTarget): Promise<void> {
+async function upscaleOne(id: string, target: VideoUpscaleTarget): Promise<string | null> {
   const item = getItem(id);
-  if (!item || item.kind !== 'video') return;
+  if (!item || item.kind !== 'video') return 'video no longer exists';
 
   let sourceFile = item.upscaleSourceFile ?? item.file;
   let sourceWidth = item.upscaleSourceWidth ?? item.width;
@@ -140,7 +170,7 @@ async function upscaleOne(id: string, target: VideoUpscaleTarget): Promise<void>
   if (!dims) {
     await updateItem(id, { upscaling: false });
     hub.emitEvent({ type: 'library', items: listItems() });
-    return;
+    return 'source already meets target';
   }
 
   const outName = `upscaled-${target}.${buildFilename(item.id, dims.width, dims.height, 'mp4')}`;
@@ -169,13 +199,13 @@ async function upscaleOne(id: string, target: VideoUpscaleTarget): Promise<void>
     await updateItem(id, { upscaling: false });
     hub.emitEvent({ type: 'library', items: listItems() });
     hub.emitEvent({ type: 'log', level: 'warn', message: `Upscale failed for ${sourceFile}; keeping current video.` });
-    return;
+    return 'upscale failed';
   }
 
   const latest = getItem(id);
   if (!latest) {
     await fs.rm(outPath).catch(() => undefined);
-    return;
+    return 'video removed during upscale';
   }
 
   const preservedSourceFile = latest.upscaleSourceFile ?? sourceFile;
@@ -198,6 +228,7 @@ async function upscaleOne(id: string, target: VideoUpscaleTarget): Promise<void>
     await fs.rm(path.join(MEDIA_DIR, oldDisplayFile)).catch(() => undefined);
   }
 
+  invalidateStorageCache();
   refresh();
   hub.emitEvent({ type: 'library', items: listItems() });
   hub.emitEvent({
@@ -205,4 +236,36 @@ async function upscaleOne(id: string, target: VideoUpscaleTarget): Promise<void>
     level: 'info',
     message: `Upscale complete: ${sourceFile} → ${dims.width}×${dims.height}.`,
   });
+  return null;
+}
+
+export async function cancelVideoProcessingJob(jobId: string): Promise<{ ok: boolean; error?: string }> {
+  const job = cancelQueuedProcessingJob(jobId);
+  if (!job) return { ok: false, error: 'only queued jobs can be cancelled' };
+  const item = getItem(job.mediaId);
+  if (item) {
+    await updateItem(job.mediaId, job.kind === 'transcode' ? { transcoding: false } : { upscaling: false });
+    hub.emitEvent({ type: 'library', items: listItems() });
+  }
+  return { ok: true };
+}
+
+export async function retryVideoProcessingJob(jobId: string): Promise<{ ok: boolean; error?: string }> {
+  const previous = getProcessingJob(jobId);
+  if (!previous || (previous.state !== 'failed' && previous.state !== 'cancelled')) {
+    return { ok: false, error: 'only failed or cancelled jobs can be retried' };
+  }
+  const item = getItem(previous.mediaId);
+  if (!item || item.kind !== 'video') return { ok: false, error: 'video no longer exists' };
+
+  if (previous.kind === 'transcode') {
+    const updated = await updateItem(item.id, { transcoding: true });
+    if (!updated) return { ok: false, error: 'video no longer exists' };
+    enqueueTranscode(updated);
+    hub.emitEvent({ type: 'library', items: listItems() });
+    return { ok: true };
+  }
+
+  if (!previous.target) return { ok: false, error: 'upscale target is missing' };
+  return enqueueUpscale(item, previous.target);
 }

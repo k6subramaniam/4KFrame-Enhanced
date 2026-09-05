@@ -14,6 +14,7 @@ import {
   defaultConfig,
   normalizeTransform,
   type DisplayTransform,
+  type FrameBackup,
   type FrameConfig,
   type MediaItem,
 } from '@4kframe/shared';
@@ -255,4 +256,106 @@ export function getAuthSecret(): string | undefined {
 export async function setAuthSecret(secret: string): Promise<void> {
   db().authSecret = secret;
   await flush();
+}
+
+
+function isBackupMediaItem(value: unknown): value is MediaItem {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const item = value as Partial<MediaItem>;
+  return typeof item.id === 'string'
+    && item.id.length > 0
+    && (item.kind === 'photo' || item.kind === 'video')
+    && typeof item.file === 'string'
+    && item.file.length > 0
+    && typeof item.preview === 'string'
+    && typeof item.thumb === 'string'
+    && typeof item.createdAt === 'number'
+    && Number.isFinite(item.createdAt);
+}
+
+/** Export settings + library catalog without OAuth tokens or authentication secrets. */
+export function createSafeBackup(): FrameBackup {
+  const d = db();
+  return JSON.parse(JSON.stringify({
+    version: 1,
+    exportedAt: Date.now(),
+    config: d.config,
+    items: d.items,
+    trash: d.trash,
+    order: d.order,
+  })) as FrameBackup;
+}
+
+/**
+ * Restore a safe backup without deleting newer library entries.
+ *
+ * Catalog rows are only merged when their main media file still exists on this volume.
+ * This makes a metadata/settings restore safe even when the JSON is moved between frames.
+ */
+export async function restoreSafeBackup(input: unknown): Promise<{
+  restoredItems: number;
+  restoredTrash: number;
+  skippedMissingAssets: number;
+}> {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('invalid backup');
+  const backup = input as Partial<FrameBackup>;
+  if (backup.version !== 1 || !backup.config || !Array.isArray(backup.items) || !Array.isArray(backup.trash) || !Array.isArray(backup.order)) {
+    throw new Error('unsupported or incomplete backup');
+  }
+  if (backup.items.some((item) => !isBackupMediaItem(item)) || backup.trash.some((item) => !isBackupMediaItem(item))) {
+    throw new Error('backup contains invalid media records');
+  }
+
+  const d = db();
+  d.config = {
+    ...defaultConfig(),
+    ...(backup.config as Partial<FrameConfig>),
+    googlePhotos: {
+      ...defaultConfig().googlePhotos,
+      ...((backup.config as Partial<FrameConfig>).googlePhotos ?? {}),
+    },
+    overlays: {
+      ...defaultConfig().overlays,
+      ...((backup.config as Partial<FrameConfig>).overlays ?? {}),
+    },
+  };
+
+  let skippedMissingAssets = 0;
+  const validItems: MediaItem[] = [];
+  for (const raw of backup.items as MediaItem[]) {
+    try {
+      await fs.access(path.join(MEDIA_DIR, raw.file));
+      validItems.push({ ...raw, ...normalizeTransform(raw) });
+    } catch {
+      skippedMissingAssets += 1;
+    }
+  }
+  const validTrash: MediaItem[] = [];
+  for (const raw of backup.trash as MediaItem[]) {
+    try {
+      await fs.access(path.join(MEDIA_DIR, raw.file));
+      validTrash.push({ ...raw, ...normalizeTransform(raw) });
+    } catch {
+      skippedMissingAssets += 1;
+    }
+  }
+
+  const activeById = new Map(d.items.map((item) => [item.id, item]));
+  for (const item of validItems) activeById.set(item.id, item);
+  d.items = [...activeById.values()];
+
+  const trashById = new Map(d.trash.map((item) => [item.id, item]));
+  for (const item of validTrash) trashById.set(item.id, item);
+  d.trash = [...trashById.values()];
+
+  const activeIds = new Set(d.items.map((item) => item.id));
+  const requestedOrder = (backup.order as string[]).filter((id) => activeIds.has(id));
+  d.order = [...new Set([...requestedOrder, ...d.order.filter((id) => activeIds.has(id)), ...activeIds])];
+
+  await flush();
+  return {
+    restoredItems: validItems.length,
+    restoredTrash: validTrash.length,
+    skippedMissingAssets,
+  };
 }
