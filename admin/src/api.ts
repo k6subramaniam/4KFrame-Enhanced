@@ -218,27 +218,46 @@ export async function deleteItem(id: string): Promise<void> {
   await requestJson(`/api/delete/${id}`);
 }
 
+const BULK_ID_BATCH_SIZE = 500;
+
+async function forEachIdBatch(
+  ids: string[],
+  action: (batch: string[]) => Promise<void>,
+): Promise<void> {
+  for (let offset = 0; offset < ids.length; offset += BULK_ID_BATCH_SIZE) {
+    await action(ids.slice(offset, offset + BULK_ID_BATCH_SIZE));
+  }
+}
+
 export async function setItemsEnabled(ids: string[], enabled: boolean): Promise<void> {
-  await requestJson('/api/items/enabled', {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids, enabled }),
+  await forEachIdBatch(ids, async (batch) => {
+    await requestJson('/api/items/enabled', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: batch, enabled }),
+    });
   });
 }
 
 export async function deleteItems(ids: string[]): Promise<void> {
-  await requestJson('/api/items', {
-    method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }),
+  await forEachIdBatch(ids, async (batch) => {
+    await requestJson('/api/items', {
+      method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: batch }),
+    });
   });
 }
 
 export async function restoreTrashItems(ids: string[]): Promise<void> {
-  await requestJson('/api/trash/restore', {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }),
+  await forEachIdBatch(ids, async (batch) => {
+    await requestJson('/api/trash/restore', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: batch }),
+    });
   });
 }
 
 export async function purgeTrashItems(ids: string[]): Promise<void> {
-  await requestJson('/api/trash/items', {
-    method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }),
+  await forEachIdBatch(ids, async (batch) => {
+    await requestJson('/api/trash/items', {
+      method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: batch }),
+    });
   });
 }
 
