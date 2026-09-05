@@ -7,11 +7,11 @@
 
 import type { DisplayPlaybackState, FrameConfig, FrameEvent, MediaItem } from '@4kframe/shared';
 import {
-  fetchItems, fetchCurrent, castItem, deleteItem, upload, thumbUrl,
+  fetchItems, fetchTrash, fetchCurrent, castItem, deleteItem, upload, thumbUrl,
   skipNext, skipPrev, getPlayback, setPaused, setHold, seekBy, toggleEnabled,
   me, login, logout, type AuthState, type Playback,
   patchMediaTransforms,
-  setItemsEnabled, deleteItems, playSequence,
+  setItemsEnabled, deleteItems, restoreTrashItems, purgeTrashItems, emptyTrash, playSequence,
   updateData,
   pushLiveCast, stopLiveCast,
 } from './api.js';
@@ -29,6 +29,20 @@ import {
 import { createMultiActivationRecognizer } from './multiActivation.js';
 import { playbackNavigationState, VIDEO_SEEK_SECONDS } from './playbackState.js';
 import { type ControlSheetController, wireControlSheet as wireControlSheetController } from './controlSheet.js';
+import {
+  DEFAULT_MEDIA_FILTERS,
+  datePresetRange,
+  filterLibraryItems,
+  formatBytes,
+  itemDate,
+  itemStorage,
+  itemUploader,
+  type DateField,
+  type DatePreset,
+  type MediaFilterState,
+  type MediaKindFilter,
+  type SizeFilter,
+} from './mediaFilters.js';
 
 type Mode = 'cast' | 'view' | 'delete';
 type PeopleFilter = 'all' | 'has-faces' | 'similar-faces' | 'labeled';
@@ -38,9 +52,13 @@ let peopleFilter: PeopleFilter = 'all';
 let sortMode: SortMode = 'date-desc';
 let labelFilter = '';
 let items: MediaItem[] = [];
+let trashItems: MediaItem[] = [];
+let trashRetentionDays = 30;
+let mediaFilters: MediaFilterState = { ...DEFAULT_MEDIA_FILTERS };
 let selectionMode = false;
 const selectedIds = new Set<string>();
 const selectedMediaIds = new Set<string>();
+const selectedTrashIds = new Set<string>();
 let activeItem: MediaItem | undefined;
 let activeConfig: Partial<FrameConfig> = {};
 // Which item id "Now playing crop" last rendered — guards the 'show' handler below against
@@ -73,13 +91,23 @@ const peopleFilterSelect = document.getElementById('people-filter') as HTMLSelec
 const labelFilterSelect = document.getElementById('label-filter') as HTMLSelectElement | null;
 const sortSelect = document.getElementById('media-sort') as HTMLSelectElement | null;
 const peopleSummary = document.getElementById('people-summary') as HTMLElement | null;
+const mediaFilterSummary = document.getElementById('media-filter-summary') as HTMLElement | null;
+const mediaDateField = document.getElementById('media-date-field') as HTMLSelectElement | null;
+const mediaDateStart = document.getElementById('media-date-start') as HTMLInputElement | null;
+const mediaDateEnd = document.getElementById('media-date-end') as HTMLInputElement | null;
+const mediaKindFilter = document.getElementById('media-kind-filter') as HTMLSelectElement | null;
+const mediaUploaderFilter = document.getElementById('media-uploader-filter') as HTMLSelectElement | null;
+const mediaSizeFilter = document.getElementById('media-size-filter') as HTMLSelectElement | null;
+const mediaStorageFilter = document.getElementById('media-storage-filter') as HTMLSelectElement | null;
 const bulkToolbar = document.getElementById('bulk-toolbar') as HTMLElement | null;
 const selectionCount = document.getElementById('selection-count') as HTMLElement | null;
+const trashGrid = document.getElementById('trash-grid') as HTMLElement | null;
+const trashSummary = document.getElementById('trash-summary') as HTMLElement | null;
 
 const HINTS: Record<Mode, string> = {
   cast: 'Cast mode: click a photo to show it on the frame.',
   view: 'View mode: click to open the full-size photo or video.',
-  delete: 'Delete mode: click to permanently remove from the frame.',
+  delete: 'Delete mode: click a photo or video to move it to Trash for 30 days.',
 };
 
 /** What Enter does on a tile in each mode — announced in the tile's accessible name. */
@@ -92,15 +120,16 @@ function fmtDuration(sec: number): string {
 
 function renderGrid(): void {
   grid.innerHTML = '';
-  const visibleItems = sortItems(filterPeople(items));
+  const visibleItems = sortItems(filterLibraryItems(filterPeople(items), mediaFilters));
   renderPeopleSummary(visibleItems);
+  renderMediaFilterSummary(visibleItems);
   if (!visibleItems.length) {
     // Distinguish "nothing uploaded yet" from "your filter hid everything" — otherwise a
     // too-narrow people filter just looks like an empty library.
     const empty = document.createElement('div');
     empty.id = 'grid-empty';
     empty.textContent = items.length
-      ? 'No media matches the current filter. Try “All media” above.'
+      ? 'No media matches the current filters. Adjust them or use Reset filters above.'
       : 'No photos or videos yet — drag some in, or use browse above to add your first.';
     grid.appendChild(empty);
     renderBulkToolbar();
@@ -118,8 +147,9 @@ function renderGrid(): void {
     tile.setAttribute('aria-pressed', String(selected));
     tile.setAttribute(
       'aria-label',
-      `${item.file}${selected ? ' (selected)' : ''} — Enter to ${MODE_VERBS[mode]}, Space to select`,
+      `${item.originalFilename ?? item.file}${selected ? ' (selected)' : ''} — Enter to ${MODE_VERBS[mode]}, Space to select`,
     );
+    tile.title = `${item.originalFilename ?? item.file} · ${formatBytes(item.sizeBytes)} · ${itemUploader(item)}`;
     // Videos only have an image thumb once a poster exists; otherwise show a placeholder.
     const hasImageThumb = item.kind === 'photo' || !!item.poster;
     const dur = item.kind === 'video' && item.durationSec
@@ -192,7 +222,7 @@ function sortItems(source: MediaItem[]): MediaItem[] {
   return [...source].sort((a, b) => {
     if (sortMode === 'date-asc' || sortMode === 'date-desc') {
       const direction = sortMode === 'date-asc' ? 1 : -1;
-      const dateCompare = (a.createdAt - b.createdAt) * direction;
+      const dateCompare = (itemDate(a, mediaFilters.dateField) - itemDate(b, mediaFilters.dateField)) * direction;
       return dateCompare || filenameCollator.compare(a.file, b.file) || a.id.localeCompare(b.id);
     }
 
@@ -236,6 +266,18 @@ function renderPeopleSummary(visibleItems: MediaItem[]): void {
   peopleSummary.textContent = `${visibleItems.length}/${items.length} shown · ${faceCount} faces · ${labelCount} labels`;
 }
 
+function renderMediaFilterSummary(visibleItems: MediaItem[]): void {
+  if (!mediaFilterSummary) return;
+  const parts = [`${visibleItems.length} of ${items.length} media`];
+  if (mediaFilters.startDate || mediaFilters.endDate) {
+    parts.push(`${mediaFilters.dateField === 'created' ? 'created' : 'uploaded'} date range`);
+  }
+  if (mediaFilters.kind !== 'all') parts.push(mediaFilters.kind === 'photo' ? 'photos' : 'videos');
+  if (mediaFilters.uploader !== 'all') parts.push(mediaFilters.uploader);
+  if (mediaFilters.size !== 'all') parts.push(mediaFilters.size.replaceAll('-', ' '));
+  mediaFilterSummary.textContent = parts.join(' · ');
+}
+
 function syncPeopleLabels(): void {
   if (!labelFilterSelect) return;
   const labels = [...new Set(items.flatMap((item) => item.faces?.map((face) => face.label).filter((label): label is string => Boolean(label)) ?? []))].sort();
@@ -248,16 +290,28 @@ function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char] ?? char));
 }
 
+function pruneSelectionToCurrentFilters(): void {
+  if (!selectedMediaIds.size) return;
+  const matching = new Set(filterLibraryItems(filterPeople(items), mediaFilters).map((item) => item.id));
+  for (const id of selectedMediaIds) if (!matching.has(id)) selectedMediaIds.delete(id);
+  if (!selectedMediaIds.size) selectionMode = false;
+}
+
+function applyFilterChange(): void {
+  pruneSelectionToCurrentFilters();
+  renderGrid();
+}
+
 function wirePeopleFilters(): void {
   if (sortSelect) sortMode = (sortSelect.value || sortMode) as SortMode;
   peopleFilterSelect?.addEventListener('change', () => {
     peopleFilter = (peopleFilterSelect.value || 'all') as PeopleFilter;
     syncPeopleLabels();
-    renderGrid();
+    applyFilterChange();
   });
   labelFilterSelect?.addEventListener('change', () => {
     labelFilter = labelFilterSelect.value;
-    renderGrid();
+    applyFilterChange();
   });
   sortSelect?.addEventListener('change', () => {
     sortMode = (sortSelect.value || 'date-desc') as SortMode;
@@ -265,6 +319,83 @@ function wirePeopleFilters(): void {
   });
 }
 
+function syncMediaFilterOptions(): void {
+  syncDynamicSelect(mediaUploaderFilter, 'All uploaders', [...new Set(items.map(itemUploader))].sort(), mediaFilters.uploader);
+  syncDynamicSelect(mediaStorageFilter, 'All storage', [...new Set(items.map(itemStorage))].sort(), mediaFilters.storage);
+}
+
+function syncDynamicSelect(
+  select: HTMLSelectElement | null,
+  allLabel: string,
+  values: string[],
+  current: string,
+): void {
+  if (!select) return;
+  select.innerHTML = `<option value="all">${allLabel}</option>`
+    + values.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join('');
+  select.value = values.includes(current) ? current : 'all';
+  if (select.value === 'all') {
+    if (select === mediaUploaderFilter) mediaFilters.uploader = 'all';
+    if (select === mediaStorageFilter) mediaFilters.storage = 'all';
+  }
+}
+
+function syncMediaFilterControls(): void {
+  if (mediaDateField) mediaDateField.value = mediaFilters.dateField;
+  if (mediaDateStart) mediaDateStart.value = mediaFilters.startDate;
+  if (mediaDateEnd) mediaDateEnd.value = mediaFilters.endDate;
+  if (mediaKindFilter) mediaKindFilter.value = mediaFilters.kind;
+  if (mediaUploaderFilter) mediaUploaderFilter.value = mediaFilters.uploader;
+  if (mediaSizeFilter) mediaSizeFilter.value = mediaFilters.size;
+  if (mediaStorageFilter) mediaStorageFilter.value = mediaFilters.storage;
+}
+
+function wireMediaFilters(): void {
+  mediaDateField?.addEventListener('change', () => {
+    mediaFilters.dateField = (mediaDateField.value || 'uploaded') as DateField;
+    applyFilterChange();
+  });
+  mediaDateStart?.addEventListener('change', () => {
+    mediaFilters.startDate = mediaDateStart.value;
+    applyFilterChange();
+  });
+  mediaDateEnd?.addEventListener('change', () => {
+    mediaFilters.endDate = mediaDateEnd.value;
+    applyFilterChange();
+  });
+  mediaKindFilter?.addEventListener('change', () => {
+    mediaFilters.kind = (mediaKindFilter.value || 'all') as MediaKindFilter;
+    applyFilterChange();
+  });
+  mediaUploaderFilter?.addEventListener('change', () => {
+    mediaFilters.uploader = mediaUploaderFilter.value || 'all';
+    applyFilterChange();
+  });
+  mediaSizeFilter?.addEventListener('change', () => {
+    mediaFilters.size = (mediaSizeFilter.value || 'all') as SizeFilter;
+    applyFilterChange();
+  });
+  mediaStorageFilter?.addEventListener('change', () => {
+    mediaFilters.storage = mediaStorageFilter.value || 'all';
+    applyFilterChange();
+  });
+  document.querySelectorAll<HTMLButtonElement>('[data-date-preset]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const range = datePresetRange((button.dataset.datePreset || 'clear') as DatePreset);
+      mediaFilters.startDate = range.startDate;
+      mediaFilters.endDate = range.endDate;
+      syncMediaFilterControls();
+      applyFilterChange();
+    });
+  });
+  document.getElementById('media-filter-reset')?.addEventListener('click', () => {
+    mediaFilters = { ...DEFAULT_MEDIA_FILTERS };
+    syncMediaFilterOptions();
+    syncMediaFilterControls();
+    renderGrid();
+  });
+  syncMediaFilterControls();
+}
 
 function ensurePhonePreview(): { root: HTMLElement; video: HTMLVideoElement; status: HTMLElement } {
   let root = document.getElementById('phone-audio-preview') as HTMLElement | null;
@@ -748,11 +879,11 @@ async function onTileClick(item: MediaItem): Promise<void> {
   } else if (mode === 'view') {
     window.open(`/photos/${item.file}`, '_blank');
   } else if (mode === 'delete') {
-    if (await confirmToast('Delete this item permanently from the frame?', { confirmLabel: 'Delete', danger: true })) {
+    if (await confirmToast('Move this item to Trash? It can be restored for 30 days.', { confirmLabel: 'Move to Trash', danger: true })) {
       try {
         await deleteItem(item.id);
         await refresh();
-        toast('Item deleted.');
+        toast('Moved to Trash.');
       } catch (err) {
         toast(`Delete failed: ${(err as Error).message}`, { error: true });
       }
@@ -800,12 +931,20 @@ function wireMediaTransforms(): void {
 }
 
 async function refresh(): Promise<void> {
-  items = await fetchItems();
+  const [activeLibrary, trash] = await Promise.all([fetchItems(), fetchTrash()]);
+  items = activeLibrary;
+  trashItems = trash.items;
+  trashRetentionDays = trash.retentionDays;
   const existing = new Set(items.map((item) => item.id));
   for (const id of selectedMediaIds) if (!existing.has(id)) selectedMediaIds.delete(id);
   if (!selectedMediaIds.size) selectionMode = false;
+  const existingTrash = new Set(trashItems.map((item) => item.id));
+  for (const id of selectedTrashIds) if (!existingTrash.has(id)) selectedTrashIds.delete(id);
   syncPeopleLabels();
+  syncMediaFilterOptions();
+  syncMediaFilterControls();
   renderGrid();
+  renderTrash();
   const current = await fetchCurrent();
   activeItem = items.find((item) => current.current.includes(item.file));
   activeConfig = current.data as Partial<FrameConfig>;
@@ -819,10 +958,11 @@ async function refresh(): Promise<void> {
 }
 
 function wireBulkActions(): void {
-  const visibleIds = () => sortItems(filterPeople(items)).map((item) => item.id);
+  const visibleIds = () => sortItems(filterLibraryItems(filterPeople(items), mediaFilters)).map((item) => item.id);
   document.getElementById('select-visible')?.addEventListener('click', () => {
-    selectionMode = true;
+    selectedMediaIds.clear();
     for (const id of visibleIds()) selectedMediaIds.add(id);
+    selectionMode = selectedMediaIds.size > 0;
     renderGrid();
   });
   document.getElementById('clear-selection')?.addEventListener('click', () => {
@@ -840,11 +980,17 @@ function wireBulkActions(): void {
   document.getElementById('bulk-delete')?.addEventListener('click', async () => {
     const ids = [...selectedMediaIds];
     if (!ids.length) return;
-    const ok = await confirmToast(`Delete ${ids.length} selected item(s) permanently?`, {
-      confirmLabel: `Delete ${ids.length}`,
+    const dateScope = mediaFilters.startDate || mediaFilters.endDate
+      ? ` ${mediaFilters.dateField === 'created' ? 'Created' : 'Uploaded'} date range: ${mediaFilters.startDate || 'any'} to ${mediaFilters.endDate || 'any'}.`
+      : '';
+    const ok = await confirmToast(`Move ${ids.length} selected item(s) to Trash?${dateScope} They can be restored for 30 days.`, {
+      confirmLabel: `Trash ${ids.length}`,
       danger: true,
     });
-    if (ok) await run(() => deleteItems(ids), true);
+    if (ok) {
+      await run(() => deleteItems(ids), true);
+      toast(`Moved ${ids.length} item${ids.length === 1 ? '' : 's'} to Trash.`);
+    }
   });
   document.getElementById('bulk-favorite')?.addEventListener('click', () => void run(() => setItemsEnabled([...selectedMediaIds], true)));
   document.getElementById('bulk-unfavorite')?.addEventListener('click', () => void run(() => setItemsEnabled([...selectedMediaIds], false)));
@@ -852,6 +998,126 @@ function wireBulkActions(): void {
     const ids = [...selectedMediaIds];
     if (!await castControl({ type: 'playSequence', ids })) await playSequence(ids);
   }));
+}
+
+function renderTrash(): void {
+  if (!trashGrid || !trashSummary) return;
+  trashGrid.innerHTML = '';
+  trashSummary.textContent = `${trashItems.length} item${trashItems.length === 1 ? '' : 's'} · retained ${trashRetentionDays} days`;
+
+  if (!trashItems.length) {
+    const empty = document.createElement('div');
+    empty.className = 'trash-empty';
+    empty.textContent = 'Trash is empty.';
+    trashGrid.appendChild(empty);
+    syncTrashActions();
+    return;
+  }
+
+  for (const item of trashItems) {
+    const selected = selectedTrashIds.has(item.id);
+    const tile = document.createElement('div');
+    tile.className = `tile trash${selected ? ' selected' : ''}`;
+    tile.tabIndex = 0;
+    tile.setAttribute('role', 'button');
+    tile.setAttribute('aria-pressed', String(selected));
+    tile.setAttribute('aria-label', `${selected ? 'Deselect' : 'Select'} trashed ${item.originalFilename ?? item.file}`);
+    tile.title = `${item.originalFilename ?? item.file} · ${formatBytes(item.sizeBytes)} · ${itemUploader(item)}`;
+    const hasImageThumb = item.kind === 'photo' || !!item.poster;
+    const daysLeft = item.trashExpiresAt
+      ? Math.max(0, Math.ceil((item.trashExpiresAt - Date.now()) / (24 * 60 * 60 * 1000)))
+      : trashRetentionDays;
+    tile.innerHTML =
+      (hasImageThumb ? `<img loading="lazy" src="${thumbUrl(item)}" alt="" />` : '<div class="ph">🎞️</div>') +
+      `<span class="badge">${item.kind === 'video' ? '▶ video' : 'photo'}</span>` +
+      `<span class="trash-expiry">${daysLeft}d left</span>` +
+      `<button class="select-control" type="button" aria-label="${selected ? 'Deselect' : 'Select'} ${escapeHtml(item.originalFilename ?? item.file)}">${selected ? '✓' : ''}</button>`;
+    tile.addEventListener('click', () => toggleTrashSelection(item.id));
+    tile.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        toggleTrashSelection(item.id);
+      }
+    });
+    tile.querySelector('.select-control')?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      toggleTrashSelection(item.id);
+    });
+    trashGrid.appendChild(tile);
+  }
+  syncTrashActions();
+}
+
+function toggleTrashSelection(id: string): void {
+  if (selectedTrashIds.has(id)) selectedTrashIds.delete(id);
+  else selectedTrashIds.add(id);
+  renderTrash();
+}
+
+function syncTrashActions(): void {
+  const disabled = selectedTrashIds.size === 0;
+  const restore = document.getElementById('trash-restore') as HTMLButtonElement | null;
+  const remove = document.getElementById('trash-delete') as HTMLButtonElement | null;
+  const empty = document.getElementById('trash-empty') as HTMLButtonElement | null;
+  if (restore) restore.disabled = disabled;
+  if (remove) remove.disabled = disabled;
+  if (empty) empty.disabled = trashItems.length === 0;
+}
+
+function wireTrashActions(): void {
+  document.getElementById('trash-select-all')?.addEventListener('click', () => {
+    for (const item of trashItems) selectedTrashIds.add(item.id);
+    renderTrash();
+  });
+  document.getElementById('trash-clear')?.addEventListener('click', () => {
+    selectedTrashIds.clear();
+    renderTrash();
+  });
+  document.getElementById('trash-restore')?.addEventListener('click', async () => {
+    const ids = [...selectedTrashIds];
+    if (!ids.length) return;
+    try {
+      await restoreTrashItems(ids);
+      selectedTrashIds.clear();
+      await refresh();
+      toast(`Restored ${ids.length} item${ids.length === 1 ? '' : 's'}.`);
+    } catch (error) {
+      toast((error as Error).message, { error: true });
+    }
+  });
+  document.getElementById('trash-delete')?.addEventListener('click', async () => {
+    const ids = [...selectedTrashIds];
+    if (!ids.length) return;
+    const ok = await confirmToast(`Permanently delete ${ids.length} selected item(s)? This cannot be undone.`, {
+      confirmLabel: `Delete ${ids.length}`,
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await purgeTrashItems(ids);
+      selectedTrashIds.clear();
+      await refresh();
+      toast(`Permanently deleted ${ids.length} item${ids.length === 1 ? '' : 's'}.`);
+    } catch (error) {
+      toast((error as Error).message, { error: true });
+    }
+  });
+  document.getElementById('trash-empty')?.addEventListener('click', async () => {
+    if (!trashItems.length) return;
+    const ok = await confirmToast(`Empty Trash and permanently delete ${trashItems.length} item(s)? This cannot be undone.`, {
+      confirmLabel: 'Empty Trash',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await emptyTrash();
+      selectedTrashIds.clear();
+      await refresh();
+      toast('Trash emptied.');
+    } catch (error) {
+      toast((error as Error).message, { error: true });
+    }
+  });
 }
 
 function updatePlaybackLabels(): void {
@@ -1021,8 +1287,10 @@ async function start(): Promise<void> {
     wirePlaybackPreviewSocket();
     wireControlSheet();
     wirePeopleFilters();
+    wireMediaFilters();
     wireMediaTransforms();
     wireBulkActions();
+    wireTrashActions();
     setMode('cast');
   }
   await refresh();

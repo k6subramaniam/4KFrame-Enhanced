@@ -22,6 +22,8 @@ import { DB_FILE, DATA_DIR, MEDIA_DIR } from './env.js';
 interface DbDocument {
   config: FrameConfig;
   items: MediaItem[];
+  /** Recoverable media removed from the active library. Assets stay on disk until purge. */
+  trash: MediaItem[];
   /** Ordered list of item ids forming the play order. */
   order: string[];
   /** Google OAuth tokens (kept server-side only). */
@@ -53,12 +55,13 @@ export async function initStore(): Promise<void> {
         overlays: { ...defaultConfig().overlays, ...(parsed.config?.overlays ?? {}) },
       },
       items: (parsed.items ?? []).map((item) => ({ ...item, ...normalizeTransform(item) })),
+      trash: (parsed.trash ?? []).map((item) => ({ ...item, ...normalizeTransform(item) })),
       order: parsed.order ?? (parsed.items ?? []).map((i) => i.id),
       googleTokens: parsed.googleTokens,
       authSecret: parsed.authSecret,
     };
   } catch {
-    doc = { config: defaultConfig(), items: [], order: [] };
+    doc = { config: defaultConfig(), items: [], trash: [], order: [] };
     await flush();
   }
 }
@@ -140,6 +143,68 @@ export async function setItemsEnabled(ids: string[], enabled: boolean): Promise<
   for (const item of updated) item.enabled = enabled;
   await flush();
   return updated;
+}
+
+export function listTrashItems(): MediaItem[] {
+  return [...db().trash].sort((a, b) => (b.trashedAt ?? 0) - (a.trashedAt ?? 0));
+}
+
+export function getTrashItem(id: string): MediaItem | undefined {
+  return db().trash.find((item) => item.id === id);
+}
+
+/** Move active media into the recoverable Trash without touching on-disk assets. */
+export async function trashItems(
+  ids: string[],
+  trashedAt = Date.now(),
+  retentionMs = 30 * 24 * 60 * 60 * 1000,
+): Promise<MediaItem[]> {
+  const d = db();
+  const wanted = new Set(ids);
+  const removed = d.items.filter((item) => wanted.has(item.id));
+  if (!removed.length) return [];
+  d.items = d.items.filter((item) => !wanted.has(item.id));
+  d.order = d.order.filter((id) => !wanted.has(id));
+  const expiresAt = trashedAt + Math.max(0, retentionMs);
+  for (const item of removed) {
+    d.trash = d.trash.filter((existing) => existing.id !== item.id);
+    d.trash.push({ ...item, trashedAt, trashExpiresAt: expiresAt });
+  }
+  await flush();
+  return removed;
+}
+
+/** Restore media from Trash to the active library, preserving its original id/assets. */
+export async function restoreTrashItems(ids: string[]): Promise<MediaItem[]> {
+  const d = db();
+  const wanted = new Set(ids);
+  const restoring = d.trash.filter((item) => wanted.has(item.id));
+  if (!restoring.length) return [];
+  d.trash = d.trash.filter((item) => !wanted.has(item.id));
+  const activeIds = new Set(d.items.map((item) => item.id));
+  const restored: MediaItem[] = [];
+  for (const item of restoring) {
+    if (activeIds.has(item.id)) continue;
+    const restoredItem: MediaItem = { ...item };
+    delete restoredItem.trashedAt;
+    delete restoredItem.trashExpiresAt;
+    d.items.push(restoredItem);
+    d.order.push(restoredItem.id);
+    activeIds.add(restoredItem.id);
+    restored.push(restoredItem);
+  }
+  await flush();
+  return restored;
+}
+
+/** Remove records from Trash so callers can permanently delete their assets. */
+export async function removeTrashItems(ids: string[]): Promise<MediaItem[]> {
+  const d = db();
+  const wanted = new Set(ids);
+  const removed = d.trash.filter((item) => wanted.has(item.id));
+  d.trash = d.trash.filter((item) => !wanted.has(item.id));
+  await flush();
+  return removed;
 }
 
 /** Atomically remove multiple records and their play-order entries. */

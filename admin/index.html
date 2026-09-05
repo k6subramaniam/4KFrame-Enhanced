@@ -153,6 +153,19 @@
       #drop.busy { border-color:var(--accent); opacity:.7; pointer-events:none; }
       #drop.busy::after { content:attr(data-status); position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(11,13,18,.85); border-radius:.8rem; color:var(--fg); }
       .people-controls select { font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--line); border-radius:.6rem; padding:.45rem .7rem; }
+      .library-panel-content { padding:1rem; }
+      .library-panel-head { display:flex; align-items:center; justify-content:space-between; gap:.75rem; margin-bottom:.8rem; }
+      .library-panel-head h2 { margin:0; font-size:1rem; }
+      .library-filters { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:.7rem; align-items:end; }
+      .library-filters select, .library-filters input { width:100%; box-sizing:border-box; font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--line); border-radius:.6rem; padding:.52rem .65rem; }
+      .date-presets { margin-top:.75rem; }
+      .date-presets button { padding:.42rem .7rem; font-size:.82rem; }
+      #media-filter-summary { margin-left:auto; }
+      #trash-grid { margin-top:.8rem; }
+      #trash-grid .tile { aspect-ratio:1; }
+      #trash-delete, #trash-empty { color:#ff8b8b; }
+      #trash-actions button:disabled { opacity:.45; cursor:not-allowed; }
+      .trash-expiry { position:absolute; left:.4rem; bottom:.4rem; background:rgba(0,0,0,.72); border-radius:.4rem; padding:.15rem .4rem; font-size:.68rem; }
       .hidden { display:none !important; }
       a { color:var(--accent); }
       #login { position:fixed; inset:0; background:var(--bg); display:flex; align-items:center; justify-content:center; z-index:50; }
@@ -257,6 +270,62 @@
         </section>
         <div id="settings"></div>
       </section>
+      <section class="panel" id="media-filter-panel" aria-label="Media library filters">
+        <div class="library-panel-content">
+          <div class="library-panel-head">
+            <h2>Media library</h2>
+            <div class="row">
+                    <button id="media-filter-reset" type="button">Reset filters</button>
+            </div>
+          </div>
+          <div class="library-filters">
+            <label class="field">Date type
+              <select id="media-date-field">
+                <option value="uploaded">Uploaded / imported</option>
+                <option value="created">Original created</option>
+              </select>
+            </label>
+            <label class="field">From
+              <input id="media-date-start" type="date" />
+            </label>
+            <label class="field">To
+              <input id="media-date-end" type="date" />
+            </label>
+            <label class="field">Media type
+              <select id="media-kind-filter">
+                <option value="all">Photos + videos</option>
+                <option value="photo">Photos only</option>
+                <option value="video">Videos only</option>
+              </select>
+            </label>
+            <label class="field">Uploader / source
+              <select id="media-uploader-filter"><option value="all">All uploaders</option></select>
+            </label>
+            <label class="field">File size
+              <select id="media-size-filter">
+                <option value="all">Any size</option>
+                <option value="under-10mb">Under 10 MB</option>
+                <option value="10-100mb">10–100 MB</option>
+                <option value="100mb-1gb">100 MB–1 GB</option>
+                <option value="over-1gb">1 GB+</option>
+                <option value="unknown">Size unknown</option>
+              </select>
+            </label>
+            <label class="field">Storage
+              <select id="media-storage-filter"><option value="all">All storage</option></select>
+            </label>
+          </div>
+          <div class="row date-presets" aria-label="Quick date ranges">
+            <button type="button" data-date-preset="today">Today</button>
+            <button type="button" data-date-preset="7-days">Last 7 days</button>
+            <button type="button" data-date-preset="30-days">Last 30 days</button>
+            <button type="button" data-date-preset="this-month">This month</button>
+            <button type="button" data-date-preset="last-month">Previous month</button>
+            <button type="button" data-date-preset="clear">Any date</button>
+            <span class="muted" id="media-filter-summary">All media</span>
+          </div>
+        </div>
+      </section>
       <section class="panel" id="people-panel">
         <h2>Smart Face Match</h2>
         <div class="row people-controls">
@@ -273,8 +342,8 @@
           </label>
           <label class="field">Sort media
             <select id="media-sort">
-              <option value="date-desc">Date uploaded — newest first</option>
-              <option value="date-asc">Date uploaded — oldest first</option>
+              <option value="date-desc">Selected date — newest first</option>
+              <option value="date-asc">Selected date — oldest first</option>
               <option value="filename-asc">Filename — A to Z</option>
               <option value="filename-desc">Filename — Z to A</option>
             </select>
@@ -293,7 +362,7 @@
       </div>
       <div id="bulk-toolbar" role="toolbar" aria-label="Selected media actions">
         <span id="selection-count" aria-live="polite">0 selected</span>
-        <button id="select-visible" type="button">Select all visible</button>
+        <button id="select-visible" type="button">Select all matching</button>
         <button id="clear-selection" type="button">Clear</button>
         <button id="bulk-delete" type="button" data-requires-selection disabled>Delete selected</button>
         <button id="bulk-favorite" type="button" data-requires-selection disabled>Add to Favorites</button>
@@ -302,6 +371,22 @@
         <span class="muted">Favorites participate in automatic playback.</span>
       </div>
       <div id="grid" class="grid"></div>
+      <section class="panel" id="trash-panel" aria-label="Trash">
+        <div class="library-panel-content">
+          <div class="library-panel-head">
+            <h2>Trash</h2>
+            <span class="muted" id="trash-summary">0 items · retained 30 days</span>
+          </div>
+          <div class="row" id="trash-actions" role="toolbar" aria-label="Trash actions">
+            <button id="trash-select-all" type="button">Select all</button>
+            <button id="trash-clear" type="button">Clear selection</button>
+            <button id="trash-restore" type="button" disabled>Restore selected</button>
+            <button id="trash-delete" type="button" disabled>Delete permanently</button>
+            <button id="trash-empty" type="button">Empty Trash</button>
+          </div>
+          <div id="trash-grid" class="grid"></div>
+        </div>
+      </section>
     </main>
     <!-- Non-blocking feedback. aria-live so screen readers announce it without stealing
          focus; confirmations render buttons inside and are focus-managed by main.ts. -->

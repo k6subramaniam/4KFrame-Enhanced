@@ -20,7 +20,7 @@ import {
   type DisplayTransform,
   type SetItemsEnabledPayload,
 } from '@4kframe/shared';
-import { DATA_DIR } from '../env.js';
+import { DATA_DIR, MEDIA_DIR } from '../env.js';
 import {
   getConfig,
   setConfig,
@@ -29,15 +29,18 @@ import {
   addItem,
   updateItem,
   patchItemTransforms,
-  removeItem,
-  removeItems,
   setItemsEnabled,
+  listTrashItems,
+  getTrashItem,
+  trashItems,
+  restoreTrashItems,
+  removeTrashItems,
 } from '../store.js';
 import { ingestImage } from '../media/images.js';
 import { ingestVideo } from '../media/video.js';
 import { enqueueTranscode, enqueueUpscale } from '../media/transcode.js';
 import { enqueueFaceDetection } from '../media/faceJob.js';
-import { deleteAssets, deleteAssetsForItems } from '../media/assets.js';
+import { deleteAssetsForItems } from '../media/assets.js';
 import {
   cast, next, previous, progress, getCurrent, refresh,
   setPaused, setHold, isPaused, isHolding,
@@ -52,6 +55,7 @@ import { getDisplayPlayback } from '../displayPlayback.js';
 
 const VIDEO_EXT = new Set(['mp4', 'webm', 'mov', 'm4v', 'mkv']);
 const MAX_BULK_IDS = 500;
+const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 function mediaIds(body: unknown): string[] | null {
   const ids = (body as Partial<MediaIdsPayload> | null)?.ids;
@@ -81,6 +85,8 @@ function adminRedirectUri(req: { protocol: string; headers: { host?: string } })
 }
 
 export async function registerApi(app: FastifyInstance): Promise<void> {
+  await purgeExpiredTrash();
+
   // Gate management/control API behind the admin password (when one is set). Static assets,
   // /ws is authenticated in server/src/ws.ts when auth is enabled; /photos stays open so
   // authenticated display clients can load media assets directly.
@@ -233,12 +239,11 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
     if (!ids) return reply.code(400).send({ error: 'invalid media ids' });
     const missing = ids.filter((id) => !getItem(id));
     if (missing.length) return reply.code(404).send({ error: 'media not found', missing });
-    const removed = await removeItems(ids);
-    const failures = await deleteAssetsForItems(removed);
+    const trashedAt = Date.now();
+    await trashItems(ids, trashedAt, TRASH_RETENTION_MS);
     refresh();
     hub.emitEvent({ type: 'library', items: listItems() });
-    if (failures.length) return reply.code(207).send({ ok: false, deleted: ids, failures });
-    return { ok: true, deleted: ids, failures: [] };
+    return { ok: true, trashed: ids, trashExpiresAt: trashedAt + TRASH_RETENTION_MS };
   });
 
   app.post('/api/play-sequence', async (req, reply) => {
@@ -267,7 +272,47 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
   });
 
   // --- Library listing (original `/api/thumbs`) ---
-  app.get('/api/thumbs', async () => ({ items: listItems() }));
+  app.get('/api/thumbs', async () => {
+    await purgeExpiredTrash();
+    return { items: await enrichMediaItems(listItems()) };
+  });
+
+  // --- Recoverable Trash (30 days by default) ---
+  app.get('/api/trash', async () => {
+    await purgeExpiredTrash();
+    return { items: await enrichMediaItems(listTrashItems()), retentionDays: 30 };
+  });
+
+  app.post('/api/trash/restore', async (req, reply) => {
+    const ids = mediaIds(req.body);
+    if (!ids) return reply.code(400).send({ error: 'invalid media ids' });
+    const missing = ids.filter((id) => !getTrashItem(id));
+    if (missing.length) return reply.code(404).send({ error: 'trash media not found', missing });
+    const restored = await restoreTrashItems(ids);
+    refresh();
+    hub.emitEvent({ type: 'library', items: listItems() });
+    return { ok: true, restored: restored.map((item) => item.id) };
+  });
+
+  app.delete('/api/trash/items', async (req, reply) => {
+    const ids = mediaIds(req.body);
+    if (!ids) return reply.code(400).send({ error: 'invalid media ids' });
+    const missing = ids.filter((id) => !getTrashItem(id));
+    if (missing.length) return reply.code(404).send({ error: 'trash media not found', missing });
+    const removed = await removeTrashItems(ids);
+    const failures = await deleteAssetsForItems(removed);
+    if (failures.length) return reply.code(207).send({ ok: false, deleted: ids, failures });
+    return { ok: true, deleted: ids, failures: [] };
+  });
+
+  app.delete('/api/trash', async (_req, reply) => {
+    const ids = listTrashItems().map((item) => item.id);
+    if (!ids.length) return { ok: true, deleted: [], failures: [] };
+    const removed = await removeTrashItems(ids);
+    const failures = await deleteAssetsForItems(removed);
+    if (failures.length) return reply.code(207).send({ ok: false, deleted: ids, failures });
+    return { ok: true, deleted: ids, failures: [] };
+  });
 
   // --- Casting / deleting by id (original) ---
   app.get('/api/cast/:id', async (req, reply) => {
@@ -277,12 +322,13 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
   });
 
   app.get('/api/delete/:id', async (req, reply) => {
-    const removed = await removeItem((req.params as { id: string }).id);
-    if (!removed) return reply.code(404).send({ error: 'not found' });
-    await deleteAssets(removed);
+    const id = (req.params as { id: string }).id;
+    if (!getItem(id)) return reply.code(404).send({ error: 'not found' });
+    const trashedAt = Date.now();
+    await trashItems([id], trashedAt, TRASH_RETENTION_MS);
     refresh();
     hub.emitEvent({ type: 'library', items: listItems() });
-    return { ok: true };
+    return { ok: true, trashed: [id], trashExpiresAt: trashedAt + TRASH_RETENTION_MS };
   });
 
   // --- Photo / preview redirects by id (original) ---
@@ -356,14 +402,14 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
   });
 
   app.post('/api/upload/finish', async (req, reply) => {
-    const q = req.query as { id?: string; name?: string; type?: string };
+    const q = req.query as { id?: string; name?: string; type?: string; createdAt?: string };
     const id = safeUploadId(q.id);
     if (!id) return reply.code(400).send({ error: 'invalid upload id' });
     const tmp = path.join(UPLOADS_DIR, id);
     try {
       const buf = await fs.readFile(tmp).catch(() => null);
       if (!buf || buf.length === 0) return reply.code(400).send({ ok: false, error: 'no chunks received' });
-      const item = await ingestUpload(buf, q.name || 'upload', q.type);
+      const item = await ingestUpload(buf, q.name || 'upload', q.type, parseOptionalTimestamp(q.createdAt));
       refresh();
       hub.emitEvent({ type: 'library', items: listItems() });
       return { ok: true, item };
@@ -432,7 +478,12 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
 // --- helpers ---
 
 /** Ingest one uploaded file (image or video), store it, and queue any transcode. */
-async function ingestUpload(buf: Buffer, filename: string, mimetype?: string): Promise<MediaItem> {
+async function ingestUpload(
+  buf: Buffer,
+  filename: string,
+  mimetype?: string,
+  originalCreatedAt?: number,
+): Promise<MediaItem> {
   if (buf.length === 0) throw new Error('empty file');
   const ext = (filename.split('.').pop() ?? '').toLowerCase();
   // Detect video by MIME type OR extension, so any video format is handled (and a video
@@ -441,10 +492,50 @@ async function ingestUpload(buf: Buffer, filename: string, mimetype?: string): P
   const { item } = isVideo
     ? await ingestVideo(buf, ext || 'mp4', 'upload')
     : await ingestImage(buf, 'upload');
+  const uploadedAt = Date.now();
+  Object.assign(item, {
+    uploadedAt,
+    originalCreatedAt: originalCreatedAt ?? item.createdAt,
+    originalFilename: filename,
+    sizeBytes: buf.length,
+    uploader: 'Admin',
+    storageLocation: 'Frame storage',
+  });
   await addItem(item);
   enqueueTranscode(item);
   enqueueFaceDetection(item);
   return item;
+}
+
+function parseOptionalTimestamp(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const timestamp = Number(value);
+  return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : undefined;
+}
+
+async function enrichMediaItems(source: MediaItem[]): Promise<MediaItem[]> {
+  return Promise.all(source.map(async (item) => {
+    const sizeBytes = item.sizeBytes ?? await fs.stat(path.join(MEDIA_DIR, item.file))
+      .then((stat) => stat.size)
+      .catch(() => undefined);
+    return {
+      ...item,
+      uploadedAt: item.uploadedAt ?? item.createdAt,
+      originalCreatedAt: item.originalCreatedAt ?? item.createdAt,
+      originalFilename: item.originalFilename ?? item.caption ?? item.file,
+      ...(sizeBytes === undefined ? {} : { sizeBytes }),
+      uploader: item.uploader ?? (item.source === 'google-photos' ? 'Google Photos' : 'Admin'),
+      storageLocation: item.storageLocation ?? 'Frame storage',
+    };
+  }));
+}
+
+async function purgeExpiredTrash(): Promise<void> {
+  const now = Date.now();
+  const expired = listTrashItems().filter((item) => (item.trashExpiresAt ?? Number.POSITIVE_INFINITY) <= now);
+  if (!expired.length) return;
+  const removed = await removeTrashItems(expired.map((item) => item.id));
+  await deleteAssetsForItems(removed);
 }
 
 async function withStorage() {

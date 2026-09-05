@@ -25,6 +25,15 @@ export async function fetchItems(): Promise<MediaItem[]> {
   return json.items;
 }
 
+export interface TrashResponse {
+  items: MediaItem[];
+  retentionDays: number;
+}
+
+export async function fetchTrash(): Promise<TrashResponse> {
+  return requestJson<TrashResponse>('/api/trash');
+}
+
 export async function fetchCurrent(): Promise<CurrentResponse> {
   const res = await fetch('/api/current');
   return (await res.json()) as CurrentResponse;
@@ -209,16 +218,51 @@ export async function deleteItem(id: string): Promise<void> {
   await requestJson(`/api/delete/${id}`);
 }
 
+const BULK_ID_BATCH_SIZE = 500;
+
+async function forEachIdBatch(
+  ids: string[],
+  action: (batch: string[]) => Promise<void>,
+): Promise<void> {
+  for (let offset = 0; offset < ids.length; offset += BULK_ID_BATCH_SIZE) {
+    await action(ids.slice(offset, offset + BULK_ID_BATCH_SIZE));
+  }
+}
+
 export async function setItemsEnabled(ids: string[], enabled: boolean): Promise<void> {
-  await requestJson('/api/items/enabled', {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids, enabled }),
+  await forEachIdBatch(ids, async (batch) => {
+    await requestJson('/api/items/enabled', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: batch, enabled }),
+    });
   });
 }
 
 export async function deleteItems(ids: string[]): Promise<void> {
-  await requestJson('/api/items', {
-    method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }),
+  await forEachIdBatch(ids, async (batch) => {
+    await requestJson('/api/items', {
+      method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: batch }),
+    });
   });
+}
+
+export async function restoreTrashItems(ids: string[]): Promise<void> {
+  await forEachIdBatch(ids, async (batch) => {
+    await requestJson('/api/trash/restore', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: batch }),
+    });
+  });
+}
+
+export async function purgeTrashItems(ids: string[]): Promise<void> {
+  await forEachIdBatch(ids, async (batch) => {
+    await requestJson('/api/trash/items', {
+      method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: batch }),
+    });
+  });
+}
+
+export async function emptyTrash(): Promise<void> {
+  await requestJson('/api/trash', { method: 'DELETE' });
 }
 
 export async function playSequence(ids: string[]): Promise<void> {
@@ -334,7 +378,7 @@ async function uploadFile(file: File, onProgress?: (fraction: number) => void): 
     onProgress?.((i + 1) / total);
   }
   const res = await fetch(
-    `/api/upload/finish?id=${id}&name=${encodeURIComponent(file.name)}&type=${encodeURIComponent(file.type)}`,
+    `/api/upload/finish?id=${id}&name=${encodeURIComponent(file.name)}&type=${encodeURIComponent(file.type)}&createdAt=${encodeURIComponent(String(file.lastModified || Date.now()))}`,
     { method: 'POST' },
   );
   if (!res.ok) return { error: `finalize failed (${res.status})` };

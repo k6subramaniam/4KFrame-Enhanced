@@ -73,7 +73,7 @@
         await import('/src/main.ts');
         await new Promise((resolve) => setTimeout(resolve, 0));
 
-        emit({ type: 'config', config: { ...defaultConfig(), videoMuted: true, videoLoop: true } });
+        emit({ type: 'config', config: { ...defaultConfig(), videoAudioMode: 'muted', videoLoop: true } });
         emit({ type: 'paused', paused: false });
         emit({
           type: 'show',
@@ -97,7 +97,7 @@
           && video.volume === 1
           && playCalls === 1;
         rejectNextPlay = true;
-        emit({ type: 'config', config: { ...defaultConfig(), videoMuted: false, videoLoop: false } });
+        emit({ type: 'config', config: { ...defaultConfig(), videoAudioMode: 'tv', videoLoop: false } });
         const propertiesUpdatedImmediately = video.muted === false
           && video.defaultMuted === false
           && video.volume === 1
@@ -111,8 +111,7 @@
           && playCalls === 2
           && video.classList.contains('visible')
           && video.src.endsWith('/photos/sample.mp4')
-          && !status.classList.contains('hidden')
-          && status.textContent.includes('blocked by the receiver')
+          && status.textContent === ''
           && sent.some((message) => message.type === 'next');
 
         document.getElementById('result').textContent = JSON.stringify({
