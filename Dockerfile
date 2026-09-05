@@ -28,6 +28,5 @@ COPY --from=build /app .
 # Keep the opt-in Tiny Face Detector weights available to the runtime.
 COPY --from=build /app/server/models/face ./server/models/face
 EXPOSE 9095 9096
-# Do not declare a Docker VOLUME here: Railway rejects Dockerfile VOLUME instructions.
-# Persist /data by mounting a platform volume (Railway/Fly/Docker Compose) instead.
-CMD ["node", "server/dist/index.js"]
+# Temporary storage-recovery diagnostic. Restored after maintenance.
+CMD ["sh", "-lc", "node -e \"const fs=require('fs');const d=JSON.parse(fs.readFileSync('/data/frame.json','utf8'));console.log('RECOVERY_CATALOG_ITEMS='+d.items.length)\" && exec node server/dist/index.js"]
