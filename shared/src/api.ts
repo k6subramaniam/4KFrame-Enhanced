@@ -64,8 +64,24 @@ export interface MediaItem {
   poster?: string;
   /** Video duration in seconds, when applicable. */
   durationSec?: number;
-  /** Epoch ms the item was added. */
+  /** Epoch ms the item was added to this frame. */
   createdAt: number;
+  /** Epoch ms the item was uploaded/imported to this frame. Legacy items fall back to createdAt. */
+  uploadedAt?: number;
+  /** Epoch ms reported by the original file/source when available. */
+  originalCreatedAt?: number;
+  /** Original filename before 4KFrame generated its storage filename. */
+  originalFilename?: string;
+  /** Best-effort source/main-file size in bytes. */
+  sizeBytes?: number;
+  /** Human-readable uploader/source label shown in admin filters. */
+  uploader?: string;
+  /** Human-readable storage backend/location label. */
+  storageLocation?: string;
+  /** Epoch ms when the item was moved to Trash. */
+  trashedAt?: number;
+  /** Epoch ms when the item becomes eligible for permanent purge from Trash. */
+  trashExpiresAt?: number;
   /** Source of the item. */
   source: 'upload' | 'google-photos';
   /** Optional caption (EXIF/description derived). */
