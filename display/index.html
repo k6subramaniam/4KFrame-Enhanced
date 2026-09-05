@@ -30,7 +30,7 @@
         :root { font-size: clamp(16px, 0.85vw, 30px); }
       }
 
-      #app { position: fixed; inset: 0; overflow: hidden; }
+      #app { position: fixed; inset: 0; overflow: hidden; touch-action:none; }
       #gl { position: absolute; inset: 0; width: 100%; height: 100%; }
       #video-bg {
         position: absolute;
@@ -118,7 +118,8 @@
         pointer-events: none;
       }
       #public-bottom-controller {
-        display: flex;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(3.55rem, auto));
         align-items: stretch;
         justify-content: center;
         gap: 0.35rem;
@@ -136,6 +137,27 @@
       #public-bottom-controller.is-dim { opacity: 0.45; filter: saturate(0.85); transform: translateY(0.18rem); }
       #public-bottom-controller.is-hidden { opacity: 0; pointer-events: none; transform: translateY(0.8rem) scale(0.97); }
       #public-bottom-controller:focus-within { opacity: 1; filter: none; transform: none; }
+
+      #public-video-timeline {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: auto minmax(9rem, 1fr) auto;
+        gap: 0.55rem;
+        align-items: center;
+        padding: 0.12rem 0.35rem 0.08rem;
+        min-width: min(30rem, 70vw);
+        color: rgba(255,255,255,0.72);
+        font-size: 0.67rem;
+        font-variant-numeric: tabular-nums;
+      }
+      #public-video-timeline.hidden { display:none !important; }
+      #public-video-seek {
+        width: 100%;
+        min-height: 1.7rem;
+        margin: 0;
+        accent-color: var(--display-primary);
+        cursor: pointer;
+      }
 
       .public-playback-button {
         width: 3.55rem;
@@ -376,9 +398,17 @@
         #public-bottom-controller {
           flex: 1 1 auto;
           min-width: 0;
+          width: 100%;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
           gap: 0.25rem;
           padding: 0.32rem;
           border-radius: 1.1rem;
+        }
+        #public-video-timeline {
+          min-width: 0;
+          width: 100%;
+          grid-template-columns: auto minmax(0, 1fr) auto;
+          padding-inline: 0.3rem;
         }
         .public-playback-button {
           flex: 1 1 0;
@@ -434,6 +464,11 @@
       <section id="public-controls" aria-label="Public slideshow controls">
         <div id="public-control-dock">
           <nav id="public-bottom-controller" class="is-hidden" aria-label="Playback controls">
+            <div id="public-video-timeline" class="hidden" aria-label="Video timeline">
+              <span id="public-video-current">0:00</span>
+              <input id="public-video-seek" type="range" min="0" max="1000" step="1" value="0" tabindex="-1" aria-label="Video position" />
+              <span id="public-video-duration">0:00</span>
+            </div>
             <button id="public-bottom-previous" class="public-playback-button" type="button" data-control="previous" data-label="Previous" aria-label="Previous item">‹</button>
             <button id="public-bottom-play-pause" class="public-playback-button primary" type="button" data-control="play-pause" data-label="Play / Pause" aria-label="Play or pause slideshow" aria-pressed="false">⏯</button>
             <button id="public-bottom-next" class="public-playback-button" type="button" data-control="next" data-label="Next" aria-label="Next item">›</button>

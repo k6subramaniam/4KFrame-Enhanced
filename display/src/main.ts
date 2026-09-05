@@ -50,6 +50,7 @@ let receivedConfigEvent = false;
 let receivedPausedEvent = false;
 let lastPlaybackReportAt = 0;
 const PLAYBACK_REPORT_INTERVAL_MS = 1_000;
+const VIDEO_SEEK_SECONDS = 10;
 
 /** Forward a control message to the backend (used to bridge Cast custom messages). */
 function sendControl(msg: ControlMessage): void {
@@ -141,6 +142,7 @@ async function renderItems(items: MediaItem[], interactive: boolean): Promise<vo
   }
   prevFrame = toFrame;
   setCaption(items, config);
+  syncPublicControls();
 
   // Photos that fail to load produced a silent black screen with no status and no skip —
   // unlike videos, which already self-skip. Treat them the same way.
@@ -229,6 +231,7 @@ async function renderVideo(item: MediaItem): Promise<void> {
   }
   setCaption([item], config);
   reportVideoPlayback(true);
+  syncPublicControls();
 }
 
 /** A video that can't be decoded (bad/unsupported file) shouldn't freeze the frame on black. */
@@ -329,6 +332,7 @@ function hideVideo(): void {
   video.pause();
   video.removeAttribute('src');
   video.load();
+  syncPublicControls();
 }
 
 /** Recompose the current content for a new screen size or fill/aspect/zoom change (no transition). */
@@ -507,6 +511,16 @@ function goPrevious(): void {
   sendControl({ type: 'previous' });
 }
 
+function navigateContext(direction: -1 | 1): void {
+  if (showingVideo && seekActiveVideo(video, direction * VIDEO_SEEK_SECONDS, true)) {
+    reportVideoPlayback(true);
+    syncPublicVideoTimeline();
+    return;
+  }
+  if (direction < 0) goPrevious();
+  else goNext();
+}
+
 function togglePause(): void {
   sendControl({ type: paused ? 'resume' : 'pause' });
 }
@@ -599,6 +613,10 @@ const publicControlsRoot = document.getElementById('public-controls') as HTMLEle
 const publicSettingsRoot = document.getElementById('public-settings') as HTMLElement | null;
 const publicControls = getElementByIds<HTMLElement>('public-control-panel', 'public-controls');
 const bottomController = document.getElementById('public-bottom-controller') as HTMLElement | null;
+const publicVideoTimeline = document.getElementById('public-video-timeline') as HTMLElement | null;
+const publicVideoSeek = document.getElementById('public-video-seek') as HTMLInputElement | null;
+const publicVideoCurrent = document.getElementById('public-video-current') as HTMLElement | null;
+const publicVideoDuration = document.getElementById('public-video-duration') as HTMLElement | null;
 const zoomPanSection = document.getElementById('public-zoom-pan-section') as HTMLElement | null;
 const zoomPanToggle = document.getElementById('public-zoom-pan-toggle') as HTMLButtonElement | null;
 const ZOOM_PAN_COLLAPSE_STORAGE_KEY = '4kframe.publicControls.zoomPanOpen';
@@ -606,6 +624,7 @@ const CONTROL_DIM_TIMEOUT_MS = 1800;
 const CONTROL_HIDE_TIMEOUT_MS = 3800;
 let controlDimTimer: ReturnType<typeof window.setTimeout> | undefined;
 let controlHideTimer: ReturnType<typeof window.setTimeout> | undefined;
+let publicTimelineScrubbing = false;
 
 const QUICK_ACTIONS = [
   'fill-cover',
@@ -946,7 +965,59 @@ function updateQuickActionDisabledStates(root: ParentNode, configControlsReady: 
   });
 }
 
+
+function formatVideoTime(seconds: number): string {
+  const safe = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
+  const rounded = Math.floor(safe);
+  const hours = Math.floor(rounded / 3600);
+  const minutes = Math.floor((rounded % 3600) / 60);
+  const secs = rounded % 60;
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+    : `${minutes}:${String(secs).padStart(2, '0')}`;
+}
+
+function syncPublicVideoTimeline(): void {
+  const duration = Number(video.duration);
+  const active = showingVideo
+    && lastVideoItem !== null
+    && video.readyState >= 1
+    && Number.isFinite(duration)
+    && duration > 0;
+
+  publicVideoTimeline?.classList.toggle('hidden', !active);
+  if (!active || !publicVideoSeek) return;
+
+  const current = Math.min(duration, Math.max(0, Number.isFinite(video.currentTime) ? video.currentTime : 0));
+  if (!publicTimelineScrubbing) publicVideoSeek.value = String(Math.round((current / duration) * 1000));
+  const previewCurrent = publicTimelineScrubbing
+    ? (Number(publicVideoSeek.value) / 1000) * duration
+    : current;
+
+  if (publicVideoCurrent) publicVideoCurrent.textContent = formatVideoTime(previewCurrent);
+  if (publicVideoDuration) publicVideoDuration.textContent = formatVideoTime(duration);
+  publicVideoSeek.setAttribute(
+    'aria-valuetext',
+    `${formatVideoTime(previewCurrent)} of ${formatVideoTime(duration)}`,
+  );
+}
+
 function syncPublicControls(): void {
+  const videoSeekMode = showingVideo
+    && video.readyState >= 1
+    && Number.isFinite(video.duration)
+    && video.duration > 0;
+
+  publicControlsRoot?.querySelectorAll<HTMLButtonElement>('[data-control="previous"], #control-previous').forEach((button) => {
+    button.textContent = videoSeekMode ? `↶${VIDEO_SEEK_SECONDS}` : '‹';
+    button.setAttribute('data-label', videoSeekMode ? `Back ${VIDEO_SEEK_SECONDS}s` : 'Previous');
+    button.setAttribute('aria-label', videoSeekMode ? `Seek backward ${VIDEO_SEEK_SECONDS} seconds` : 'Previous item');
+  });
+  publicControlsRoot?.querySelectorAll<HTMLButtonElement>('[data-control="next"], #control-next').forEach((button) => {
+    button.textContent = videoSeekMode ? `${VIDEO_SEEK_SECONDS}↷` : '›';
+    button.setAttribute('data-label', videoSeekMode ? `Forward ${VIDEO_SEEK_SECONDS}s` : 'Next');
+    button.setAttribute('aria-label', videoSeekMode ? `Seek forward ${VIDEO_SEEK_SECONDS} seconds` : 'Next item');
+  });
   publicControlsRoot?.querySelectorAll<HTMLButtonElement>('[data-control="play-pause"], #control-pause').forEach((button) => {
     button.textContent = paused ? '▶' : '⏸';
     button.setAttribute('aria-label', paused ? 'Resume slideshow' : 'Pause slideshow');
@@ -956,6 +1027,7 @@ function syncPublicControls(): void {
   // The shared settings panel renders its own controls and wires them via
   // wireSharedSettings(); it emits `data-range-key`, never `data-config-key`, so there is
   // nothing here to sync by hand. Values re-sync when renderPublicSettings() re-renders.
+  syncPublicVideoTimeline();
   if (publicControls) syncQuickActions(publicControls);
 }
 
@@ -970,13 +1042,13 @@ function wirePublicControls(): void {
   publicControlsRoot.querySelectorAll<HTMLButtonElement>('[data-control="previous"], #control-previous').forEach((button) => {
     button.addEventListener('click', () => {
       registerPublicControlActivity();
-      goPrevious();
+      navigateContext(-1);
     });
   });
   publicControlsRoot.querySelectorAll<HTMLButtonElement>('[data-control="next"], #control-next').forEach((button) => {
     button.addEventListener('click', () => {
       registerPublicControlActivity();
-      goNext();
+      navigateContext(1);
     });
   });
   publicControlsRoot.querySelectorAll<HTMLButtonElement>('[data-control="play-pause"], #control-pause').forEach((button) => {
@@ -988,6 +1060,29 @@ function wirePublicControls(): void {
 
   if (publicControls) {
     wireQuickActions(publicControls);
+  }
+
+  publicVideoSeek?.addEventListener('input', () => {
+    publicTimelineScrubbing = true;
+    registerPublicControlActivity();
+    syncPublicVideoTimeline();
+  });
+  publicVideoSeek?.addEventListener('change', () => {
+    const duration = Number(video.duration);
+    if (showingVideo && Number.isFinite(duration) && duration > 0) {
+      const desired = (Number(publicVideoSeek.value) / 1000) * duration;
+      video.currentTime = Math.min(duration, Math.max(0, desired));
+      reportVideoPlayback(true);
+    }
+    publicTimelineScrubbing = false;
+    syncPublicVideoTimeline();
+  });
+  publicVideoSeek?.addEventListener('pointercancel', () => {
+    publicTimelineScrubbing = false;
+    syncPublicVideoTimeline();
+  });
+  for (const eventName of ['loadedmetadata', 'durationchange', 'timeupdate', 'seeking', 'seeked', 'ended'] as const) {
+    video.addEventListener(eventName, syncPublicVideoTimeline);
   }
 
   // Selects/ranges/groups inside the shared settings panel are wired by
@@ -1053,11 +1148,11 @@ function wireRemote(): void {
     switch (e.key) {
       case 'ArrowRight':
         if (zoomed) setPan(config.panX + PAN_STEP, config.panY);
-        else goNext();
+        else navigateContext(1);
         break;
       case 'ArrowLeft':
         if (zoomed) setPan(config.panX - PAN_STEP, config.panY);
-        else goPrevious();
+        else navigateContext(-1);
         break;
       case 'ArrowDown':
         // When zoomed, Down pans. Otherwise it enters the on-screen controls — the usual
@@ -1070,8 +1165,12 @@ function wireRemote(): void {
         else goPrevious();
         break;
       case 'Backspace': case 'BrowserBack': case 'GoBack':
-        if (publicControls && !publicControls.hidden) setControlsOpen(false);
-        break;
+        if (publicControls && !publicControls.hidden) {
+          setControlsOpen(false);
+          registerPublicControlActivity();
+          e.preventDefault();
+        }
+        return;
       case 'PageDown': case 'MediaTrackNext': case 'n': case 'N':
         goNext();
         break;

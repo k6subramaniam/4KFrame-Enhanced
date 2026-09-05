@@ -88,6 +88,10 @@
       .playback-controls { display:flex; gap:.5rem; align-items:center; }
       #playback button { min-width:44px; min-height:52px; font-size:1.25rem; line-height:1; padding:.35rem; border-radius:.8rem; background:rgba(255,255,255,.045); }
       #playback button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+      #playback button.video-seek { font-size:.92rem; font-weight:800; letter-spacing:-.03em; }
+      #video-scrubber { margin:0 0 .75rem; padding:.72rem .82rem; border:1px solid var(--line); border-radius:1rem; background:rgba(255,255,255,.03); }
+      .video-scrubber-times { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:.28rem; color:var(--muted); font-size:.76rem; font-variant-numeric:tabular-nums; }
+      #video-seek-range { width:100%; min-height:34px; margin:0; accent-color:var(--accent); cursor:pointer; }
       #tv-volume-control { margin:0 0 .85rem; padding:.8rem .85rem; border:1px solid var(--line); border-radius:1rem; background:rgba(255,255,255,.03); }
       .tv-volume-head { display:flex; align-items:center; justify-content:space-between; gap:.75rem; margin-bottom:.55rem; font-size:.82rem; font-weight:700; }
       .tv-volume-row { display:grid; grid-template-columns:44px minmax(0,1fr) 3.2rem; gap:.65rem; align-items:center; }
@@ -236,6 +240,13 @@
           <button id="pb-next" title="Next slideshow item" aria-label="Next slideshow item">⏭</button>
           <button id="pb-loop" title="Loop the current item" aria-label="Loop the current item" aria-pressed="false">🔁</button>
         </div>
+        <section id="video-scrubber" class="hidden" aria-label="Video timeline">
+          <div class="video-scrubber-times">
+            <span id="video-current-time">0:00</span>
+            <span id="video-duration">0:00</span>
+          </div>
+          <input id="video-seek-range" type="range" min="0" max="1000" step="1" value="0" aria-label="Video position" />
+        </section>
         <section id="tv-volume-control" class="hidden" aria-label="TV video volume">
           <div class="tv-volume-head"><span>TV volume</span><span class="muted">Video</span></div>
           <div class="tv-volume-row">

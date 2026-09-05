@@ -9,7 +9,7 @@ import type { DisplayPlaybackState, FrameConfig, FrameEvent, MediaItem } from '@
 import {
   fetchItems, fetchCurrent, castItem, deleteItem, upload, thumbUrl,
   skipNext, skipPrev, getPlayback, setPaused, setHold, seekBy, toggleEnabled,
-  me, login, logout, type AuthState,
+  me, login, logout, type AuthState, type Playback,
   patchMediaTransforms,
   setItemsEnabled, deleteItems, playSequence,
   updateData,
@@ -61,8 +61,13 @@ const tvVolumeRoot = document.getElementById('tv-volume-control') as HTMLElement
 const tvVolumeRange = document.getElementById('tv-volume-range') as HTMLInputElement | null;
 const tvVolumeMute = document.getElementById('tv-volume-mute') as HTMLButtonElement | null;
 const tvVolumeValue = document.getElementById('tv-volume-value') as HTMLElement | null;
+const videoScrubberRoot = document.getElementById('video-scrubber') as HTMLElement | null;
+const videoSeekRange = document.getElementById('video-seek-range') as HTMLInputElement | null;
+const videoCurrentTime = document.getElementById('video-current-time') as HTMLElement | null;
+const videoDuration = document.getElementById('video-duration') as HTMLElement | null;
 let controlsController: ControlSheetController | null = null;
 let lastAudibleTvVolume = 0.7;
+let videoScrubbing = false;
 let tvVolumeCommitTimer: ReturnType<typeof window.setTimeout> | undefined;
 const peopleFilterSelect = document.getElementById('people-filter') as HTMLSelectElement | null;
 const labelFilterSelect = document.getElementById('label-filter') as HTMLSelectElement | null;
@@ -339,9 +344,14 @@ async function renderPhonePreview(display: DisplayPlaybackState | null = null): 
 }
 
 async function pollPreviewPlayback(): Promise<void> {
-  if (activeConfig.videoAudioMode !== 'phone' || activeItem?.kind !== 'video') return;
+  if (activeItem?.kind !== 'video') {
+    renderVideoScrubber(null);
+    return;
+  }
   const playback = await getPlayback().catch(() => null);
-  await renderPhonePreview(playback?.display ?? null);
+  if (!playback) return;
+  renderVideoScrubber(playback);
+  if (activeConfig.videoAudioMode === 'phone') await renderPhonePreview(playback.display);
 }
 
 function wirePlaybackPreviewSocket(): void {
@@ -381,9 +391,101 @@ function wirePlaybackPreviewSocket(): void {
   } catch {
     // Polling still keeps the preview roughly synchronized when WebSocket setup fails.
   }
-  window.setInterval(() => { pollPreviewPlayback().catch(() => {}); }, 1500);
+  window.setInterval(() => { pollPreviewPlayback().catch(() => {}); }, 1000);
 }
 
+function formatPlaybackTime(seconds: number): string {
+  const safe = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
+  const rounded = Math.floor(safe);
+  const hours = Math.floor(rounded / 3600);
+  const minutes = Math.floor((rounded % 3600) / 60);
+  const secs = rounded % 60;
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+    : `${minutes}:${String(secs).padStart(2, '0')}`;
+}
+
+function estimatedPlaybackTime(playback: Playback): number {
+  const display = playback.display;
+  if (!display || !Number.isFinite(display.currentTime)) return 0;
+  let current = display.currentTime;
+  if (!playback.paused && Number.isFinite(display.observedAt)) {
+    const elapsed = Math.max(0, (Date.now() - display.observedAt) / 1000);
+    const requestedRate = Number(activeConfig.videoPlaybackRate ?? 1);
+    const rate = Number.isFinite(requestedRate) ? Math.min(3, Math.max(0.25, requestedRate)) : 1;
+    current += elapsed * rate;
+  }
+  const duration = Number.isFinite(display.duration) ? Math.max(0, display.duration) : 0;
+  return duration > 0 ? Math.min(duration, Math.max(0, current)) : Math.max(0, current);
+}
+
+function renderVideoScrubber(playback: Playback | null): void {
+  const display = playback?.display ?? null;
+  const active = Boolean(
+    playback?.kind === 'video'
+    && playback.itemId
+    && display
+    && display.itemId === playback.itemId
+    && display.seekable
+    && Number.isFinite(display.duration)
+    && display.duration > 0,
+  );
+  videoScrubberRoot?.classList.toggle('hidden', !active);
+  if (!active || !playback || !display || !videoSeekRange) return;
+
+  const duration = Math.max(0, display.duration);
+  const current = estimatedPlaybackTime(playback);
+  if (!videoScrubbing) videoSeekRange.value = String(Math.round((current / duration) * 1000));
+  videoCurrentTime && (videoCurrentTime.textContent = formatPlaybackTime(
+    videoScrubbing ? (Number(videoSeekRange.value) / 1000) * duration : current,
+  ));
+  if (videoDuration) {
+    videoDuration.textContent = formatPlaybackTime(duration);
+    videoDuration.dataset.seconds = String(duration);
+  }
+  videoSeekRange.setAttribute(
+    'aria-valuetext',
+    `${formatPlaybackTime((Number(videoSeekRange.value) / 1000) * duration)} of ${formatPlaybackTime(duration)}`,
+  );
+}
+
+async function commitVideoScrub(): Promise<void> {
+  if (!videoSeekRange) return;
+  const playback = await getPlayback().catch(() => null);
+  if (!playback?.display || playback.kind !== 'video' || !playback.display.seekable || playback.display.duration <= 0) {
+    videoScrubbing = false;
+    renderVideoScrubber(playback);
+    return;
+  }
+
+  const desired = (Number(videoSeekRange.value) / 1000) * playback.display.duration;
+  const current = estimatedPlaybackTime(playback);
+  const delta = desired - current;
+  if (Math.abs(delta) > 0.15) {
+    try { navigator.vibrate?.(9); } catch { /* enhancement only */ }
+    await seekBy(delta);
+  }
+  videoScrubbing = false;
+  await syncPlayback();
+}
+
+function wireVideoScrubber(): void {
+  if (!videoSeekRange) return;
+  videoSeekRange.addEventListener('input', () => {
+    videoScrubbing = true;
+    const duration = Number(videoDuration?.dataset.seconds ?? 0);
+    if (duration > 0 && videoCurrentTime) {
+      videoCurrentTime.textContent = formatPlaybackTime((Number(videoSeekRange.value) / 1000) * duration);
+    }
+  });
+  videoSeekRange.addEventListener('change', () => {
+    void commitVideoScrub().catch((error: Error) => {
+      videoScrubbing = false;
+      toast('Seek failed: ' + error.message, { error: true });
+    });
+  });
+  videoSeekRange.addEventListener('pointercancel', () => { videoScrubbing = false; });
+}
 
 function clampTvVolume(value: number): number {
   return Math.min(1, Math.max(0, Number.isFinite(value) ? value : 1));
@@ -612,18 +714,24 @@ async function syncPlayback(): Promise<void> {
     loop.setAttribute('aria-pressed', String(p.holding));
   }
   const nav = playbackNavigationState(p);
+  const videoSeek = nav.action === 'video-seek';
   const previous = document.getElementById('pb-prev') as HTMLButtonElement | null;
   const next = document.getElementById('pb-next') as HTMLButtonElement | null;
   if (previous) {
+    previous.textContent = videoSeek ? `↶${VIDEO_SEEK_SECONDS}` : '⏮';
+    previous.classList.toggle('video-seek', videoSeek);
     previous.title = nav.previousLabel;
     previous.setAttribute('aria-label', nav.previousLabel);
     previous.disabled = nav.previousDisabled;
   }
   if (next) {
+    next.textContent = videoSeek ? `${VIDEO_SEEK_SECONDS}↷` : '⏭';
+    next.classList.toggle('video-seek', videoSeek);
     next.title = nav.nextLabel;
     next.setAttribute('aria-label', nav.nextLabel);
     next.disabled = nav.nextDisabled;
   }
+  renderVideoScrubber(p);
 }
 
 async function onTileClick(item: MediaItem): Promise<void> {
@@ -908,6 +1016,7 @@ async function start(): Promise<void> {
     wireUpload();
     wireLiveCast();
     wirePlayback();
+    wireVideoScrubber();
     wireTvVolume();
     wirePlaybackPreviewSocket();
     wireControlSheet();
