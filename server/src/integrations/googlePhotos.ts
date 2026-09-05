@@ -175,6 +175,8 @@ export async function deleteSession(id: string): Promise<void> {
 
 interface PickedMediaItem {
   id: string;
+  /** Original media creation time supplied by the Google Photos Picker API. */
+  createTime?: string;
   type?: string; // 'PHOTO' | 'VIDEO' | 'TYPE_UNSPECIFIED'
   mediaFile?: {
     baseUrl?: string;
@@ -217,9 +219,10 @@ async function importPicked(m: PickedMediaItem): Promise<void> {
   const { item } = isVideo
     ? await ingestVideo(buf, filename.split('.').pop() ?? 'mp4', 'google-photos', filename)
     : await ingestImage(buf, 'google-photos', filename);
+  const sourceCreatedAt = m.createTime ? Date.parse(m.createTime) : Number.NaN;
   Object.assign(item, {
     uploadedAt: Date.now(),
-    originalCreatedAt: item.createdAt,
+    originalCreatedAt: Number.isFinite(sourceCreatedAt) ? sourceCreatedAt : item.createdAt,
     originalFilename: filename,
     sizeBytes: buf.length,
     uploader: 'Google Photos',
