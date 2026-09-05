@@ -217,6 +217,14 @@ async function importPicked(m: PickedMediaItem): Promise<void> {
   const { item } = isVideo
     ? await ingestVideo(buf, filename.split('.').pop() ?? 'mp4', 'google-photos', filename)
     : await ingestImage(buf, 'google-photos', filename);
+  Object.assign(item, {
+    uploadedAt: Date.now(),
+    originalCreatedAt: item.createdAt,
+    originalFilename: filename,
+    sizeBytes: buf.length,
+    uploader: 'Google Photos',
+    storageLocation: 'Frame storage',
+  });
   await addItem(item);
   enqueueTranscode(item);
   enqueueFaceDetection(item);
