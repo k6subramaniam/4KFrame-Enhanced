@@ -124,7 +124,7 @@ function renderGrid(): void {
     const empty = document.createElement('div');
     empty.id = 'grid-empty';
     empty.textContent = items.length
-      ? 'No media matches the current filter. Try “All media” above.'
+      ? 'No media matches the current filters. Adjust them or use Reset filters above.'
       : 'No photos or videos yet — drag some in, or use browse above to add your first.';
     grid.appendChild(empty);
     renderBulkToolbar();
