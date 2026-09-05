@@ -267,5 +267,6 @@ export async function retryVideoProcessingJob(jobId: string): Promise<{ ok: bool
   }
 
   if (!previous.target) return { ok: false, error: 'upscale target is missing' };
-  return enqueueUpscale(item, previous.target);
+  const result = await enqueueUpscale(item, previous.target);
+  return result.queued ? { ok: true } : { ok: false, error: result.error };
 }
