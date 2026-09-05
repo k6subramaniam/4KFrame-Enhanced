@@ -709,6 +709,7 @@ function focusableControls(): HTMLElement[] {
     for (const el of candidates) {
       if (seen.has(el)) continue;
       if ((el as HTMLButtonElement).disabled) continue;
+      if (el.tabIndex < 0) continue;
       if (el.offsetParent === null) continue; // not rendered
       seen.add(el);
       out.push(el);
