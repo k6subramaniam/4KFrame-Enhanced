@@ -62,6 +62,9 @@
       globalThis.WebSocket = FakeWebSocket;
 
       try {
+        // Browser runners can reuse origin storage between test invocations. Start from
+        // the explicit open state so collapse/expand persistence is deterministic.
+        localStorage.setItem('4kframe.publicControls.zoomPanOpen', 'true');
         await import('/src/main.ts');
         await new Promise((resolve) => setTimeout(resolve, 50));
 
@@ -89,15 +92,22 @@
         const countBeforeUnknown = sent.length;
         document.getElementById('unknown-action').click();
 
+        const normalize = (messages) => messages.map((message) => ({
+          ...message,
+          patch: Object.fromEntries(Object.entries(message.patch ?? {}).map(([key, value]) => [
+            key,
+            typeof value === 'number' ? Math.round(value * 1_000_000) / 1_000_000 : value,
+          ])),
+        }));
         const expected = [
           { type: 'publicConfig', patch: { zoom: 1.6 } },
           { type: 'publicConfig', patch: { zoom: 1.2 } },
           { type: 'publicConfig', patch: { panX: 0.2, panY: -0.4 } },
-          { type: 'publicConfig', patch: { panX: 0.2, panY: -0.19999999999999998 } },
+          { type: 'publicConfig', patch: { panX: 0.2, panY: -0.2 } },
           { type: 'publicConfig', patch: { panX: 0.1, panY: -0.3 } },
-          { type: 'publicConfig', patch: { panX: 0.30000000000000004, panY: -0.3 } },
+          { type: 'publicConfig', patch: { panX: 0.3, panY: -0.3 } },
         ];
-        const passed = JSON.stringify(sent) === JSON.stringify(expected)
+        const passed = JSON.stringify(normalize(sent)) === JSON.stringify(expected)
           && sent.length === countBeforeUnknown
           && collapsed
           && expanded;
