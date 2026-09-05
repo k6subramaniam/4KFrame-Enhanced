@@ -630,10 +630,6 @@ function isPublicControlTarget(target: EventTarget | null): boolean {
   return target instanceof Element && Boolean(target.closest('#public-controls, #public-control-panel, #public-controls-toggle, #controls-toggle'));
 }
 
-function bottomControllerHasFocus(): boolean {
-  return Boolean(bottomController?.contains(document.activeElement));
-}
-
 function clearControlIdleTimers(): void {
   window.clearTimeout(controlDimTimer);
   window.clearTimeout(controlHideTimer);
