@@ -18,6 +18,7 @@ export interface VideoPlaybackSyncOptions {
   muted: boolean;
   loop: boolean;
   playbackRate?: number;
+  volume?: number;
   restartAfterUnmute?: boolean;
   onPlaybackRejected: (error: unknown) => void;
 }
@@ -38,7 +39,8 @@ export function syncVideoPlaybackProperties(
   const becameAudible = video.muted && !options.muted;
   video.muted = options.muted;
   video.defaultMuted = options.muted;
-  video.volume = AUDIBLE_VIDEO_VOLUME;
+  const requestedVolume = Number(options.volume ?? AUDIBLE_VIDEO_VOLUME);
+  video.volume = Number.isFinite(requestedVolume) ? Math.min(1, Math.max(0, requestedVolume)) : AUDIBLE_VIDEO_VOLUME;
   video.loop = options.loop;
   const requestedRate = Number(options.playbackRate ?? 1);
   const rate = Number.isFinite(requestedRate) ? Math.min(3, Math.max(0.25, requestedRate)) : 1;

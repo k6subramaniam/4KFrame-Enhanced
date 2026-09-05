@@ -18,7 +18,14 @@ import {
 import { renderSettings } from './settings.js';
 import { renderActiveCropPreview } from './cropPreview.js';
 import { toast, confirmToast } from './toast.js';
-import { initCastSender, isCastReady, castControl, toggleCastSession } from './cast-sender.js';
+import {
+  initCastSender,
+  isCastReady,
+  castControl,
+  toggleCastSession,
+  getCastVolume,
+  setCastVolume,
+} from './cast-sender.js';
 import { createMultiActivationRecognizer } from './multiActivation.js';
 import { playbackNavigationState, VIDEO_SEEK_SECONDS } from './playbackState.js';
 import { type ControlSheetController, wireControlSheet as wireControlSheetController } from './controlSheet.js';
@@ -50,7 +57,13 @@ const controlsToggle = document.getElementById('controls-toggle') as HTMLButtonE
 const controlsClose = document.getElementById('controls-close') as HTMLButtonElement | null;
 const controlsSheet = document.getElementById('control-sheet') as HTMLElement | null;
 const controlsBackdrop = document.getElementById('controls-backdrop') as HTMLElement | null;
+const tvVolumeRoot = document.getElementById('tv-volume-control') as HTMLElement | null;
+const tvVolumeRange = document.getElementById('tv-volume-range') as HTMLInputElement | null;
+const tvVolumeMute = document.getElementById('tv-volume-mute') as HTMLButtonElement | null;
+const tvVolumeValue = document.getElementById('tv-volume-value') as HTMLElement | null;
 let controlsController: ControlSheetController | null = null;
+let lastAudibleTvVolume = 0.7;
+let tvVolumeCommitTimer: ReturnType<typeof window.setTimeout> | undefined;
 const peopleFilterSelect = document.getElementById('people-filter') as HTMLSelectElement | null;
 const labelFilterSelect = document.getElementById('label-filter') as HTMLSelectElement | null;
 const sortSelect = document.getElementById('media-sort') as HTMLSelectElement | null;
@@ -256,13 +269,12 @@ function ensurePhonePreview(): { root: HTMLElement; video: HTMLVideoElement; sta
     root.className = 'phone-audio-preview';
     root.innerHTML = `
       <style>
-        .phone-audio-preview{margin:.75rem 0;padding:.75rem;border:1px solid rgba(255,255,255,.18);border-radius:12px;background:rgba(0,0,0,.22)}
+        .phone-audio-preview{margin:.75rem 0;padding:.7rem;border:1px solid rgba(255,255,255,.1);border-radius:16px;background:rgba(255,255,255,.035)}
         .phone-audio-preview video{width:100%;max-height:180px;border-radius:10px;background:#000}
-        .phone-audio-preview .preview-copy{margin:.35rem 0 0;font-size:.9rem;opacity:.82}
+        .phone-audio-preview .preview-copy{display:none}
       </style>
-      <strong>Phone / Browser audio preview</strong>
+      <strong>Phone audio</strong>
       <video playsinline controls></video>
-      <p class="preview-copy">Audio plays in this browser while the TV stays muted. Browser autoplay permissions may block audio; tap Play if it does not start.</p>
       <div class="preview-copy" data-preview-status></div>`;
     hint.insertAdjacentElement('afterend', root);
   }
@@ -319,10 +331,10 @@ async function renderPhonePreview(display: DisplayPlaybackState | null = null): 
   if (!phonePreviewUserPaused) {
     try {
       await video.play();
-      status.textContent = 'Playing browser audio for the active TV video.';
     } catch {
-      status.textContent = 'Tap Play to start browser audio; autoplay with sound may be blocked.';
+      // Audible autoplay can require a gesture. Keep browser-policy warnings out of the UI.
     }
+    status.textContent = '';
   }
 }
 
@@ -341,9 +353,11 @@ function wirePlaybackPreviewSocket(): void {
         const msg = JSON.parse(event.data as string) as FrameEvent;
         if (msg.type === 'config') {
           activeConfig = msg.config;
+          syncTvVolumeControl();
           void renderPhonePreview();
         } else if (msg.type === 'show') {
           activeItem = msg.items.find((item) => item.kind === 'video') ?? msg.items[0];
+          syncTvVolumeControl();
           void renderPhonePreview();
           // Keep "Now playing crop" tracking what's actually live on the display — it
           // otherwise only re-renders on the next full refresh() (upload/delete/etc.),
@@ -371,6 +385,81 @@ function wirePlaybackPreviewSocket(): void {
 }
 
 
+function clampTvVolume(value: number): number {
+  return Math.min(1, Math.max(0, Number.isFinite(value) ? value : 1));
+}
+
+function renderTvVolume(value: number): void {
+  const volume = clampTvVolume(value);
+  if (volume > 0.01) lastAudibleTvVolume = volume;
+  if (tvVolumeRange) tvVolumeRange.value = String(Math.round(volume * 100));
+  if (tvVolumeValue) tvVolumeValue.textContent = `${Math.round(volume * 100)}%`;
+  if (tvVolumeMute) {
+    tvVolumeMute.textContent = volume <= 0.01 ? '🔇' : volume < 0.5 ? '🔉' : '🔊';
+    tvVolumeMute.setAttribute('aria-label', volume <= 0.01 ? 'Unmute TV video' : 'Mute TV video');
+    tvVolumeMute.setAttribute('aria-pressed', String(volume <= 0.01));
+  }
+}
+
+function syncTvVolumeControl(): void {
+  const videoActive = activeItem?.kind === 'video';
+  tvVolumeRoot?.classList.toggle('hidden', !videoActive);
+  if (!videoActive) return;
+  const castVolume = getCastVolume();
+  const configured = Number(activeConfig.videoVolume ?? 1);
+  renderTvVolume(castVolume ?? clampTvVolume(configured));
+}
+
+async function commitTvVolume(value: number): Promise<void> {
+  const volume = clampTvVolume(value);
+  renderTvVolume(volume);
+
+  if (activeConfig.videoAudioMode !== 'tv') {
+    activeConfig.videoAudioMode = 'tv';
+    activeConfig.videoMuted = false;
+    await updateData({ videoAudioMode: 'tv', videoMuted: 'false' });
+  }
+
+  if (await setCastVolume(volume)) {
+    if (Math.abs(Number(activeConfig.videoVolume ?? 1) - 1) > 0.001) {
+      activeConfig.videoVolume = 1;
+      await updateData({ videoVolume: '1' });
+    }
+    return;
+  }
+
+  activeConfig.videoVolume = volume;
+  await updateData({ videoVolume: String(volume) });
+}
+
+function scheduleTvVolumeCommit(value: number, immediate = false): void {
+  window.clearTimeout(tvVolumeCommitTimer);
+  const run = () => {
+    void commitTvVolume(value).catch((error: Error) => toast('Volume failed: ' + error.message, { error: true }));
+  };
+  if (immediate) { run(); return; }
+  tvVolumeCommitTimer = window.setTimeout(run, 90);
+}
+
+function wireTvVolume(): void {
+  if (!tvVolumeRange || !tvVolumeMute) return;
+  tvVolumeRange.addEventListener('input', () => {
+    const volume = clampTvVolume(Number(tvVolumeRange.value) / 100);
+    renderTvVolume(volume);
+    scheduleTvVolumeCommit(volume);
+  });
+  tvVolumeRange.addEventListener('change', () => {
+    scheduleTvVolumeCommit(Number(tvVolumeRange.value) / 100, true);
+  });
+  tvVolumeMute.addEventListener('click', () => {
+    const current = clampTvVolume(Number(tvVolumeRange.value) / 100);
+    const next = current <= 0.01 ? Math.max(0.1, lastAudibleTvVolume) : 0;
+    try { navigator.vibrate?.(10); } catch { /* enhancement only */ }
+    renderTvVolume(next);
+    scheduleTvVolumeCommit(next, true);
+  });
+  syncTvVolumeControl();
+}
 function isAppleTouchDevice(): boolean {
   return /iP(?:hone|ad|od)/.test(navigator.userAgent)
     || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -615,6 +704,7 @@ async function refresh(): Promise<void> {
   renderedCropPreviewItemId = activeItem?.id;
   await renderSettings(settingsRoot, current.data, activeItem);
   await renderPhonePreview();
+  syncTvVolumeControl();
   updatePlaybackLabels();
   controlsController?.setOpen(controlsController.isOpen());
   await syncPlayback();
@@ -702,6 +792,7 @@ function wireCast(): void {
     btn.classList.toggle('hidden', !isCastReady());
     btn.classList.toggle('active', isConnected);
     btn.textContent = isConnected ? '◉ Casting' : '▶ Cast device';
+    syncTvVolumeControl();
   };
   btn.addEventListener('click', () => { toggleCastSession().catch(() => {}); });
   initCastSender(sync);
@@ -817,6 +908,7 @@ async function start(): Promise<void> {
     wireUpload();
     wireLiveCast();
     wirePlayback();
+    wireTvVolume();
     wirePlaybackPreviewSocket();
     wireControlSheet();
     wirePeopleFilters();

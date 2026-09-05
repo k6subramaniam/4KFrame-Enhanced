@@ -147,7 +147,7 @@ export async function sendControl(message: ControlMessage): Promise<boolean> {
 export async function updateData(patch: Record<string, string>): Promise<void> {
   // Playback rate is admin-only, so use authenticated REST rather than the public-config
   // WebSocket allowlist.
-  if ('videoPlaybackRate' in patch) {
+  if ('videoPlaybackRate' in patch || 'videoVolume' in patch) {
     const qs = new URLSearchParams(patch).toString();
     await requestJson(`/api/data?${qs}`);
     return;

@@ -18,6 +18,8 @@ export const CAST_APP_ID = (import.meta as { env?: Record<string, string> }).env
 interface CastSession {
   sendMessage(namespace: string, message: unknown): Promise<unknown>;
   endSession(stopCasting: boolean): void;
+  getVolume(): number;
+  setVolume(volume: number): Promise<unknown>;
 }
 interface CastContext {
   setOptions(options: { receiverApplicationId: string; autoJoinPolicy: string }): void;
@@ -113,6 +115,32 @@ export async function castControl(msg: ControlMessage): Promise<boolean> {
   if (!session) return false;
   try {
     await session.sendMessage(CAST_NAMESPACE, msg);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+
+/** Current Cast device/system volume, or null when no Cast session is active. */
+export function getCastVolume(): number | null {
+  const session = context?.getCurrentSession();
+  if (!session) return null;
+  try {
+    const volume = Number(session.getVolume());
+    return Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Set the Cast device/system volume. Returns false when there is no active Cast session. */
+export async function setCastVolume(volume: number): Promise<boolean> {
+  const session = context?.getCurrentSession();
+  if (!session) return false;
+  const clamped = Math.min(1, Math.max(0, Number.isFinite(volume) ? volume : 1));
+  try {
+    await session.setVolume(clamped);
     return true;
   } catch {
     return false;

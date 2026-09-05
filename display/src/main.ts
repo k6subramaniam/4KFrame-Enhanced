@@ -27,7 +27,7 @@ import { GLRenderer } from './gl.js';
 import { compose, contentRect } from './compositor.js';
 import { applyOverlays, setCaption, setStatus } from './overlays.js';
 import { initCastReceiver } from './cast.js';
-import { playbackBlockedStatusMessage, seekActiveVideo, syncVideoPlaybackProperties } from './videoPlayback.js';
+import { seekActiveVideo, syncVideoPlaybackProperties } from './videoPlayback.js';
 import { attachMediaGestures } from './gestures.js';
 
 const canvas = document.getElementById('gl') as HTMLCanvasElement;
@@ -145,7 +145,7 @@ async function renderItems(items: MediaItem[], interactive: boolean): Promise<vo
   // Photos that fail to load produced a silent black screen with no status and no skip —
   // unlike videos, which already self-skip. Treat them the same way.
   if (toFrame.dataset.mediaFailed === 'true') {
-    setStatus('Photo unavailable — skipping…');
+    setStatus('');
     const failedIds = items.map((i) => i.id).join(',');
     window.setTimeout(() => {
       if (lastItems?.map((i) => i.id).join(',') !== failedIds) return; // already moved on
@@ -195,8 +195,10 @@ function startMotion(): void {
 }
 
 function reportPlaybackBlocked(error: unknown): void {
-  console.error('Video playback was blocked.', error);
-  setStatus(playbackBlockedStatusMessage(config.videoAudioMode));
+  // Keep autoplay policy noise out of the TV UI. A later user Play action can resume
+  // normally; the receiver remains visually clean in the meantime.
+  console.warn('Video playback was blocked by the browser.', error);
+  setStatus('');
 }
 
 /** Keep the active video element aligned with persisted playback settings. */
@@ -205,6 +207,7 @@ function syncActiveVideoPlaybackProperties(restartAfterUnmute = false): void {
     muted: config.videoAudioMode !== 'tv',
     loop: config.videoLoop || holding,
     playbackRate: config.videoPlaybackRate,
+    volume: config.videoVolume,
     restartAfterUnmute: restartAfterUnmute && showingVideo && !paused,
     onPlaybackRejected: reportPlaybackBlocked,
   });
@@ -232,7 +235,7 @@ async function renderVideo(item: MediaItem): Promise<void> {
 function handleVideoError(item: MediaItem): void {
   if (lastVideoItem?.id !== item.id) return; // stale handler from a previous item
   console.error(`Cannot play video ${item.file} — skipping.`);
-  setStatus('Skipping unplayable video…');
+  setStatus('');
   // Delay so several bad files in a row skip calmly rather than in a tight loop.
   window.setTimeout(() => {
     if (lastVideoItem?.id !== item.id) return;
@@ -344,8 +347,7 @@ async function rerender(): Promise<void> {
 }
 
 function statusText(): string {
-  if (paused) return '⏸ Paused';
-  if (holding) return '🔁 Loop';
+  // Playback state lives in the controls themselves; keep the media canvas text-free.
   return '';
 }
 
@@ -372,7 +374,7 @@ function startLiveCast(info: LiveCastInfo): void {
   // If the bytes can't be fetched (expired, replaced, auth), bail out immediately rather
   // than holding a black layer over the slideshow for the rest of the window.
   const onMediaError = (): void => {
-    setStatus('Live cast unavailable');
+    setStatus('');
     endLiveCast();
   };
   liveCastImg.onerror = onMediaError;
@@ -600,8 +602,8 @@ const bottomController = document.getElementById('public-bottom-controller') as 
 const zoomPanSection = document.getElementById('public-zoom-pan-section') as HTMLElement | null;
 const zoomPanToggle = document.getElementById('public-zoom-pan-toggle') as HTMLButtonElement | null;
 const ZOOM_PAN_COLLAPSE_STORAGE_KEY = '4kframe.publicControls.zoomPanOpen';
-const CONTROL_DIM_TIMEOUT_MS = 2600;
-const CONTROL_HIDE_TIMEOUT_MS = 7600;
+const CONTROL_DIM_TIMEOUT_MS = 1800;
+const CONTROL_HIDE_TIMEOUT_MS = 3800;
 let controlDimTimer: ReturnType<typeof window.setTimeout> | undefined;
 let controlHideTimer: ReturnType<typeof window.setTimeout> | undefined;
 
@@ -641,6 +643,7 @@ function clearControlIdleTimers(): void {
 
 function showBottomController(): void {
   bottomController?.classList.remove('is-hidden', 'is-dim');
+  controlsToggle?.classList.remove('is-hidden');
   // The Controls pill sits at low opacity and previously only brightened on hover or
   // focus-visible — neither of which a TV remote produces, leaving it invisible. Tie it to
   // the same activity signal as the bottom bar. Keeping it faint when idle also avoids
@@ -652,16 +655,17 @@ function scheduleControlIdle(): void {
   if (!bottomController) return;
   clearControlIdleTimers();
   controlDimTimer = window.setTimeout(() => {
-    if (!bottomControllerHasFocus()) bottomController.classList.add('is-dim');
+    bottomController.classList.add('is-dim');
   }, CONTROL_DIM_TIMEOUT_MS);
   controlHideTimer = window.setTimeout(() => {
-    if (bottomControllerHasFocus()) return;
+    // YouTube-style idle state: the media is the entire screen. Hide every control,
+    // close every adjustments panel, and drop stale focus until the next touch/move/key.
     bottomController.classList.add('is-hidden');
-    // Also fade the Controls pill and close an abandoned panel, so a 24/7 display isn't
-    // left with static bright UI burned into it.
-    if (!publicControls?.contains(document.activeElement)) {
-      controlsToggle?.classList.remove('is-active');
-      if (publicControls && !publicControls.hidden) setControlsOpen(false, false);
+    controlsToggle?.classList.add('is-hidden');
+    controlsToggle?.classList.remove('is-active');
+    if (publicControls && !publicControls.hidden) setControlsOpen(false, false);
+    if (isPublicControlTarget(document.activeElement)) {
+      (document.activeElement as HTMLElement | null)?.blur?.();
     }
   }, CONTROL_HIDE_TIMEOUT_MS);
 }
@@ -735,7 +739,7 @@ function setControlsOpen(open: boolean, revealController = true): void {
   publicControls.hidden = !open;
   controlsToggle.setAttribute('aria-expanded', String(open));
   controlsToggle.setAttribute('aria-label', open ? 'Close slideshow controls' : 'Open slideshow controls');
-  controlsToggle.textContent = open ? 'Close' : 'Controls';
+  controlsToggle.textContent = open ? '✕' : '•••';
   if (revealController) registerPublicControlActivity();
 }
 

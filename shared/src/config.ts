@@ -163,6 +163,8 @@ export interface FrameConfig {
   videoLoop: boolean;
   /** Playback speed for videos. 1 = normal, values below 1 are slow motion. */
   videoPlaybackRate: number;
+  /** Video loudness on browser/TV displays that are not using Cast system volume. */
+  videoVolume: number;
 
   // --- Enhanced: integrations & UX ---
   googlePhotos: GooglePhotosConfig;
@@ -205,6 +207,7 @@ export function defaultConfig(): FrameConfig {
     videoMuted: false,
     videoLoop: true,
     videoPlaybackRate: VIDEO_PLAYBACK_RATE_DEFAULT,
+    videoVolume: 1,
     googlePhotos: {
       connected: false,
       retentionDays: DEFAULT_GOOGLE_PHOTOS_RETENTION_DAYS,
@@ -248,6 +251,7 @@ export function toApiData(c: FrameConfig): ApiDataPayload {
     videoAudioMode: c.videoAudioMode,
     videoLoop: String(c.videoLoop),
     videoPlaybackRate: String(c.videoPlaybackRate),
+    videoVolume: String(c.videoVolume),
     // Only the retention window round-trips through the flat payload; the rest of
     // `googlePhotos` (connected/account/lastImportAt) is served by /api/google/status.
     googlePhotosRetentionDays: String(googlePhotosRetentionDays(c)),
@@ -340,6 +344,7 @@ export function fromApiData(current: FrameConfig, patch: ApiDataPayload): FrameC
       VIDEO_PLAYBACK_RATE_MIN,
       VIDEO_PLAYBACK_RATE_MAX,
     ),
+    videoVolume: clamp(num(patch.videoVolume, current.videoVolume ?? 1), 0, 1),
     googlePhotos: {
       ...current.googlePhotos,
       retentionDays: Math.max(
