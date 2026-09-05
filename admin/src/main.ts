@@ -285,16 +285,28 @@ function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char] ?? char));
 }
 
+function pruneSelectionToCurrentFilters(): void {
+  if (!selectedMediaIds.size) return;
+  const matching = new Set(filterLibraryItems(filterPeople(items), mediaFilters).map((item) => item.id));
+  for (const id of selectedMediaIds) if (!matching.has(id)) selectedMediaIds.delete(id);
+  if (!selectedMediaIds.size) selectionMode = false;
+}
+
+function applyFilterChange(): void {
+  pruneSelectionToCurrentFilters();
+  renderGrid();
+}
+
 function wirePeopleFilters(): void {
   if (sortSelect) sortMode = (sortSelect.value || sortMode) as SortMode;
   peopleFilterSelect?.addEventListener('change', () => {
     peopleFilter = (peopleFilterSelect.value || 'all') as PeopleFilter;
     syncPeopleLabels();
-    renderGrid();
+    applyFilterChange();
   });
   labelFilterSelect?.addEventListener('change', () => {
     labelFilter = labelFilterSelect.value;
-    renderGrid();
+    applyFilterChange();
   });
   sortSelect?.addEventListener('change', () => {
     sortMode = (sortSelect.value || 'date-desc') as SortMode;
@@ -336,31 +348,31 @@ function syncMediaFilterControls(): void {
 function wireMediaFilters(): void {
   mediaDateField?.addEventListener('change', () => {
     mediaFilters.dateField = (mediaDateField.value || 'uploaded') as DateField;
-    renderGrid();
+    applyFilterChange();
   });
   mediaDateStart?.addEventListener('change', () => {
     mediaFilters.startDate = mediaDateStart.value;
-    renderGrid();
+    applyFilterChange();
   });
   mediaDateEnd?.addEventListener('change', () => {
     mediaFilters.endDate = mediaDateEnd.value;
-    renderGrid();
+    applyFilterChange();
   });
   mediaKindFilter?.addEventListener('change', () => {
     mediaFilters.kind = (mediaKindFilter.value || 'all') as MediaKindFilter;
-    renderGrid();
+    applyFilterChange();
   });
   mediaUploaderFilter?.addEventListener('change', () => {
     mediaFilters.uploader = mediaUploaderFilter.value || 'all';
-    renderGrid();
+    applyFilterChange();
   });
   mediaSizeFilter?.addEventListener('change', () => {
     mediaFilters.size = (mediaSizeFilter.value || 'all') as SizeFilter;
-    renderGrid();
+    applyFilterChange();
   });
   mediaStorageFilter?.addEventListener('change', () => {
     mediaFilters.storage = mediaStorageFilter.value || 'all';
-    renderGrid();
+    applyFilterChange();
   });
   document.querySelectorAll<HTMLButtonElement>('[data-date-preset]').forEach((button) => {
     button.addEventListener('click', () => {
@@ -368,7 +380,7 @@ function wireMediaFilters(): void {
       mediaFilters.startDate = range.startDate;
       mediaFilters.endDate = range.endDate;
       syncMediaFilterControls();
-      renderGrid();
+      applyFilterChange();
     });
   });
   document.getElementById('media-filter-reset')?.addEventListener('click', () => {
@@ -840,8 +852,9 @@ async function refresh(): Promise<void> {
 function wireBulkActions(): void {
   const visibleIds = () => sortItems(filterLibraryItems(filterPeople(items), mediaFilters)).map((item) => item.id);
   document.getElementById('select-visible')?.addEventListener('click', () => {
-    selectionMode = true;
+    selectedMediaIds.clear();
     for (const id of visibleIds()) selectedMediaIds.add(id);
+    selectionMode = selectedMediaIds.size > 0;
     renderGrid();
   });
   document.getElementById('clear-selection')?.addEventListener('click', () => {
@@ -859,7 +872,10 @@ function wireBulkActions(): void {
   document.getElementById('bulk-delete')?.addEventListener('click', async () => {
     const ids = [...selectedMediaIds];
     if (!ids.length) return;
-    const ok = await confirmToast(`Move ${ids.length} selected item(s) to Trash? They can be restored for 30 days.`, {
+    const dateScope = mediaFilters.startDate || mediaFilters.endDate
+      ? ` ${mediaFilters.dateField === 'created' ? 'Created' : 'Uploaded'} date range: ${mediaFilters.startDate || 'any'} to ${mediaFilters.endDate || 'any'}.`
+      : '';
+    const ok = await confirmToast(`Move ${ids.length} selected item(s) to Trash?${dateScope} They can be restored for 30 days.`, {
       confirmLabel: `Trash ${ids.length}`,
       danger: true,
     });
