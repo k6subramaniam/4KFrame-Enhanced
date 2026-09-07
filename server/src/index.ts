@@ -62,7 +62,7 @@ export async function buildApp(https?: TlsMaterial): Promise<FastifyInstance> {
     const requestPath = url.pathname;
     if (!requestPath.startsWith('/photos/')) return;
     const frameAuthToken = url.searchParams.get('frame_auth') ?? undefined;
-    if (!auth.isAuthed(req.headers.cookie) && !auth.verifyToken(frameAuthToken)) {
+    if (!auth.isAuthedRequest(req.headers.cookie, frameAuthToken)) {
       return reply.code(401).send({ error: 'unauthorized' });
     }
   });
