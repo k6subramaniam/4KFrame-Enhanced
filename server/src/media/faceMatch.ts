@@ -1,7 +1,7 @@
 import type { FaceMetadata } from '@4kframe/shared';
 import { faceMatchEnabled } from '../env.js';
 
-export type FaceDetectionSource = 'image' | 'video-poster';
+export type FaceDetectionSource = 'image' | 'video-poster' | 'video-frame';
 
 export interface FaceDetectionInput {
   buffer: Buffer;
@@ -37,6 +37,10 @@ export async function detectFacesInGeneratedVideoPosterImage(buffer: Buffer): Pr
   return detectFaces({ buffer, source: 'video-poster' });
 }
 
+export async function detectFacesInVideoFrame(buffer: Buffer): Promise<FaceMetadata[] | undefined> {
+  return detectFaces({ buffer, source: 'video-frame' });
+}
+
 async function detectFaces(input: FaceDetectionInput): Promise<FaceMetadata[] | undefined> {
   if (!faceMatchEnabled()) return undefined;
   const faces = await detector(input);
@@ -60,6 +64,8 @@ function sanitizeFaces(faces: FaceMetadata[]): FaceMetadata[] {
         box: { x, y, width, height },
         ...(embedding?.length ? { embedding } : {}),
         ...(face.label ? { label: String(face.label) } : {}),
+        ...(Number.isFinite(face.timestampSec) ? { timestampSec: Number(face.timestampSec) } : {}),
+        ...(face.trackId ? { trackId: String(face.trackId) } : {}),
       } satisfies FaceMetadata;
     })
     .filter((face): face is FaceMetadata => Boolean(face));
