@@ -739,7 +739,9 @@ async function pollPreviewPlayback(): Promise<void> {
   if (playback?.kind === 'video' && playback.itemId === activeItem.id && playback.display?.itemId === activeItem.id) {
     lastVideoPlayback = playback;
   }
-  renderVideoScrubber(playback ?? lastVideoPlayback);
+  const stable = playback ?? lastVideoPlayback;
+  renderVideoScrubber(stable);
+  await syncFacesPreview(stable);
   if (playback && activeConfig.videoAudioMode === 'phone') await renderPhonePreview(playback.display);
 }
 
@@ -754,12 +756,21 @@ function wirePlaybackPreviewSocket(): void {
           activeConfig = msg.config;
           syncTvVolumeControl();
           void renderPhonePreview();
+          void getPlayback().then(syncFacesPreview).catch(() => {});
+        } else if (msg.type === 'library') {
+          items = msg.items;
+          if (activeItem) activeItem = items.find((item) => item.id === activeItem?.id) ?? activeItem;
+          syncPeopleLabels();
+          renderGrid();
+          renderFacesPanel();
         } else if (msg.type === 'show') {
           const nextActiveItem = msg.items.find((item) => item.kind === 'video') ?? msg.items[0];
           if (nextActiveItem?.id !== activeItem?.id) lastVideoPlayback = null;
           activeItem = nextActiveItem;
           renderVideoScrubber(lastVideoPlayback);
+          renderFacesPanel();
           syncTvVolumeControl();
+          void getPlayback().then(syncFacesPreview).catch(() => {});
           void renderPhonePreview();
           // Keep "Now playing crop" tracking what's actually live on the display — it
           // otherwise only re-renders on the next full refresh() (upload/delete/etc.),
@@ -921,9 +932,9 @@ interface FaceOccurrence { face: VideoFace; index: number }
 interface FaceGroup { key: string; label: string; occurrences: FaceOccurrence[]; trackIds: string[] }
 
 function faceGroupKey(face: VideoFace, index: number): string {
-  if (face.label) return \`label:\${face.label.toLocaleLowerCase()}\`;
-  if (face.trackId) return \`track:\${face.trackId}\`;
-  return \`face:\${index}\`;
+  if (face.label) return `label:${face.label.toLocaleLowerCase()}`;
+  if (face.trackId) return `track:${face.trackId}`;
+  return `face:${index}`;
 }
 
 function groupVideoFaces(item: MediaItem | undefined): FaceGroup[] {
@@ -973,13 +984,13 @@ function renderFaceOverlay(timeSec: number): void {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'face-box';
-    button.style.left = \`\${Math.max(0, Math.min(1, face.box.x)) * 100}%\`;
-    button.style.top = \`\${Math.max(0, Math.min(1, face.box.y)) * 100}%\`;
-    button.style.width = \`\${Math.max(0, Math.min(1, face.box.width)) * 100}%\`;
-    button.style.height = \`\${Math.max(0, Math.min(1, face.box.height)) * 100}%\`;
+    button.style.left = `${Math.max(0, Math.min(1, face.box.x)) * 100}%`;
+    button.style.top = `${Math.max(0, Math.min(1, face.box.y)) * 100}%`;
+    button.style.width = `${Math.max(0, Math.min(1, face.box.width)) * 100}%`;
+    button.style.height = `${Math.max(0, Math.min(1, face.box.height)) * 100}%`;
     const name = face.label || 'Unknown person';
-    button.title = \`\${name} · \${formatPlaybackTime(Number(face.timestampSec))}\`;
-    button.setAttribute('aria-label', \`\${name} at \${formatPlaybackTime(Number(face.timestampSec))}. Edit name.\`);
+    button.title = `${name} · ${formatPlaybackTime(Number(face.timestampSec))}`;
+    button.setAttribute('aria-label', `${name} at ${formatPlaybackTime(Number(face.timestampSec))}. Edit name.`);
     button.addEventListener('click', () => {
       const input = faceInputByKey.get(faceGroupKey(face, index));
       input?.focus();
@@ -1029,7 +1040,7 @@ async function saveFaceGroup(group: FaceGroup, input: HTMLInputElement, button: 
     renderFacesPanel();
     syncPeopleLabels();
     renderGrid();
-    toast(label ? \`Face saved as \${label}.\` : 'Face label cleared.');
+    toast(label ? `Face saved as ${label}.` : 'Face label cleared.');
   } catch (error) {
     toast((error as Error).message, { error: true });
   } finally {
@@ -1052,7 +1063,7 @@ function renderFacesPanel(): void {
   const occurrences = groups.reduce((sum, group) => sum + group.occurrences.length, 0);
   if (facesSummary) {
     facesSummary.textContent = occurrences
-      ? \`\${groups.length} \${groups.length === 1 ? 'person' : 'people'} · \${occurrences} \${occurrences === 1 ? 'moment' : 'moments'}\`
+      ? `${groups.length} ${groups.length === 1 ? 'person' : 'people'} · ${occurrences} ${occurrences === 1 ? 'moment' : 'moments'}`
       : 'No timeline faces yet';
   }
   facesToggle?.setAttribute('aria-pressed', String(facesEnabled));
@@ -1062,7 +1073,7 @@ function renderFacesPanel(): void {
   if (facesPreviewRoot) facesPreviewRoot.style.aspectRatio = String(ratio);
   if (facesPreview && facesPreviewItemId !== activeItem.id) {
     facesPreviewItemId = activeItem.id;
-    facesPreview.src = \`/photos/\${activeItem.file}\`;
+    facesPreview.src = `/photos/${activeItem.file}`;
     facesPreview.muted = true;
     facesPreview.load();
   }
@@ -1071,7 +1082,7 @@ function renderFacesPanel(): void {
     item.faces?.map((face) => face.label).filter((label): label is string => Boolean(label)) ?? [],
   ))].sort();
   if (facesKnownLabels) {
-    facesKnownLabels.innerHTML = knownLabels.map((label) => \`<option value="\${escapeHtml(label)}"></option>\`).join('');
+    facesKnownLabels.innerHTML = knownLabels.map((label) => `<option value="${escapeHtml(label)}"></option>`).join('');
   }
 
   faceInputByKey.clear();
@@ -1094,7 +1105,7 @@ function renderFacesPanel(): void {
     head.className = 'faces-person-head';
     const name = document.createElement('strong');
     name.className = 'faces-person-name';
-    name.textContent = group.label || \`Unknown person \${groupIndex + 1}\`;
+    name.textContent = group.label || `Unknown person ${groupIndex + 1}`;
 
     const input = document.createElement('input');
     input.type = 'text';
@@ -1102,7 +1113,7 @@ function renderFacesPanel(): void {
     input.placeholder = 'Name person';
     input.value = group.label;
     input.setAttribute('list', 'faces-known-labels');
-    input.setAttribute('aria-label', \`Name \${name.textContent}\`);
+    input.setAttribute('aria-label', `Name ${name.textContent}`);
     faceInputByKey.set(group.key, input);
 
     const save = document.createElement('button');
@@ -1132,7 +1143,7 @@ function renderFacesPanel(): void {
       const jump = document.createElement('button');
       jump.type = 'button';
       jump.textContent = formatPlaybackTime(time);
-      jump.title = \`Jump to \${formatPlaybackTime(time)}\`;
+      jump.title = `Jump to ${formatPlaybackTime(time)}`;
       jump.addEventListener('click', () => {
         void seekToFace(time).catch((error: Error) => toast('Seek failed: ' + error.message, { error: true }));
       });
@@ -1430,6 +1441,7 @@ async function syncPlayback(): Promise<void> {
     next.disabled = nav.nextDisabled;
   }
   renderVideoScrubber(p);
+  await syncFacesPreview(p);
 }
 
 async function onTileClick(item: MediaItem): Promise<void> {
@@ -1518,6 +1530,7 @@ async function refresh(): Promise<void> {
   renderedCropPreviewItemId = activeItem?.id;
   await renderSettings(settingsRoot, current.data, activeItem);
   await renderPhonePreview();
+  renderFacesPanel();
   syncTvVolumeControl();
   updatePlaybackLabels();
   controlsController?.setOpen(controlsController.isOpen());
@@ -1851,6 +1864,7 @@ async function start(): Promise<void> {
     wireLiveCast();
     wirePlayback();
     wireVideoScrubber();
+    wireFaces();
     wireTvVolume();
     wirePlaybackPreviewSocket();
     wireControlSheet();
