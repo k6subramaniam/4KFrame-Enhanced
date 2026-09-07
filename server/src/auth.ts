@@ -157,11 +157,16 @@ export function isAuthed(cookieHeader: string | undefined): boolean {
  * token lets a Cast receiver (which can't send our cookie) load protected `/photos` media
  * via a handoff URL like `/photos/x.jpg?frame_auth=<token>`.
  */
-export function isAuthedRequest(cookieHeader: string | undefined, frameAuthToken: string | undefined): boolean {
+export function isAuthedRequest(
+  cookieHeader: string | undefined,
+  frameAuthToken: string | undefined,
+  mediaAuthToken?: string,
+): boolean {
   if (!authRequired()) return true;
   if (verifyToken(cookieFromHeader(cookieHeader))) return true;
   if (verifyMediaToken(cookieFromHeader(cookieHeader, MEDIA_COOKIE))) return true;
-  return frameAuthToken !== undefined && verifyToken(frameAuthToken);
+  if (frameAuthToken !== undefined && verifyToken(frameAuthToken)) return true;
+  return mediaAuthToken !== undefined && verifyMediaToken(mediaAuthToken);
 }
 
 // --- OAuth state (CSRF protection for the Google sign-in round trip) ---
