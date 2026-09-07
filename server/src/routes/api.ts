@@ -136,9 +136,10 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
   // Range requests, so query-token handoffs alone are not reliable enough.
   app.get('/api/display-media-session', async (req, reply) => {
     if (!auth.authRequired()) return { ok: true, required: false };
-    reply.header('set-cookie', auth.setMediaCookie(auth.issueMediaToken(), req.protocol === 'https'));
+    const token = auth.issueMediaToken();
+    reply.header('set-cookie', auth.setMediaCookie(token, req.protocol === 'https'));
     reply.header('cache-control', 'no-store');
-    return { ok: true, required: true };
+    return { ok: true, required: true, token };
   });
 
   // --- Google sign-in for the admin (identity only; Photos has its own flow below) ---
