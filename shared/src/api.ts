@@ -25,6 +25,10 @@ export interface FaceMetadata {
   embedding?: number[];
   /** Optional app-owned label assigned by an administrator. */
   label?: string;
+  /** Video timestamp for this detection. Omitted for still photos. */
+  timestampSec?: number;
+  /** Best-effort local track identifier joining the same face across nearby video samples. */
+  trackId?: string;
 }
 
 /** Generic, privacy-preserving subject metadata used by smart framing. */
@@ -86,9 +90,9 @@ export interface MediaItem {
   source: 'upload' | 'google-photos';
   /** Optional caption (EXIF/description derived). */
   caption?: string;
-  /** Face metadata detected on the image, or on the poster for videos.
-   *  When Smart Face Match is enabled, includes embeddings and labels.
-   *  Otherwise, contains only box coordinates. */
+  /** Face metadata detected on the image or sampled throughout a video.
+   *  Video detections may include timestampSec + trackId so the admin can jump between appearances.
+   *  Labels are app-owned and assigned locally by an administrator. */
   faces?: FaceMetadata[];
   /** Generic focus/subject regions detected locally on the image, or on the poster for videos. */
   focusRegions?: FocusRegion[];
