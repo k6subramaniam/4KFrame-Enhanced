@@ -24,7 +24,7 @@ import {
   HTTP_PORT, HTTPS_PORT, HOST, HTTPS_ENABLED,
   detectLanAddress, detectLanIp, faceMatchEnabled,
 } from './env.js';
-import { initStore, getConfig, setConfig, listItems } from './store.js';
+import { initStore, getConfig, setConfig } from './store.js';
 import { registerApi } from './routes/api.js';
 import { registerWs } from './ws.js';
 import { startSlideshow } from './slideshow.js';
@@ -33,7 +33,6 @@ import { registerLiveCast } from './routes/liveCast.js';
 import { imageProcessingAvailable } from './media/images.js';
 import { videoProcessingAvailable } from './media/video.js';
 import { setFaceDetector } from './media/faceMatch.js';
-import { enqueueFaceDetection } from './media/faceJob.js';
 import { loadOrCreateTls, type TlsMaterial } from './tls.js';
 import * as auth from './auth.js';
 import { startBackupSnapshots } from './backups.js';
@@ -150,11 +149,6 @@ async function main(): Promise<void> {
       const { detectFacesLocal } = await import('./media/faceDetector.js');
       setFaceDetector(detectFacesLocal);
       httpApp.log.info('Smart Face Match initialized (local face boxes only).');
-      for (const item of listItems()) {
-        if (item.kind === 'video' && !item.faces?.some((face) => Number.isFinite(face.timestampSec))) {
-          enqueueFaceDetection(item);
-        }
-      }
     } catch (err) {
       httpApp.log.warn(`Smart Face Match initialization failed: ${(err as Error).message}`);
     }
