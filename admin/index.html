@@ -154,6 +154,28 @@
       #drop.busy::after { content:attr(data-status); position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(11,13,18,.85); border-radius:.8rem; color:var(--fg); }
       .people-controls select { font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--line); border-radius:.6rem; padding:.45rem .7rem; }
 
+      #faces-control { margin:0 0 .8rem; padding:.75rem .82rem; border:1px solid var(--line); border-radius:1rem; background:rgba(255,255,255,.03); }
+      .faces-head { display:flex; align-items:center; gap:.55rem; }
+      #faces-toggle { min-height:44px; font-weight:750; }
+      #faces-toggle[aria-pressed="true"] { background:rgba(91,156,255,.18); border-color:rgba(91,156,255,.6); }
+      #faces-summary { margin-right:auto; }
+      #faces-rescan { min-height:44px; padding:.4rem .7rem; }
+      #faces-content { margin-top:.7rem; }
+      #faces-preview { position:relative; width:100%; overflow:hidden; border:1px solid var(--line); border-radius:.8rem; background:#000; }
+      #faces-video-preview { width:100%; height:100%; display:block; object-fit:contain; background:#000; }
+      #faces-overlay { position:absolute; inset:0; pointer-events:none; }
+      .face-box { position:absolute; min-width:0; min-height:0; padding:0; border:1px solid rgba(255,255,255,.86); border-radius:.38rem; background:rgba(91,156,255,.08); box-shadow:0 0 0 1px rgba(0,0,0,.28); pointer-events:auto; }
+      .face-box:hover, .face-box:focus-visible { border-color:#fff; background:rgba(91,156,255,.18); outline:none; }
+      #faces-list { display:grid; gap:.55rem; margin-top:.65rem; }
+      .faces-person { padding:.65rem; border:1px solid var(--line); border-radius:.8rem; background:rgba(0,0,0,.14); }
+      .faces-person-head { display:grid; grid-template-columns:minmax(7rem,1fr) minmax(8rem,1fr) auto; gap:.5rem; align-items:center; }
+      .faces-person-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.82rem; }
+      .faces-person input { width:100%; min-width:0; font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--line); border-radius:.55rem; padding:.45rem .55rem; }
+      .faces-person-save { min-height:40px; padding:.35rem .65rem; }
+      .faces-timestamps { display:flex; flex-wrap:wrap; gap:.35rem; margin-top:.5rem; }
+      .faces-timestamps button { min-height:34px; padding:.28rem .5rem; border-radius:999px; font-size:.74rem; font-variant-numeric:tabular-nums; }
+      .faces-empty { padding:.7rem; border:1px dashed var(--line); border-radius:.7rem; color:var(--muted); font-size:.82rem; text-align:center; }
+
       .ops-dashboard { margin:0 0 1rem; padding:.9rem; border:1px solid var(--line); border-radius:1.05rem; background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,.025)); box-shadow:0 14px 34px rgba(0,0,0,.16); }
       .ops-head { display:flex; align-items:center; justify-content:space-between; gap:.75rem; margin-bottom:.7rem; }
       .ops-title { display:flex; align-items:center; gap:.55rem; min-width:0; }
@@ -370,6 +392,21 @@
             <span id="video-duration">0:00</span>
           </div>
           <input id="video-seek-range" type="range" min="0" max="1000" step="1" value="0" aria-label="Video position" />
+        </section>
+        <section id="faces-control" class="hidden" aria-label="Video faces">
+          <div class="faces-head">
+            <button id="faces-toggle" type="button" aria-pressed="false" aria-controls="faces-content">👤 Faces</button>
+            <span id="faces-summary" class="muted">Not scanned</span>
+            <button id="faces-rescan" type="button">Scan video</button>
+          </div>
+          <div id="faces-content" hidden>
+            <div id="faces-preview">
+              <video id="faces-video-preview" muted playsinline preload="metadata"></video>
+              <div id="faces-overlay" aria-label="Detected face boxes"></div>
+            </div>
+            <datalist id="faces-known-labels"></datalist>
+            <div id="faces-list"></div>
+          </div>
         </section>
         <section id="tv-volume-control" class="hidden" aria-label="TV video volume">
           <div class="tv-volume-head"><span>TV volume</span><span class="muted">Video</span></div>
