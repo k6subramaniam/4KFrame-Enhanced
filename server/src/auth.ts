@@ -19,8 +19,10 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { getAuthSecret, setAuthSecret } from './store.js';
 
 const COOKIE = 'frame_auth';
+const MEDIA_COOKIE = 'frame_media';
 const STATE_COOKIE = 'frame_oauth_state';
 const MAX_AGE_S = 60 * 60 * 24 * 30; // 30 days
+const MEDIA_MAX_AGE_S = 60 * 60 * 24; // 24-hour display media session
 const STATE_MAX_AGE_S = 60 * 10; // OAuth round-trip window
 
 function password(): string {
@@ -80,6 +82,10 @@ function sign(data: string): string {
   return createHmac('sha256', signingKey()).update(data).digest('hex');
 }
 
+function signScoped(scope: string, data: string): string {
+  return createHmac('sha256', signingKey()).update(`${scope}:${data}`).digest('hex');
+}
+
 function equal(a: string, b: string): boolean {
   const ab = Buffer.from(a);
   const bb = Buffer.from(b);
@@ -99,6 +105,21 @@ export function verifyToken(token: string | undefined): boolean {
   const sig = token.slice(dot + 1);
   if (!/^\d+$/.test(exp) || Number(exp) < Date.now()) return false;
   return equal(sig, sign(exp));
+}
+
+export function issueMediaToken(): string {
+  const exp = String(Date.now() + MEDIA_MAX_AGE_S * 1000);
+  return `${exp}.${signScoped('media', exp)}`;
+}
+
+export function verifyMediaToken(token: string | undefined): boolean {
+  if (!token) return false;
+  const dot = token.lastIndexOf('.');
+  if (dot < 0) return false;
+  const exp = token.slice(0, dot);
+  const sig = token.slice(dot + 1);
+  if (!/^\d+$/.test(exp) || Number(exp) < Date.now()) return false;
+  return equal(sig, signScoped('media', exp));
 }
 
 export function checkPassword(pw: unknown): boolean {
@@ -123,6 +144,10 @@ export function clearCookie(): string {
   return `${COOKIE}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax`;
 }
 
+export function setMediaCookie(token: string, secure: boolean): string {
+  return `${MEDIA_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Path=/photos/; Max-Age=${MEDIA_MAX_AGE_S}; SameSite=Lax${secure ? '; Secure' : ''}`;
+}
+
 export function isAuthed(cookieHeader: string | undefined): boolean {
   return !authRequired() || verifyToken(cookieFromHeader(cookieHeader));
 }
@@ -135,6 +160,7 @@ export function isAuthed(cookieHeader: string | undefined): boolean {
 export function isAuthedRequest(cookieHeader: string | undefined, frameAuthToken: string | undefined): boolean {
   if (!authRequired()) return true;
   if (verifyToken(cookieFromHeader(cookieHeader))) return true;
+  if (verifyMediaToken(cookieFromHeader(cookieHeader, MEDIA_COOKIE))) return true;
   return frameAuthToken !== undefined && verifyToken(frameAuthToken);
 }
 
