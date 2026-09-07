@@ -12,8 +12,8 @@ interface Track {
   lastTime: number;
 }
 
-const DEFAULT_INTERVAL_SEC = 3;
-const DEFAULT_MAX_SAMPLES = 60;
+const DEFAULT_INTERVAL_SEC = 5;
+const DEFAULT_MAX_SAMPLES = 30;
 
 /**
  * Sample a video locally with ffmpeg and return normalized face boxes tagged with timestamps
@@ -55,6 +55,8 @@ export async function detectFacesAcrossVideo(
     if (!width || !height) continue;
 
     const detections = await detectFacesInVideoFrame(frame);
+    // Yield between samples so long scans do not monopolize the admin/control API.
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
     if (!detections?.length) continue;
 
     const normalized = detections
@@ -105,6 +107,7 @@ async function extractFrame(videoPath: string, timestampSec: number): Promise<Bu
       '-ss', String(Math.max(0, timestampSec)),
       '-i', videoPath,
       '-frames:v', '1',
+      '-vf', 'scale=720:-2:force_original_aspect_ratio=decrease',
       '-f', 'image2pipe',
       '-vcodec', 'mjpeg',
       'pipe:1',
