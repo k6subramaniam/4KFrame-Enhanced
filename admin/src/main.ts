@@ -92,6 +92,8 @@ const videoDuration = document.getElementById('video-duration') as HTMLElement |
 let controlsController: ControlSheetController | null = null;
 let lastAudibleTvVolume = 0.7;
 let videoScrubbing = false;
+/** Last usable TV video report; retained across brief network/reporting gaps so the seek bar never flickers. */
+let lastVideoPlayback: Playback | null = null;
 let tvVolumeCommitTimer: ReturnType<typeof window.setTimeout> | undefined;
 const peopleFilterSelect = document.getElementById('people-filter') as HTMLSelectElement | null;
 const labelFilterSelect = document.getElementById('label-filter') as HTMLSelectElement | null;
@@ -715,13 +717,16 @@ async function renderPhonePreview(display: DisplayPlaybackState | null = null): 
 
 async function pollPreviewPlayback(): Promise<void> {
   if (activeItem?.kind !== 'video') {
+    lastVideoPlayback = null;
     renderVideoScrubber(null);
     return;
   }
   const playback = await getPlayback().catch(() => null);
-  if (!playback) return;
-  renderVideoScrubber(playback);
-  if (activeConfig.videoAudioMode === 'phone') await renderPhonePreview(playback.display);
+  if (playback?.kind === 'video' && playback.itemId === activeItem.id && playback.display?.itemId === activeItem.id) {
+    lastVideoPlayback = playback;
+  }
+  renderVideoScrubber(playback ?? lastVideoPlayback);
+  if (playback && activeConfig.videoAudioMode === 'phone') await renderPhonePreview(playback.display);
 }
 
 function wirePlaybackPreviewSocket(): void {
@@ -736,7 +741,10 @@ function wirePlaybackPreviewSocket(): void {
           syncTvVolumeControl();
           void renderPhonePreview();
         } else if (msg.type === 'show') {
-          activeItem = msg.items.find((item) => item.kind === 'video') ?? msg.items[0];
+          const nextActiveItem = msg.items.find((item) => item.kind === 'video') ?? msg.items[0];
+          if (nextActiveItem?.id !== activeItem?.id) lastVideoPlayback = null;
+          activeItem = nextActiveItem;
+          renderVideoScrubber(lastVideoPlayback);
           syncTvVolumeControl();
           void renderPhonePreview();
           // Keep "Now playing crop" tracking what's actually live on the display — it
@@ -790,45 +798,80 @@ function estimatedPlaybackTime(playback: Playback): number {
 }
 
 function renderVideoScrubber(playback: Playback | null): void {
-  const display = playback?.display ?? null;
-  const active = Boolean(
-    playback?.kind === 'video'
-    && playback.itemId
-    && display
-    && display.itemId === playback.itemId
-    && display.seekable
-    && Number.isFinite(display.duration)
-    && display.duration > 0,
-  );
-  videoScrubberRoot?.classList.toggle('hidden', !active);
-  if (!active || !playback || !display || !videoSeekRange) return;
+  const item = activeItem;
+  const videoActive = item?.kind === 'video';
+  videoScrubberRoot?.classList.toggle('hidden', !videoActive);
+  if (!videoActive || !item || !videoSeekRange) return;
 
-  const duration = Math.max(0, display.duration);
-  const current = estimatedPlaybackTime(playback);
-  if (!videoScrubbing) videoSeekRange.value = String(Math.round((current / duration) * 1000));
-  videoCurrentTime && (videoCurrentTime.textContent = formatPlaybackTime(
-    videoScrubbing ? (Number(videoSeekRange.value) / 1000) * duration : current,
-  ));
-  if (videoDuration) {
-    videoDuration.textContent = formatPlaybackTime(duration);
-    videoDuration.dataset.seconds = String(duration);
-  }
-  videoSeekRange.setAttribute(
-    'aria-valuetext',
-    `${formatPlaybackTime((Number(videoSeekRange.value) / 1000) * duration)} of ${formatPlaybackTime(duration)}`,
+  const incomingMatches = playback?.kind === 'video'
+    && playback.itemId === item.id
+    && playback.display?.itemId === item.id;
+  if (incomingMatches && playback?.display) lastVideoPlayback = playback;
+
+  const stablePlayback = incomingMatches ? playback : (
+    lastVideoPlayback?.kind === 'video' && lastVideoPlayback.itemId === item.id
+      ? lastVideoPlayback
+      : null
   );
+  const display = stablePlayback?.display ?? null;
+  const metadataDuration = Number(item.durationSec ?? 0);
+  const duration = display && Number.isFinite(display.duration) && display.duration > 0
+    ? display.duration
+    : (Number.isFinite(metadataDuration) && metadataDuration > 0 ? metadataDuration : 0);
+  const seekable = Boolean(display?.seekable && duration > 0);
+
+  // Keep the whole timeline visible for the active video. A transient missing/stale
+  // playback report may freeze the thumb briefly, but it must not make the UI jump.
+  videoSeekRange.disabled = duration <= 0;
+  videoSeekRange.classList.toggle('temporarily-unseekable', duration > 0 && !seekable);
+
+  let current = 0;
+  if (stablePlayback?.display) current = estimatedPlaybackTime(stablePlayback);
+  else if (duration > 0) current = (Number(videoSeekRange.value) / 1000) * duration;
+
+  if (duration > 0) {
+    if (!videoScrubbing && stablePlayback?.display) {
+      videoSeekRange.value = String(Math.round((Math.min(duration, Math.max(0, current)) / duration) * 1000));
+    }
+    const shownCurrent = videoScrubbing
+      ? (Number(videoSeekRange.value) / 1000) * duration
+      : Math.min(duration, Math.max(0, current));
+    if (videoCurrentTime) videoCurrentTime.textContent = formatPlaybackTime(shownCurrent);
+    if (videoDuration) {
+      videoDuration.textContent = formatPlaybackTime(duration);
+      videoDuration.dataset.seconds = String(duration);
+    }
+    videoSeekRange.setAttribute(
+      'aria-valuetext',
+      `${formatPlaybackTime(shownCurrent)} of ${formatPlaybackTime(duration)}`,
+    );
+  } else {
+    if (videoCurrentTime) videoCurrentTime.textContent = '0:00';
+    if (videoDuration) {
+      videoDuration.textContent = '0:00';
+      videoDuration.dataset.seconds = '0';
+    }
+  }
 }
 
 async function commitVideoScrub(): Promise<void> {
-  if (!videoSeekRange) return;
-  const playback = await getPlayback().catch(() => null);
-  if (!playback?.display || playback.kind !== 'video' || !playback.display.seekable || playback.display.duration <= 0) {
+  const item = activeItem;
+  if (!videoSeekRange || item?.kind !== 'video') return;
+  const fresh = await getPlayback().catch(() => null);
+  if (fresh?.kind === 'video' && fresh.itemId === item.id && fresh.display?.itemId === item.id) {
+    lastVideoPlayback = fresh;
+  }
+  const playback = fresh?.display?.itemId === item.id ? fresh : lastVideoPlayback;
+  const duration = playback?.display?.duration && playback.display.duration > 0
+    ? playback.display.duration
+    : Number(item.durationSec ?? 0);
+  if (!playback?.display || playback.kind !== 'video' || !Number.isFinite(duration) || duration <= 0) {
     videoScrubbing = false;
-    renderVideoScrubber(playback);
+    renderVideoScrubber(playback ?? null);
     return;
   }
 
-  const desired = (Number(videoSeekRange.value) / 1000) * playback.display.duration;
+  const desired = (Number(videoSeekRange.value) / 1000) * duration;
   const current = estimatedPlaybackTime(playback);
   const delta = desired - current;
   if (Math.abs(delta) > 0.15) {

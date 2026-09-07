@@ -1,6 +1,9 @@
 import type { DisplayPlaybackState } from '@4kframe/shared';
 
-const MAX_REPORT_AGE_MS = 5_000;
+// TV browsers can throttle timeupdate/WebSocket work briefly during buffering, decode
+// pressure, focus changes, or system UI overlays. Treat a report as usable long enough to
+// bridge those gaps; the item-id check still prevents one video's state leaking into another.
+const MAX_REPORT_AGE_MS = 20_000;
 
 let latest: DisplayPlaybackState | null = null;
 let reporter: object | null = null;

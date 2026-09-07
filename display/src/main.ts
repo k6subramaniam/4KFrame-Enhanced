@@ -1227,6 +1227,9 @@ function connect(): void {
   const heartbeat = (): void => {
     if (socket === ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'displayHeartbeat' }));
+      // Do not rely only on HTMLMediaElement timeupdate. Some TV browsers throttle it
+      // during buffering/system overlays, which used to make the companion seek bar vanish.
+      reportVideoPlayback(true);
     }
   };
   ws.onopen = () => {
