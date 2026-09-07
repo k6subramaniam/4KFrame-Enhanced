@@ -55,6 +55,7 @@ let tvAudioUnlocked = false;
 let videoRetryItemId: string | null = null;
 let videoRetryCount = 0;
 let videoSkipTimer: ReturnType<typeof window.setTimeout> | undefined;
+let displayMediaToken: string | undefined;
 const PLAYBACK_REPORT_INTERVAL_MS = 1_000;
 const DISPLAY_HEARTBEAT_MS = 5_000;
 const VIDEO_SEEK_SECONDS = 10;
@@ -262,15 +263,25 @@ function unlockTvAudioFromUserGesture(event: Event): void {
 
 async function ensureDisplayMediaSession(): Promise<void> {
   try {
-    await fetch('/api/display-media-session', {
+    const response = await fetch('/api/display-media-session', {
       method: 'GET',
       credentials: 'include',
       cache: 'no-store',
     });
+    if (!response.ok) return;
+    const body = await response.json() as { token?: unknown };
+    displayMediaToken = typeof body.token === 'string' && body.token ? body.token : undefined;
   } catch {
     // Private-LAN/no-auth mode does not depend on this session; normal media errors still
     // flow through the retry/skip path below.
   }
+}
+
+function displayMediaUrl(file: string): string {
+  const base = `/photos/${file}`;
+  return displayMediaToken
+    ? `${base}?media_auth=${encodeURIComponent(displayMediaToken)}`
+    : base;
 }
 
 async function renderVideo(item: MediaItem): Promise<void> {
@@ -288,7 +299,7 @@ async function renderVideo(item: MediaItem): Promise<void> {
   layoutVideo(item);
   syncActiveVideoPlaybackProperties();
   video.onerror = () => handleVideoError(item);
-  video.src = `/photos/${item.file}`;
+  video.src = displayMediaUrl(item.file);
   lastPlaybackReportAt = 0;
   video.classList.add('visible');
   try {
@@ -402,7 +413,7 @@ function layoutVideo(item: MediaItem): void {
   // Opaque backdrop hides the stale photo behind any bars; blurred poster in blur mode.
   videoBg.classList.add('visible');
   if (config.fillMode === 'blur' && item.poster) {
-    videoBg.style.backgroundImage = `url(/photos/${item.poster})`;
+    videoBg.style.backgroundImage = `url("${displayMediaUrl(item.poster)}")`;
   } else {
     videoBg.style.backgroundImage = 'none';
   }
