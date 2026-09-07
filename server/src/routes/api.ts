@@ -283,6 +283,21 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
     hub.emitEvent({ type: 'seek', itemId: item.id, deltaSec: Math.max(-300, Math.min(300, deltaSec)) });
     return { ok: true };
   });
+
+  app.get('/api/seek-to', async (req, reply) => {
+    const item = getCurrent()[0];
+    const targetSec = Number((req.query as { time?: unknown }).time);
+    if (!item || item.kind !== 'video' || !Number.isFinite(targetSec)) {
+      return reply.code(400).send({ error: 'active video and target time required' });
+    }
+    const playback = getDisplayPlayback(item.id);
+    const duration = Math.max(0, Number(playback?.duration ?? item.durationSec ?? 0));
+    const target = duration > 0 ? Math.min(duration, Math.max(0, targetSec)) : Math.max(0, targetSec);
+    const current = Math.max(0, Number(playback?.currentTime ?? 0));
+    const deltaSec = target - current;
+    if (Math.abs(deltaSec) > 0.01) hub.emitEvent({ type: 'seek', itemId: item.id, deltaSec });
+    return { ok: true, time: target };
+  });
   app.get('/api/pause', async () => { setPaused(true); return { ok: true }; });
   app.get('/api/resume', async () => { setPaused(false); return { ok: true }; });
   app.get('/api/hold', async () => { setHold(true); return { ok: true }; });
@@ -328,6 +343,46 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
     refresh();
     hub.emitEvent({ type: 'library', items: listItems() });
     return { ok: true, items: updated };
+  });
+
+  app.patch('/api/media/:id/faces', async (req, reply) => {
+    const item = getItem((req.params as { id: string }).id);
+    if (!item) return reply.code(404).send({ error: 'media not found' });
+    const faces = item.faces ?? [];
+    if (!faces.length) return reply.code(404).send({ error: 'no detected faces for this media' });
+
+    const body = (req.body ?? {}) as { trackId?: unknown; faceIndex?: unknown; label?: unknown };
+    const trackId = typeof body.trackId === 'string' ? body.trackId.trim() : '';
+    const faceIndex = Number(body.faceIndex);
+    const label = typeof body.label === 'string' ? body.label.trim() : '';
+    if (label.length > 80) return reply.code(400).send({ error: 'label must be 80 characters or fewer' });
+    if (!trackId && (!Number.isInteger(faceIndex) || faceIndex < 0 || faceIndex >= faces.length)) {
+      return reply.code(400).send({ error: 'trackId or valid faceIndex is required' });
+    }
+
+    let matched = 0;
+    const updatedFaces = faces.map((face, index) => {
+      const match = trackId ? face.trackId === trackId : index === faceIndex;
+      if (!match) return face;
+      matched += 1;
+      const next = { ...face };
+      if (label) next.label = label;
+      else delete next.label;
+      return next;
+    });
+    if (!matched) return reply.code(404).send({ error: 'face track not found' });
+
+    const updated = await updateItem(item.id, { faces: updatedFaces });
+    refresh();
+    hub.emitEvent({ type: 'library', items: listItems() });
+    return { ok: true, item: updated };
+  });
+
+  app.post('/api/media/:id/faces/rescan', async (req, reply) => {
+    const item = getItem((req.params as { id: string }).id);
+    if (!item) return reply.code(404).send({ error: 'media not found' });
+    enqueueFaceDetection(item);
+    return reply.code(202).send({ ok: true, queued: true });
   });
 
   app.post('/api/items/enabled', async (req, reply) => {
