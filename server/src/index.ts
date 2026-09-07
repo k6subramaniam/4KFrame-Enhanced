@@ -41,6 +41,35 @@ import { listProcessingJobs } from './processingJobs.js';
 
 const FALLBACK_HTML = '<html><head><title>4KFrame</title></head><body></body></html>';
 
+const MEDIA_CONTINUATION_MS = 30 * 60 * 1000;
+const mediaClientGrants = new Map<string, number>();
+
+function forwardedClientIp(req: { headers: Record<string, unknown>; ip?: string }): string {
+  const forwarded = req.headers['x-forwarded-for'];
+  const first = typeof forwarded === 'string' ? forwarded.split(',')[0]?.trim() : '';
+  return first || req.ip || '';
+}
+
+function mediaClientKey(req: { headers: Record<string, unknown>; ip?: string }): string {
+  const ua = typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : '';
+  return `${forwardedClientIp(req)}|${ua}`;
+}
+
+function grantMediaContinuation(key: string): void {
+  if (!key || key === '|') return;
+  mediaClientGrants.set(key, Date.now() + MEDIA_CONTINUATION_MS);
+}
+
+function hasMediaContinuation(key: string): boolean {
+  const expiresAt = mediaClientGrants.get(key) ?? 0;
+  if (expiresAt < Date.now()) {
+    mediaClientGrants.delete(key);
+    return false;
+  }
+  mediaClientGrants.set(key, Date.now() + MEDIA_CONTINUATION_MS);
+  return true;
+}
+
 /** Build a fully-configured Fastify instance. Pass TLS material to serve HTTPS. */
 export async function buildApp(https?: TlsMaterial): Promise<FastifyInstance> {
   const app = Fastify({
@@ -63,9 +92,16 @@ export async function buildApp(https?: TlsMaterial): Promise<FastifyInstance> {
     if (!requestPath.startsWith('/photos/')) return;
     const frameAuthToken = url.searchParams.get('frame_auth') ?? undefined;
     const mediaAuthToken = url.searchParams.get('media_auth') ?? undefined;
-    if (!auth.isAuthedRequest(req.headers.cookie, frameAuthToken, mediaAuthToken)) {
-      return reply.code(401).send({ error: 'unauthorized' });
+    const clientKey = mediaClientKey(req);
+    if (auth.isAuthedRequest(req.headers.cookie, frameAuthToken, mediaAuthToken)) {
+      // Chromecast's native media pipeline can drop cookies/query params on follow-up HEAD
+      // and Range requests. A successful scoped/authenticated fetch grants this same client
+      // a short media-only continuation window; it never authorizes admin/API operations.
+      grantMediaContinuation(clientKey);
+      return;
     }
+    if (hasMediaContinuation(clientKey)) return;
+    return reply.code(401).send({ error: 'unauthorized' });
   });
   await app.register(fastifyStatic, { root: MEDIA_DIR, prefix: '/photos/', decorateReply: false });
 
