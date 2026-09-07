@@ -363,6 +363,27 @@ export async function seekBy(deltaSec: number): Promise<void> {
   await requestJson(`/api/seek?delta=${encodeURIComponent(deltaSec)}`);
 }
 
+export async function seekTo(timeSec: number): Promise<void> {
+  await requestJson(`/api/seek-to?time=${encodeURIComponent(timeSec)}`);
+}
+
+export async function updateFaceLabel(
+  id: string,
+  target: { trackId?: string; faceIndex?: number },
+  label: string,
+): Promise<MediaItem> {
+  const result = await requestJson<{ ok: boolean; item: MediaItem }>(`/api/media/${encodeURIComponent(id)}/faces`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ...target, label }),
+  });
+  return result.item;
+}
+
+export async function rescanFaces(id: string): Promise<void> {
+  await requestJson(`/api/media/${encodeURIComponent(id)}/faces/rescan`, { method: 'POST' });
+}
+
 export async function upscaleVideo(id: string, target: VideoUpscaleTarget): Promise<void> {
   await requestJson(`/api/video/${encodeURIComponent(id)}/upscale`, {
     method: 'POST',
