@@ -260,6 +260,19 @@ function unlockTvAudioFromUserGesture(event: Event): void {
   });
 }
 
+async function ensureDisplayMediaSession(): Promise<void> {
+  try {
+    await fetch('/api/display-media-session', {
+      method: 'GET',
+      credentials: 'include',
+      cache: 'no-store',
+    });
+  } catch {
+    // Private-LAN/no-auth mode does not depend on this session; normal media errors still
+    // flow through the retry/skip path below.
+  }
+}
+
 async function renderVideo(item: MediaItem): Promise<void> {
   showingVideo = true;
   lastVideoItem = item;
@@ -269,6 +282,9 @@ async function renderVideo(item: MediaItem): Promise<void> {
   }
   window.clearTimeout(videoSkipTimer);
   videoSkipTimer = undefined;
+  // Establish the scoped media cookie before assigning src. Chromecast's media stack
+  // performs separate HEAD/Range requests that otherwise lose an admin/query handoff.
+  await ensureDisplayMediaSession();
   layoutVideo(item);
   syncActiveVideoPlaybackProperties();
   video.onerror = () => handleVideoError(item);
