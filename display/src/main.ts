@@ -50,6 +50,11 @@ let receivedConfigEvent = false;
 let receivedPausedEvent = false;
 let lastPlaybackReportAt = 0;
 let displayHeartbeatTimer: ReturnType<typeof window.setInterval> | undefined;
+let tvAudioFallbackActive = false;
+let tvAudioUnlocked = false;
+let videoRetryItemId: string | null = null;
+let videoRetryCount = 0;
+let videoSkipTimer: ReturnType<typeof window.setTimeout> | undefined;
 const PLAYBACK_REPORT_INTERVAL_MS = 1_000;
 const DISPLAY_HEARTBEAT_MS = 5_000;
 const VIDEO_SEEK_SECONDS = 10;
@@ -199,27 +204,71 @@ function startMotion(): void {
 }
 
 function reportPlaybackBlocked(error: unknown): void {
-  // Keep autoplay policy noise out of the TV UI. A later user Play action can resume
-  // normally; the receiver remains visually clean in the meantime.
+  // Keep autoplay-policy noise out of the TV UI.
   console.warn('Video playback was blocked by the browser.', error);
   setStatus('');
+}
+
+/**
+ * Audible autoplay can be rejected by Chromecast/TV Chromium until the page receives a
+ * trusted remote/touch interaction. Never leave the TV black in that case: retry the same
+ * video muted immediately. A later trusted interaction unlocks TV audio.
+ */
+function recoverBlockedVideoPlayback(error: unknown): void {
+  reportPlaybackBlocked(error);
+  if (!showingVideo || paused || config.videoAudioMode !== 'tv' || video.muted) return;
+  tvAudioFallbackActive = true;
+  tvAudioUnlocked = false;
+  video.muted = true;
+  video.defaultMuted = true;
+  void video.play().catch(reportPlaybackBlocked);
+}
+
+function desiredDisplayVideoMuted(): boolean {
+  if (config.videoAudioMode !== 'tv') return true;
+  return tvAudioFallbackActive && !tvAudioUnlocked;
 }
 
 /** Keep the active video element aligned with persisted playback settings. */
 function syncActiveVideoPlaybackProperties(restartAfterUnmute = false): void {
   syncVideoPlaybackProperties(video, {
-    muted: config.videoAudioMode !== 'tv',
+    muted: desiredDisplayVideoMuted(),
     loop: config.videoLoop || holding,
     playbackRate: config.videoPlaybackRate,
     volume: config.videoVolume,
     restartAfterUnmute: restartAfterUnmute && showingVideo && !paused,
-    onPlaybackRejected: reportPlaybackBlocked,
+    onPlaybackRejected: recoverBlockedVideoPlayback,
+  });
+}
+
+/** A trusted TV/browser interaction can promote muted fallback playback back to TV audio. */
+function unlockTvAudioFromUserGesture(event: Event): void {
+  if (!event.isTrusted || config.videoAudioMode !== 'tv') return;
+  tvAudioUnlocked = true;
+  if (!showingVideo || paused || (!tvAudioFallbackActive && !video.muted)) return;
+  tvAudioFallbackActive = false;
+  video.muted = false;
+  video.defaultMuted = false;
+  void video.play().catch((error) => {
+    // Some receiver builds still reject the first audible restart. Preserve visual playback.
+    tvAudioUnlocked = false;
+    tvAudioFallbackActive = true;
+    video.muted = true;
+    video.defaultMuted = true;
+    reportPlaybackBlocked(error);
+    void video.play().catch(reportPlaybackBlocked);
   });
 }
 
 async function renderVideo(item: MediaItem): Promise<void> {
   showingVideo = true;
   lastVideoItem = item;
+  if (videoRetryItemId !== item.id) {
+    videoRetryItemId = item.id;
+    videoRetryCount = 0;
+  }
+  window.clearTimeout(videoSkipTimer);
+  videoSkipTimer = undefined;
   layoutVideo(item);
   syncActiveVideoPlaybackProperties();
   video.onerror = () => handleVideoError(item);
@@ -229,7 +278,7 @@ async function renderVideo(item: MediaItem): Promise<void> {
   try {
     await video.play();
   } catch (error) {
-    reportPlaybackBlocked(error);
+    recoverBlockedVideoPlayback(error);
   }
   setCaption([item], config);
   reportVideoPlayback(true);
@@ -239,13 +288,31 @@ async function renderVideo(item: MediaItem): Promise<void> {
 /** A video that can't be decoded (bad/unsupported file) shouldn't freeze the frame on black. */
 function handleVideoError(item: MediaItem): void {
   if (lastVideoItem?.id !== item.id) return; // stale handler from a previous item
-  console.error(`Cannot play video ${item.file} — skipping.`);
+
+  // TV media stacks occasionally fail the first decoder/load attempt during a source
+  // transition. Retry once before declaring the file unplayable.
+  if (videoRetryItemId !== item.id) {
+    videoRetryItemId = item.id;
+    videoRetryCount = 0;
+  }
+  if (videoRetryCount < 1) {
+    videoRetryCount += 1;
+    console.warn(`Video ${item.file} failed to load; retrying once before skip.`);
+    setStatus('');
+    window.setTimeout(() => {
+      if (lastVideoItem?.id !== item.id) return;
+      video.load();
+      void video.play().catch(recoverBlockedVideoPlayback);
+    }, 650);
+    return;
+  }
+
+  console.error(`Cannot play video ${item.file} after retry — skipping.`);
   setStatus('');
-  // Delay so several bad files in a row skip calmly rather than in a tight loop.
-  window.setTimeout(() => {
+  window.clearTimeout(videoSkipTimer);
+  // Delay so several genuinely bad files in a row skip calmly rather than in a tight loop.
+  videoSkipTimer = window.setTimeout(() => {
     if (lastVideoItem?.id !== item.id) return;
-    // Nothing else clears the status, so it would otherwise stay burned on screen —
-    // especially when paused, where the skip below never runs.
     setStatus(statusText());
     if (!paused) goNext();
   }, 2500);
@@ -328,6 +395,10 @@ function layoutVideo(item: MediaItem): void {
 function hideVideo(): void {
   showingVideo = false;
   lastVideoItem = null;
+  window.clearTimeout(videoSkipTimer);
+  videoSkipTimer = undefined;
+  videoRetryItemId = null;
+  videoRetryCount = 0;
   video.onerror = null;
   video.classList.remove('visible');
   videoBg.classList.remove('visible');
@@ -1275,5 +1346,8 @@ wirePublicControls();
 updateControlStates();
 wireRemote();
 wireMediaGestures();
+window.addEventListener('pointerdown', unlockTvAudioFromUserGesture, { capture: true, passive: true });
+window.addEventListener('touchstart', unlockTvAudioFromUserGesture, { capture: true, passive: true });
+window.addEventListener('keydown', unlockTvAudioFromUserGesture, { capture: true });
 initCastReceiver(video, sendControl);
 connect();
