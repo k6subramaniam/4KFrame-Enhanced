@@ -171,6 +171,44 @@ test('display media session cookie authorizes protected video range requests wit
   });
 });
 
+test('authenticated media handoff grants same Chromecast client follow-up range requests only', async () => {
+  await withApp('test-index-password', async (app) => {
+    await writeFile(path.join(MEDIA_DIR, 'continuation.mp4'), '0123456789abcdef');
+    const token = auth.issueMediaToken();
+    const headers = {
+      'user-agent': 'Chromecast-Test/1.0',
+      'x-forwarded-for': '203.0.113.42',
+    };
+
+    const initial = await app.inject({
+      method: 'GET',
+      url: `/photos/continuation.mp4?media_auth=${encodeURIComponent(token)}`,
+      headers: { ...headers, range: 'bytes=0-3' },
+    });
+    assert.equal(initial.statusCode, 206);
+    assert.equal(initial.body, '0123');
+
+    const followUp = await app.inject({
+      method: 'GET',
+      url: '/photos/continuation.mp4',
+      headers: { ...headers, range: 'bytes=4-7' },
+    });
+    assert.equal(followUp.statusCode, 206);
+    assert.equal(followUp.body, '4567');
+
+    const differentClient = await app.inject({
+      method: 'GET',
+      url: '/photos/continuation.mp4',
+      headers: {
+        'user-agent': 'Chromecast-Test/1.0',
+        'x-forwarded-for': '203.0.113.99',
+        range: 'bytes=4-7',
+      },
+    });
+    assert.equal(differentClient.statusCode, 401);
+  });
+});
+
 test('authenticated requests can read protected display state and raw media', async () => {
   await withApp('test-index-password', async (app) => {
     await writeFile(path.join(MEDIA_DIR, 'authed-photo.jpg'), 'authenticated photo bytes');
