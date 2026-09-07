@@ -8,7 +8,7 @@
 import type { AdminStatus, DisplayPlaybackState, FrameBackup, FrameConfig, FrameEvent, MediaItem, ProcessingJob } from '@4kframe/shared';
 import {
   fetchItems, fetchTrash, fetchCurrent, castItem, deleteItem, upload, thumbUrl,
-  skipNext, skipPrev, getPlayback, setPaused, setHold, seekBy, toggleEnabled,
+  skipNext, skipPrev, getPlayback, setPaused, setHold, seekBy, seekTo, toggleEnabled,
   me, login, logout, type AuthState, type Playback,
   patchMediaTransforms,
   setItemsEnabled, deleteItems, restoreTrashItems, purgeTrashItems, emptyTrash, playSequence,
@@ -16,6 +16,7 @@ import {
   pushLiveCast, stopLiveCast,
   fetchAdminStatus, cancelProcessingJob, retryProcessingJob, clearFinishedProcessingJobs,
   createBackupSnapshot, downloadBackup, restoreBackup,
+  updateFaceLabel, rescanFaces,
 } from './api.js';
 import { renderSettings } from './settings.js';
 import { renderActiveCropPreview } from './cropPreview.js';
@@ -89,12 +90,25 @@ const videoScrubberRoot = document.getElementById('video-scrubber') as HTMLEleme
 const videoSeekRange = document.getElementById('video-seek-range') as HTMLInputElement | null;
 const videoCurrentTime = document.getElementById('video-current-time') as HTMLElement | null;
 const videoDuration = document.getElementById('video-duration') as HTMLElement | null;
+const facesRoot = document.getElementById('faces-control') as HTMLElement | null;
+const facesToggle = document.getElementById('faces-toggle') as HTMLButtonElement | null;
+const facesSummary = document.getElementById('faces-summary') as HTMLElement | null;
+const facesRescan = document.getElementById('faces-rescan') as HTMLButtonElement | null;
+const facesContent = document.getElementById('faces-content') as HTMLElement | null;
+const facesPreview = document.getElementById('faces-video-preview') as HTMLVideoElement | null;
+const facesPreviewRoot = document.getElementById('faces-preview') as HTMLElement | null;
+const facesOverlay = document.getElementById('faces-overlay') as HTMLElement | null;
+const facesList = document.getElementById('faces-list') as HTMLElement | null;
+const facesKnownLabels = document.getElementById('faces-known-labels') as HTMLDataListElement | null;
 let controlsController: ControlSheetController | null = null;
 let lastAudibleTvVolume = 0.7;
 let videoScrubbing = false;
 /** Last usable TV video report; retained across brief network/reporting gaps so the seek bar never flickers. */
 let lastVideoPlayback: Playback | null = null;
 let tvVolumeCommitTimer: ReturnType<typeof window.setTimeout> | undefined;
+let facesEnabled = false;
+let facesPreviewItemId: string | null = null;
+const faceInputByKey = new Map<string, HTMLInputElement>();
 const peopleFilterSelect = document.getElementById('people-filter') as HTMLSelectElement | null;
 const labelFilterSelect = document.getElementById('label-filter') as HTMLSelectElement | null;
 const sortSelect = document.getElementById('media-sort') as HTMLSelectElement | null;
@@ -899,6 +913,276 @@ function wireVideoScrubber(): void {
     });
   });
   videoSeekRange.addEventListener('pointercancel', () => { videoScrubbing = false; });
+}
+
+
+type VideoFace = NonNullable<MediaItem['faces']>[number];
+interface FaceOccurrence { face: VideoFace; index: number }
+interface FaceGroup { key: string; label: string; occurrences: FaceOccurrence[]; trackIds: string[] }
+
+function faceGroupKey(face: VideoFace, index: number): string {
+  if (face.label) return \`label:\${face.label.toLocaleLowerCase()}\`;
+  if (face.trackId) return \`track:\${face.trackId}\`;
+  return \`face:\${index}\`;
+}
+
+function groupVideoFaces(item: MediaItem | undefined): FaceGroup[] {
+  const groups = new Map<string, FaceGroup>();
+  (item?.faces ?? []).forEach((face, index) => {
+    if (!Number.isFinite(face.timestampSec)) return;
+    const key = faceGroupKey(face, index);
+    let group = groups.get(key);
+    if (!group) {
+      group = { key, label: face.label ?? '', occurrences: [], trackIds: [] };
+      groups.set(key, group);
+    }
+    group.occurrences.push({ face, index });
+    if (face.trackId && !group.trackIds.includes(face.trackId)) group.trackIds.push(face.trackId);
+  });
+  return [...groups.values()]
+    .map((group) => ({
+      ...group,
+      occurrences: group.occurrences.sort((a, b) => Number(a.face.timestampSec) - Number(b.face.timestampSec)),
+    }))
+    .sort((a, b) => Number(a.occurrences[0]?.face.timestampSec ?? 0) - Number(b.occurrences[0]?.face.timestampSec ?? 0));
+}
+
+function renderFaceOverlay(timeSec: number): void {
+  if (!facesOverlay) return;
+  facesOverlay.innerHTML = '';
+  if (!facesEnabled || activeItem?.kind !== 'video') return;
+  const occurrences = (activeItem.faces ?? [])
+    .map((face, index) => ({ face, index }))
+    .filter(({ face }) => Number.isFinite(face.timestampSec));
+  if (!occurrences.length) return;
+
+  let nearestTime = Number.POSITIVE_INFINITY;
+  let nearestGap = Number.POSITIVE_INFINITY;
+  for (const { face } of occurrences) {
+    const timestamp = Number(face.timestampSec);
+    const gap = Math.abs(timestamp - timeSec);
+    if (gap < nearestGap) {
+      nearestGap = gap;
+      nearestTime = timestamp;
+    }
+  }
+  if (!Number.isFinite(nearestTime)) return;
+
+  for (const { face, index } of occurrences) {
+    if (Math.abs(Number(face.timestampSec) - nearestTime) > 0.05) continue;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'face-box';
+    button.style.left = \`\${Math.max(0, Math.min(1, face.box.x)) * 100}%\`;
+    button.style.top = \`\${Math.max(0, Math.min(1, face.box.y)) * 100}%\`;
+    button.style.width = \`\${Math.max(0, Math.min(1, face.box.width)) * 100}%\`;
+    button.style.height = \`\${Math.max(0, Math.min(1, face.box.height)) * 100}%\`;
+    const name = face.label || 'Unknown person';
+    button.title = \`\${name} · \${formatPlaybackTime(Number(face.timestampSec))}\`;
+    button.setAttribute('aria-label', \`\${name} at \${formatPlaybackTime(Number(face.timestampSec))}. Edit name.\`);
+    button.addEventListener('click', () => {
+      const input = faceInputByKey.get(faceGroupKey(face, index));
+      input?.focus();
+      input?.select();
+      try { navigator.vibrate?.(8); } catch { /* enhancement only */ }
+    });
+    facesOverlay.appendChild(button);
+  }
+}
+
+async function seekToFace(timestampSec: number): Promise<void> {
+  if (!activeItem || activeItem.kind !== 'video') return;
+  await seekTo(timestampSec);
+  if (facesPreview) {
+    facesPreview.currentTime = Math.max(0, timestampSec);
+    renderFaceOverlay(facesPreview.currentTime);
+  }
+  try { navigator.vibrate?.(8); } catch { /* enhancement only */ }
+  await syncPlayback();
+}
+
+function setLocalActiveItem(updated: MediaItem): void {
+  items = items.map((item) => item.id === updated.id ? updated : item);
+  if (activeItem?.id === updated.id) activeItem = updated;
+}
+
+async function saveFaceGroup(group: FaceGroup, input: HTMLInputElement, button: HTMLButtonElement): Promise<void> {
+  if (!activeItem) return;
+  const label = input.value.trim();
+  if (label.length > 80) {
+    toast('Face names must be 80 characters or fewer.', { error: true });
+    return;
+  }
+  button.disabled = true;
+  try {
+    let updated: MediaItem | undefined;
+    for (const trackId of group.trackIds) {
+      updated = await updateFaceLabel(activeItem.id, { trackId }, label);
+      setLocalActiveItem(updated);
+    }
+    if (!group.trackIds.length) {
+      for (const occurrence of group.occurrences) {
+        updated = await updateFaceLabel(activeItem.id, { faceIndex: occurrence.index }, label);
+        setLocalActiveItem(updated);
+      }
+    }
+    renderFacesPanel();
+    syncPeopleLabels();
+    renderGrid();
+    toast(label ? \`Face saved as \${label}.\` : 'Face label cleared.');
+  } catch (error) {
+    toast((error as Error).message, { error: true });
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function renderFacesPanel(): void {
+  const videoActive = activeItem?.kind === 'video';
+  facesRoot?.classList.toggle('hidden', !videoActive);
+  if (!videoActive) {
+    if (facesContent) facesContent.hidden = true;
+    facesPreview?.pause();
+    facesPreviewItemId = null;
+    if (facesOverlay) facesOverlay.innerHTML = '';
+    return;
+  }
+
+  const groups = groupVideoFaces(activeItem);
+  const occurrences = groups.reduce((sum, group) => sum + group.occurrences.length, 0);
+  if (facesSummary) {
+    facesSummary.textContent = occurrences
+      ? \`\${groups.length} \${groups.length === 1 ? 'person' : 'people'} · \${occurrences} \${occurrences === 1 ? 'moment' : 'moments'}\`
+      : 'No timeline faces yet';
+  }
+  facesToggle?.setAttribute('aria-pressed', String(facesEnabled));
+  if (facesContent) facesContent.hidden = !facesEnabled;
+
+  const ratio = activeItem.width > 0 && activeItem.height > 0 ? activeItem.width / activeItem.height : 16 / 9;
+  if (facesPreviewRoot) facesPreviewRoot.style.aspectRatio = String(ratio);
+  if (facesPreview && facesPreviewItemId !== activeItem.id) {
+    facesPreviewItemId = activeItem.id;
+    facesPreview.src = \`/photos/\${activeItem.file}\`;
+    facesPreview.muted = true;
+    facesPreview.load();
+  }
+
+  const knownLabels = [...new Set(items.flatMap((item) =>
+    item.faces?.map((face) => face.label).filter((label): label is string => Boolean(label)) ?? [],
+  ))].sort();
+  if (facesKnownLabels) {
+    facesKnownLabels.innerHTML = knownLabels.map((label) => \`<option value="\${escapeHtml(label)}"></option>\`).join('');
+  }
+
+  faceInputByKey.clear();
+  if (!facesList) return;
+  facesList.innerHTML = '';
+  if (!groups.length) {
+    const empty = document.createElement('div');
+    empty.className = 'faces-empty';
+    empty.textContent = 'No timestamped faces yet. Tap Scan video to analyze this video locally.';
+    facesList.appendChild(empty);
+    renderFaceOverlay(facesPreview?.currentTime ?? 0);
+    return;
+  }
+
+  groups.forEach((group, groupIndex) => {
+    const row = document.createElement('div');
+    row.className = 'faces-person';
+
+    const head = document.createElement('div');
+    head.className = 'faces-person-head';
+    const name = document.createElement('strong');
+    name.className = 'faces-person-name';
+    name.textContent = group.label || \`Unknown person \${groupIndex + 1}\`;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.maxLength = 80;
+    input.placeholder = 'Name person';
+    input.value = group.label;
+    input.setAttribute('list', 'faces-known-labels');
+    input.setAttribute('aria-label', \`Name \${name.textContent}\`);
+    faceInputByKey.set(group.key, input);
+
+    const save = document.createElement('button');
+    save.type = 'button';
+    save.className = 'faces-person-save';
+    save.textContent = 'Save';
+    save.addEventListener('click', () => { void saveFaceGroup(group, input, save); });
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        void saveFaceGroup(group, input, save);
+      }
+    });
+
+    head.append(name, input, save);
+    row.appendChild(head);
+
+    const timestamps = document.createElement('div');
+    timestamps.className = 'faces-timestamps';
+    const unique = new Map<number, FaceOccurrence>();
+    for (const occurrence of group.occurrences) {
+      const time = Number(occurrence.face.timestampSec);
+      const key = Math.round(time * 10) / 10;
+      if (!unique.has(key)) unique.set(key, occurrence);
+    }
+    for (const [time] of unique) {
+      const jump = document.createElement('button');
+      jump.type = 'button';
+      jump.textContent = formatPlaybackTime(time);
+      jump.title = \`Jump to \${formatPlaybackTime(time)}\`;
+      jump.addEventListener('click', () => {
+        void seekToFace(time).catch((error: Error) => toast('Seek failed: ' + error.message, { error: true }));
+      });
+      timestamps.appendChild(jump);
+    }
+    row.appendChild(timestamps);
+    facesList.appendChild(row);
+  });
+
+  renderFaceOverlay(facesPreview?.currentTime ?? 0);
+}
+
+async function syncFacesPreview(playback: Playback | null): Promise<void> {
+  renderFacesPanel();
+  if (!facesEnabled || !facesPreview || activeItem?.kind !== 'video') return;
+  const display = playback?.display;
+  if (playback && display && display.itemId === activeItem.id) {
+    const target = estimatedPlaybackTime(playback);
+    if (Math.abs(facesPreview.currentTime - target) > 1.25) facesPreview.currentTime = target;
+  }
+  const requestedRate = Number(activeConfig.videoPlaybackRate ?? 1);
+  const rate = Number.isFinite(requestedRate) ? Math.min(3, Math.max(0.25, requestedRate)) : 1;
+  facesPreview.playbackRate = rate;
+  facesPreview.defaultPlaybackRate = rate;
+  if (playback?.paused) facesPreview.pause();
+  else await facesPreview.play().catch(() => undefined);
+  renderFaceOverlay(facesPreview.currentTime);
+}
+
+function wireFaces(): void {
+  facesToggle?.addEventListener('click', () => {
+    facesEnabled = !facesEnabled;
+    renderFacesPanel();
+    if (!facesEnabled) {
+      facesPreview?.pause();
+      return;
+    }
+    void getPlayback().then(syncFacesPreview).catch(() => {});
+  });
+  facesRescan?.addEventListener('click', () => {
+    if (!activeItem || activeItem.kind !== 'video') return;
+    void withBusy(facesRescan, async () => {
+      await rescanFaces(activeItem!.id);
+      if (facesSummary) facesSummary.textContent = 'Scanning video…';
+      toast('Video face scan queued. The panel will update when detections are ready.');
+    });
+  });
+  facesPreview?.addEventListener('timeupdate', () => renderFaceOverlay(facesPreview.currentTime));
+  installHapticFeedback(facesToggle, 9);
+  installHapticFeedback(facesRescan, 9);
 }
 
 function clampTvVolume(value: number): number {
