@@ -7,10 +7,8 @@ import { MEDIA_DIR, faceMatchEnabled } from '../env.js';
 import { hub } from '../hub.js';
 import { listItems, updateItem } from '../store.js';
 import { refresh } from '../slideshow.js';
-import {
-  detectFacesInGeneratedVideoPosterImage,
-  detectFacesInImageBuffer,
-} from './faceMatch.js';
+import { detectFacesInImageBuffer } from './faceMatch.js';
+import { detectFacesAcrossVideo } from './videoFaces.js';
 
 let chain: Promise<void> = Promise.resolve();
 
@@ -27,18 +25,29 @@ export async function drainFaceQueue(): Promise<void> {
 
 async function detectOne(item: MediaItem): Promise<void> {
   try {
-    const asset = item.kind === 'video' ? item.poster : item.preview;
-    if (!asset) return;
+    if (item.kind === 'video') {
+      const timelineFaces = await detectFacesAcrossVideo(item, item.faces ?? []);
+      if (!timelineFaces.length) return;
+      await updateItem(item.id, { faces: timelineFaces });
+      refresh();
+      hub.emitEvent({ type: 'library', items: listItems() });
+      hub.emitEvent({
+        type: 'log',
+        level: 'info',
+        message: `Detected ${timelineFaces.length} timestamped face occurrence(s) in ${item.file}.`,
+      });
+      return;
+    }
 
+    const asset = item.preview;
+    if (!asset) return;
     const buffer = await fs.readFile(path.join(MEDIA_DIR, asset)).catch((error: unknown) => {
       if (isMissingFile(error)) return undefined;
       throw error;
     });
     if (!buffer) return;
 
-    const faces = item.kind === 'video'
-      ? await detectFacesInGeneratedVideoPosterImage(buffer)
-      : await detectFacesInImageBuffer(buffer);
+    const faces = await detectFacesInImageBuffer(buffer);
     if (!faces?.length) return;
 
     const sharpModule = await import('sharp');
@@ -48,13 +57,15 @@ async function detectOne(item: MediaItem): Promise<void> {
     const height = metadata.height;
     if (!width || !height) throw new Error(`could not read dimensions for ${asset}`);
 
-    const normalized: FaceMetadata[] = faces.map(({ box }) => ({
+    const normalized: FaceMetadata[] = faces.map(({ box, embedding, label }) => ({
       box: {
         x: box.x / width,
         y: box.y / height,
         width: box.width / width,
         height: box.height / height,
       },
+      ...(embedding?.length ? { embedding } : {}),
+      ...(label ? { label } : {}),
     }));
 
     await updateItem(item.id, { faces: normalized });
