@@ -132,6 +132,35 @@ test('Cast receiver handoff tokens can read protected media without an admin coo
   assert.equal(photo.body, 'cast token photo bytes');
 });
 
+test('display media session cookie authorizes protected video range requests without admin access', async () => {
+  await withApp('test-index-password', async (app) => {
+    const bytes = Buffer.from('0123456789abcdef');
+    await writeFile(path.join(MEDIA_DIR, 'range-video.mp4'), bytes);
+
+    const session = await app.inject({ method: 'GET', url: '/api/display-media-session' });
+    assert.equal(session.statusCode, 200);
+    const setCookie = session.headers['set-cookie'];
+    assert.ok(setCookie, 'display media session should set a cookie');
+    const mediaCookie = (Array.isArray(setCookie) ? setCookie[0] : setCookie).split(';')[0];
+    assert.match(mediaCookie, /^frame_media=/);
+
+    const range = await app.inject({
+      method: 'GET',
+      url: '/photos/range-video.mp4',
+      headers: { cookie: mediaCookie, range: 'bytes=4-9' },
+    });
+    assert.equal(range.statusCode, 206);
+    assert.equal(range.body, '456789');
+
+    const admin = await app.inject({
+      method: 'GET',
+      url: '/api/admin/status',
+      headers: { cookie: mediaCookie },
+    });
+    assert.equal(admin.statusCode, 401, 'media-only cookie must not grant admin access');
+  });
+});
+
 test('authenticated requests can read protected display state and raw media', async () => {
   await withApp('test-index-password', async (app) => {
     await writeFile(path.join(MEDIA_DIR, 'authed-photo.jpg'), 'authenticated photo bytes');
