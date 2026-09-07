@@ -98,18 +98,21 @@
           && playCalls === 1;
         rejectNextPlay = true;
         emit({ type: 'config', config: { ...defaultConfig(), videoAudioMode: 'tv', videoLoop: false } });
-        const propertiesUpdatedImmediately = video.muted === false
+        const audibleAttemptStarted = video.muted === false
           && video.defaultMuted === false
           && video.volume === 1
           && video.loop === false;
         await new Promise((resolve) => setTimeout(resolve, 0));
+        const mutedFallbackRecovered = video.muted === true
+          && video.defaultMuted === true
+          && video.classList.contains('visible')
+          && playCalls === 3;
 
         document.getElementById('next').click();
         const status = document.getElementById('status');
         const passed = initialMutedPlayback
-          && propertiesUpdatedImmediately
-          && playCalls === 2
-          && video.classList.contains('visible')
+          && audibleAttemptStarted
+          && mutedFallbackRecovered
           && video.src.endsWith('/photos/sample.mp4')
           && status.textContent === ''
           && sent.some((message) => message.type === 'next');
@@ -117,7 +120,8 @@
         document.getElementById('result').textContent = JSON.stringify({
           passed,
           initialMutedPlayback,
-          propertiesUpdatedImmediately,
+          audibleAttemptStarted,
+          mutedFallbackRecovered,
           muted: video.muted,
           defaultMuted: video.defaultMuted,
           volume: video.volume,
