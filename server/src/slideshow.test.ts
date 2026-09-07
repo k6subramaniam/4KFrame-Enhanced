@@ -132,6 +132,24 @@ test('playbackMediaMode videos includes only enabled videos', async () => {
   assert.deepEqual(slideshow.getCurrent().map((item) => item.id), ['video-b']);
 });
 
+test('automatic rotation skips videos while transcoding or upscaling', async () => {
+  await resetStore(
+    [
+      { ...video('transcoding', 1920, 1080), transcoding: true },
+      video('ready-a', 1920, 1080),
+      { ...video('upscaling', 1920, 1080), upscaling: true },
+      video('ready-b', 1920, 1080),
+    ],
+    { playbackMediaMode: 'videos' },
+  );
+
+  assert.deepEqual(slideshow.getCurrent().map((item) => item.id), ['ready-a']);
+  slideshow.next();
+  assert.deepEqual(slideshow.getCurrent().map((item) => item.id), ['ready-b']);
+  slideshow.next();
+  assert.deepEqual(slideshow.getCurrent().map((item) => item.id), ['ready-a']);
+});
+
 test('playbackMediaMode refresh clears current when selected mode has no items', async () => {
   await resetStore(
     [photo('photo-a', 1600, 900), photo('photo-b', 1600, 900)],
