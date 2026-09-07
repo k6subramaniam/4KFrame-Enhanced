@@ -74,6 +74,9 @@ function rotation(): MediaItem[] {
   const mode = getConfig().playbackMediaMode;
   return listItems()
     .filter((i) => i.enabled !== false)
+    // Never hand an in-progress compatibility/upscale file to the TV. The processing job
+    // refreshes the slideshow when the finished rendition is ready.
+    .filter((i) => i.kind !== 'video' || (!i.transcoding && !i.upscaling))
     .filter((i) => {
       if (mode === 'photos') return i.kind === 'photo';
       if (mode === 'videos') return i.kind === 'video';
