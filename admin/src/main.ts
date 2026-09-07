@@ -1049,9 +1049,10 @@ async function saveFaceGroup(group: FaceGroup, input: HTMLInputElement, button: 
 }
 
 function renderFacesPanel(): void {
-  const videoActive = activeItem?.kind === 'video';
+  const item = activeItem;
+  const videoActive = item?.kind === 'video';
   facesRoot?.classList.toggle('hidden', !videoActive);
-  if (!videoActive) {
+  if (!videoActive || !item) {
     if (facesContent) facesContent.hidden = true;
     facesPreview?.pause();
     facesPreviewItemId = null;
@@ -1059,7 +1060,7 @@ function renderFacesPanel(): void {
     return;
   }
 
-  const groups = groupVideoFaces(activeItem);
+  const groups = groupVideoFaces(item);
   const occurrences = groups.reduce((sum, group) => sum + group.occurrences.length, 0);
   if (facesSummary) {
     facesSummary.textContent = occurrences
@@ -1069,11 +1070,11 @@ function renderFacesPanel(): void {
   facesToggle?.setAttribute('aria-pressed', String(facesEnabled));
   if (facesContent) facesContent.hidden = !facesEnabled;
 
-  const ratio = activeItem.width > 0 && activeItem.height > 0 ? activeItem.width / activeItem.height : 16 / 9;
+  const ratio = item.width > 0 && item.height > 0 ? item.width / item.height : 16 / 9;
   if (facesPreviewRoot) facesPreviewRoot.style.aspectRatio = String(ratio);
-  if (facesPreview && facesPreviewItemId !== activeItem.id) {
-    facesPreviewItemId = activeItem.id;
-    facesPreview.src = `/photos/${activeItem.file}`;
+  if (facesPreview && facesPreviewItemId !== item.id) {
+    facesPreviewItemId = item.id;
+    facesPreview.src = `/photos/${item.file}`;
     facesPreview.muted = true;
     facesPreview.load();
   }
