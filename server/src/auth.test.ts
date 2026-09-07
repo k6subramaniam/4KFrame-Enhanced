@@ -2,8 +2,8 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   authRequired, passwordEnabled, googleLoginEnabled, isEmailAllowed, adminEmails,
-  issueToken, verifyToken, issueStateToken, verifyStateToken,
-  cookieFromHeader, setCookie, checkPassword,
+  issueToken, verifyToken, issueMediaToken, verifyMediaToken, issueStateToken, verifyStateToken,
+  cookieFromHeader, setCookie, setMediaCookie, checkPassword,
 } from './auth.js';
 
 beforeEach(() => {
@@ -51,6 +51,21 @@ test('session tokens round-trip and reject tampering', () => {
 
   const header = setCookie(token, false);
   assert.equal(cookieFromHeader(`foo=bar; ${header.split(';')[0]}`), token);
+});
+
+test('media tokens are scoped separately from admin sessions', () => {
+  process.env.FRAME_AUTH_SECRET = 'test-secret';
+  const media = issueMediaToken();
+  assert.equal(verifyMediaToken(media), true);
+  assert.equal(verifyToken(media), false);
+
+  const admin = issueToken();
+  assert.equal(verifyToken(admin), true);
+  assert.equal(verifyMediaToken(admin), false);
+
+  const header = setMediaCookie(media, false);
+  assert.match(header, /^frame_media=/);
+  assert.match(header, /Path=\/photos\//);
 });
 
 test('oauth state tokens verify and expire', () => {
