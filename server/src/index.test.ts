@@ -152,6 +152,16 @@ test('display media session cookie authorizes protected video range requests wit
     assert.equal(range.statusCode, 206);
     assert.equal(range.body, '456789');
 
+    const sessionBody = session.json() as { token?: string };
+    assert.ok(sessionBody.token);
+    const tokenRange = await app.inject({
+      method: 'GET',
+      url: `/photos/range-video.mp4?media_auth=${encodeURIComponent(sessionBody.token)}`,
+      headers: { range: 'bytes=10-15' },
+    });
+    assert.equal(tokenRange.statusCode, 206);
+    assert.equal(tokenRange.body, 'abcdef');
+
     const admin = await app.inject({
       method: 'GET',
       url: '/api/admin/status',
