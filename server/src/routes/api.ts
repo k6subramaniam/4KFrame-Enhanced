@@ -89,6 +89,7 @@ function safeUploadId(id: unknown): string | null {
 /** /api/* paths reachable without a login when an admin password is configured. */
 const OPEN_API = new Set([
   '/api/health', '/api/login', '/api/logout', '/api/me',
+  '/api/display-media-session',
   '/api/auth/google/start', '/api/auth/google/callback',
 ]);
 
@@ -129,6 +130,16 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
     authed: auth.isAuthed(req.headers.cookie),
     methods: { password: auth.passwordEnabled(), google: auth.googleLoginEnabled() },
   }));
+
+  // A display-only cookie allows Chromecast/TV media range requests without granting any
+  // admin API or WebSocket privileges. HTMLVideoElement may issue many independent HEAD/
+  // Range requests, so query-token handoffs alone are not reliable enough.
+  app.get('/api/display-media-session', async (req, reply) => {
+    if (!auth.authRequired()) return { ok: true, required: false };
+    reply.header('set-cookie', auth.setMediaCookie(auth.issueMediaToken(), req.protocol === 'https'));
+    reply.header('cache-control', 'no-store');
+    return { ok: true, required: true };
+  });
 
   // --- Google sign-in for the admin (identity only; Photos has its own flow below) ---
   app.get('/api/auth/google/start', async (req, reply) => {
