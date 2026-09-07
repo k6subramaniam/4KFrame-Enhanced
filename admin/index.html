@@ -27,6 +27,15 @@
       .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:.75rem; }
       .tile { position:relative; aspect-ratio:1; border-radius:.9rem; overflow:hidden; border:1px solid var(--line); cursor:pointer; background:#000; box-shadow:0 8px 30px rgba(0,0,0,.16); }
       .tile.selected { border-color:var(--accent); box-shadow:0 0 0 3px rgba(76,141,255,.35); }
+      .tile.playing {
+        border:3px solid #fff;
+        box-shadow:0 0 0 1px rgba(255,255,255,.18),0 8px 30px rgba(0,0,0,.22);
+      }
+      .tile.playing.selected {
+        border-color:#fff;
+        outline:3px solid var(--accent);
+        outline-offset:2px;
+      }
       .tile:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
       .tile img { width:100%; height:100%; object-fit:cover; display:block; }
       .tile .ph { width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:2rem; background:#11151c; }

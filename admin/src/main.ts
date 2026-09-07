@@ -383,7 +383,9 @@ function renderGrid(): void {
     const tile = document.createElement('div');
     const excluded = item.enabled === false;
     const selected = selectedMediaIds.has(item.id);
-    tile.className = `tile ${mode}${excluded ? ' excluded' : ''}${selected ? ' selected' : ''}`;
+    const playing = activeItem?.id === item.id;
+    tile.className = `tile ${mode}${excluded ? ' excluded' : ''}${selected ? ' selected' : ''}${playing ? ' playing' : ''}`;
+    tile.dataset.mediaId = item.id;
     tile.tabIndex = 0;
     // role=option requires a listbox ancestor, which #grid isn't — these behave as
     // buttons, with selection expressed by aria-pressed.
@@ -441,6 +443,12 @@ function renderGrid(): void {
     grid.appendChild(tile);
   }
   renderBulkToolbar();
+}
+
+function syncPlayingTileHighlight(): void {
+  grid.querySelectorAll<HTMLElement>('.tile[data-media-id]').forEach((tile) => {
+    tile.classList.toggle('playing', Boolean(activeItem?.id && tile.dataset.mediaId === activeItem.id));
+  });
 }
 
 function toggleSelection(id: string): void {
@@ -767,6 +775,7 @@ function wirePlaybackPreviewSocket(): void {
           const nextActiveItem = msg.items.find((item) => item.kind === 'video') ?? msg.items[0];
           if (nextActiveItem?.id !== activeItem?.id) lastVideoPlayback = null;
           activeItem = nextActiveItem;
+          syncPlayingTileHighlight();
           renderVideoScrubber(lastVideoPlayback);
           renderFacesPanel();
           syncTvVolumeControl();
