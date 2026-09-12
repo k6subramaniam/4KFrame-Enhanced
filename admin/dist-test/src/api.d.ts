@@ -1,6 +1,23 @@
 /** Thin REST client for the admin PWA. */
-import type { ApiDataPayload, ControlMessage, CurrentResponse, DisplayPlaybackState, MediaItem, MediaKind } from '@4kframe/shared';
+import type { AdminStatus, ApiDataPayload, ControlMessage, CurrentResponse, FrameBackup, ProcessingJob, DisplayPlaybackState, MediaItem, MediaKind, VideoUpscaleTarget } from '@4kframe/shared';
+export declare function fetchAdminStatus(): Promise<AdminStatus>;
+export declare function fetchProcessingJobs(): Promise<ProcessingJob[]>;
+export declare function cancelProcessingJob(id: string): Promise<void>;
+export declare function retryProcessingJob(id: string): Promise<void>;
+export declare function clearFinishedProcessingJobs(): Promise<number>;
+export declare function createBackupSnapshot(): Promise<number>;
+export declare function downloadBackup(): Promise<Blob>;
+export declare function restoreBackup(backup: FrameBackup): Promise<{
+    restoredItems: number;
+    restoredTrash: number;
+    skippedMissingAssets: number;
+}>;
 export declare function fetchItems(): Promise<MediaItem[]>;
+export interface TrashResponse {
+    items: MediaItem[];
+    retentionDays: number;
+}
+export declare function fetchTrash(): Promise<TrashResponse>;
 export declare function fetchCurrent(): Promise<CurrentResponse>;
 export declare function fetchData(): Promise<ApiDataPayload>;
 export declare function sendControl(message: ControlMessage): Promise<boolean>;
@@ -29,6 +46,9 @@ export declare function castItem(id: string): Promise<void>;
 export declare function deleteItem(id: string): Promise<void>;
 export declare function setItemsEnabled(ids: string[], enabled: boolean): Promise<void>;
 export declare function deleteItems(ids: string[]): Promise<void>;
+export declare function restoreTrashItems(ids: string[]): Promise<void>;
+export declare function purgeTrashItems(ids: string[]): Promise<void>;
+export declare function emptyTrash(): Promise<void>;
 export declare function playSequence(ids: string[]): Promise<void>;
 export interface AuthState {
     required: boolean;
@@ -55,6 +75,13 @@ export declare function getPlayback(): Promise<Playback>;
 export declare function setPaused(paused: boolean): Promise<void>;
 export declare function setHold(holding: boolean): Promise<void>;
 export declare function seekBy(deltaSec: number): Promise<void>;
+export declare function seekTo(timeSec: number): Promise<void>;
+export declare function updateFaceLabel(id: string, target: {
+    trackId?: string;
+    faceIndex?: number;
+}, label: string): Promise<MediaItem>;
+export declare function rescanFaces(id: string): Promise<void>;
+export declare function upscaleVideo(id: string, target: VideoUpscaleTarget): Promise<void>;
 /** Include/exclude an item from rotation; returns the new enabled state. */
 export declare function toggleEnabled(id: string): Promise<boolean>;
 export declare function patchMediaTransforms(ids: string[], transform: Partial<Pick<MediaItem, 'rotation' | 'flipHorizontal' | 'flipVertical'>>): Promise<MediaItem[]>;

@@ -454,7 +454,10 @@
     <div id="app">
       <canvas id="gl"></canvas>
       <div id="video-bg"></div>
-      <video id="video" autoplay playsinline></video>
+      <!-- `muted` must be present for declarative autoplay to be permitted: browsers (and
+           TV browsers especially) refuse `autoplay` without it. JS unmutes for TV audio as
+           soon as the page has user activation. preload=auto so a frame is ready to paint. -->
+      <video id="video" autoplay muted playsinline preload="auto"></video>
       <img id="live-cast-img" class="live-cast-layer" alt="" />
       <video id="live-cast-video" class="live-cast-layer" muted playsinline loop></video>
       <div id="clock" class="overlay hidden"></div>

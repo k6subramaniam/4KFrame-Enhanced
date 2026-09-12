@@ -27,7 +27,7 @@ import { GLRenderer } from './gl.js';
 import { compose, contentRect } from './compositor.js';
 import { applyOverlays, setCaption, setStatus } from './overlays.js';
 import { initCastReceiver } from './cast.js';
-import { seekActiveVideo, syncVideoPlaybackProperties } from './videoPlayback.js';
+import { playbackBlockedStatusMessage, seekActiveVideo, syncVideoPlaybackProperties } from './videoPlayback.js';
 import { attachMediaGestures } from './gestures.js';
 
 const canvas = document.getElementById('gl') as HTMLCanvasElement;
@@ -52,6 +52,8 @@ let lastPlaybackReportAt = 0;
 let displayHeartbeatTimer: ReturnType<typeof window.setInterval> | undefined;
 let tvAudioFallbackActive = false;
 let tvAudioUnlocked = false;
+/** Set when the browser refuses even muted playback, so a later gesture can retry it. */
+let playbackBlocked = false;
 let videoRetryItemId: string | null = null;
 let videoRetryCount = 0;
 let videoSkipTimer: ReturnType<typeof window.setTimeout> | undefined;
@@ -211,22 +213,74 @@ function reportPlaybackBlocked(error: unknown): void {
 }
 
 /**
+ * Whether the page has ever seen a real user interaction.
+ *
+ * Audible playback is impossible before this, so there is no point unmuting (and trying
+ * costs us the picture: a browser refuses the play() outright rather than playing silently).
+ */
+function hasUserActivation(): boolean {
+  const ua = (navigator as Navigator & {
+    userActivation?: { hasBeenActive: boolean; isActive: boolean };
+  }).userActivation;
+  if (ua) return ua.hasBeenActive || ua.isActive;
+  return tvAudioUnlocked; // engines without the API: fall back to our own gesture latch
+}
+
+/**
+ * Start (or resume) the active video, preferring TV audio but never at the cost of the
+ * picture. Falls back to muted playback, and latches `playbackBlocked` when even muted
+ * playback is refused so a later user gesture can retry it.
+ */
+async function attemptVideoPlayback(): Promise<void> {
+  if (!showingVideo || paused) return;
+  try {
+    await video.play();
+    playbackBlocked = false;
+    return;
+  } catch (error) {
+    reportPlaybackBlocked(error);
+    // A redundant play() on an already-running video can be rejected; that is not a block.
+    if (!video.paused) return;
+    if (video.muted) {
+      // Even silent playback was refused — this TV requires an interaction for any
+      // playback at all. Say so instead of sitting on a dead frame.
+      playbackBlocked = true;
+      setStatus(playbackBlockedStatusMessage(config.videoAudioMode));
+      return;
+    }
+    // Audible playback was refused; retry silently so the frame still shows motion.
+    tvAudioFallbackActive = true;
+    tvAudioUnlocked = false;
+    video.muted = true;
+    video.defaultMuted = true;
+  }
+  try {
+    await video.play();
+    playbackBlocked = false;
+  } catch (error) {
+    reportPlaybackBlocked(error);
+    if (!video.paused) return; // playing already; the retry was simply redundant
+    playbackBlocked = true;
+    setStatus(playbackBlockedStatusMessage(config.videoAudioMode));
+  }
+}
+
+/**
  * Audible autoplay can be rejected by Chromecast/TV Chromium until the page receives a
  * trusted remote/touch interaction. Never leave the TV black in that case: retry the same
  * video muted immediately. A later trusted interaction unlocks TV audio.
  */
 function recoverBlockedVideoPlayback(error: unknown): void {
   reportPlaybackBlocked(error);
-  if (!showingVideo || paused || config.videoAudioMode !== 'tv' || video.muted) return;
-  tvAudioFallbackActive = true;
-  tvAudioUnlocked = false;
-  video.muted = true;
-  video.defaultMuted = true;
-  void video.play().catch(reportPlaybackBlocked);
+  if (!showingVideo || paused) return;
+  void attemptVideoPlayback();
 }
 
 function desiredDisplayVideoMuted(): boolean {
   if (config.videoAudioMode !== 'tv') return true;
+  // Without a user gesture the browser will reject audible playback outright, taking the
+  // picture with it. Start silent and upgrade to sound on the first interaction.
+  if (!hasUserActivation()) return true;
   return tvAudioFallbackActive && !tvAudioUnlocked;
 }
 
@@ -244,7 +298,17 @@ function syncActiveVideoPlaybackProperties(restartAfterUnmute = false): void {
 
 /** A trusted TV/browser interaction can promote muted fallback playback back to TV audio. */
 function unlockTvAudioFromUserGesture(event: Event): void {
-  if (!event.isTrusted || config.videoAudioMode !== 'tv') return;
+  if (!event.isTrusted) return;
+  // A TV that refuses even muted autoplay leaves the frame stopped; this interaction is
+  // the first chance to start it, whatever the audio mode is.
+  if (playbackBlocked && showingVideo && !paused) {
+    playbackBlocked = false;
+    video.muted = desiredDisplayVideoMuted();
+    video.defaultMuted = video.muted;
+    void attemptVideoPlayback();
+    return;
+  }
+  if (config.videoAudioMode !== 'tv') return;
   tvAudioUnlocked = true;
   if (!showingVideo || paused || (!tvAudioFallbackActive && !video.muted)) return;
   tvAudioFallbackActive = false;
@@ -299,14 +363,15 @@ async function renderVideo(item: MediaItem): Promise<void> {
   layoutVideo(item);
   syncActiveVideoPlaybackProperties();
   video.onerror = () => handleVideoError(item);
+  // Show the video's own first frame while it loads — and keep showing it if this TV
+  // refuses to autoplay at all. Without a poster the element paints pure black.
+  const posterFile = item.poster ?? item.thumb;
+  if (posterFile) video.poster = displayMediaUrl(posterFile);
+  else video.removeAttribute('poster');
   video.src = displayMediaUrl(item.file);
   lastPlaybackReportAt = 0;
   video.classList.add('visible');
-  try {
-    await video.play();
-  } catch (error) {
-    recoverBlockedVideoPlayback(error);
-  }
+  await attemptVideoPlayback();
   setCaption([item], config);
   reportVideoPlayback(true);
   syncPublicControls();
@@ -329,7 +394,7 @@ function handleVideoError(item: MediaItem): void {
     window.setTimeout(() => {
       if (lastVideoItem?.id !== item.id) return;
       video.load();
-      void video.play().catch(recoverBlockedVideoPlayback);
+      void attemptVideoPlayback();
     }, 650);
     return;
   }
@@ -428,6 +493,8 @@ function hideVideo(): void {
   videoRetryCount = 0;
   video.onerror = null;
   video.classList.remove('visible');
+  video.removeAttribute('poster'); // don't flash the previous clip's frame on the next one
+  playbackBlocked = false;
   videoBg.classList.remove('visible');
   video.pause();
   video.removeAttribute('src');
@@ -562,7 +629,7 @@ function handleEvent(event: FrameEvent): void {
       paused = event.paused;
       if (showingVideo) {
         if (paused) video.pause();
-        else video.play().catch(reportPlaybackBlocked);
+        else void attemptVideoPlayback();
       } else if (paused) {
         motionAnim?.pause();
       } else {
@@ -583,6 +650,14 @@ function handleEvent(event: FrameEvent): void {
 }
 
 video.addEventListener('loadedmetadata', () => reportVideoPlayback(true));
+// The browser is the authority on whether playback actually started — clear any
+// "autoplay blocked" notice from here rather than trying to track every play() path.
+video.addEventListener('playing', () => {
+  playbackBlocked = false;
+  // Unconditional: statusText() is '' unless paused/holding, so this both clears a stale
+  // "autoplay blocked" notice and restores the right badge, without tracking who set it.
+  setStatus(statusText());
+});
 video.addEventListener('durationchange', () => reportVideoPlayback(true));
 video.addEventListener('timeupdate', () => reportVideoPlayback());
 video.addEventListener('seeked', () => reportVideoPlayback(true));

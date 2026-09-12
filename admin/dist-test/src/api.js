@@ -7,10 +7,44 @@ async function requestJson(url, init) {
     }
     return body;
 }
+export async function fetchAdminStatus() {
+    return requestJson('/api/admin/status');
+}
+export async function fetchProcessingJobs() {
+    return (await requestJson('/api/admin/jobs')).jobs;
+}
+export async function cancelProcessingJob(id) {
+    await requestJson(`/api/admin/jobs/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+}
+export async function retryProcessingJob(id) {
+    await requestJson(`/api/admin/jobs/${encodeURIComponent(id)}/retry`, { method: 'POST' });
+}
+export async function clearFinishedProcessingJobs() {
+    return (await requestJson('/api/admin/jobs', { method: 'DELETE' })).cleared;
+}
+export async function createBackupSnapshot() {
+    return (await requestJson('/api/admin/backup/snapshot', { method: 'POST' })).exportedAt;
+}
+export async function downloadBackup() {
+    const res = await fetch('/api/admin/backup');
+    if (!res.ok)
+        throw new Error(`Backup download failed (${res.status})`);
+    return res.blob();
+}
+export async function restoreBackup(backup) {
+    return requestJson('/api/admin/restore', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(backup),
+    });
+}
 export async function fetchItems() {
     const res = await fetch('/api/thumbs');
     const json = (await res.json());
     return json.items;
+}
+export async function fetchTrash() {
+    return requestJson('/api/trash');
 }
 export async function fetchCurrent() {
     const res = await fetch('/api/current');
@@ -131,6 +165,13 @@ export async function sendControl(message) {
     });
 }
 export async function updateData(patch) {
+    // Playback rate is admin-only, so use authenticated REST rather than the public-config
+    // WebSocket allowlist.
+    if ('videoPlaybackRate' in patch || 'videoVolume' in patch) {
+        const qs = new URLSearchParams(patch).toString();
+        await requestJson(`/api/data?${qs}`);
+        return;
+    }
     if ('videoAudioMode' in patch || 'videoMuted' in patch) {
         const typedPatch = { ...patch };
         if ('videoMuted' in typedPatch)
@@ -184,15 +225,42 @@ export async function castItem(id) {
 export async function deleteItem(id) {
     await requestJson(`/api/delete/${id}`);
 }
+const BULK_ID_BATCH_SIZE = 500;
+async function forEachIdBatch(ids, action) {
+    for (let offset = 0; offset < ids.length; offset += BULK_ID_BATCH_SIZE) {
+        await action(ids.slice(offset, offset + BULK_ID_BATCH_SIZE));
+    }
+}
 export async function setItemsEnabled(ids, enabled) {
-    await requestJson('/api/items/enabled', {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids, enabled }),
+    await forEachIdBatch(ids, async (batch) => {
+        await requestJson('/api/items/enabled', {
+            method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: batch, enabled }),
+        });
     });
 }
 export async function deleteItems(ids) {
-    await requestJson('/api/items', {
-        method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }),
+    await forEachIdBatch(ids, async (batch) => {
+        await requestJson('/api/items', {
+            method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: batch }),
+        });
     });
+}
+export async function restoreTrashItems(ids) {
+    await forEachIdBatch(ids, async (batch) => {
+        await requestJson('/api/trash/restore', {
+            method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: batch }),
+        });
+    });
+}
+export async function purgeTrashItems(ids) {
+    await forEachIdBatch(ids, async (batch) => {
+        await requestJson('/api/trash/items', {
+            method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: batch }),
+        });
+    });
+}
+export async function emptyTrash() {
+    await requestJson('/api/trash', { method: 'DELETE' });
 }
 export async function playSequence(ids) {
     await requestJson('/api/play-sequence', {
@@ -229,6 +297,27 @@ export async function setHold(holding) {
 }
 export async function seekBy(deltaSec) {
     await requestJson(`/api/seek?delta=${encodeURIComponent(deltaSec)}`);
+}
+export async function seekTo(timeSec) {
+    await requestJson(`/api/seek-to?time=${encodeURIComponent(timeSec)}`);
+}
+export async function updateFaceLabel(id, target, label) {
+    const result = await requestJson(`/api/media/${encodeURIComponent(id)}/faces`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ...target, label }),
+    });
+    return result.item;
+}
+export async function rescanFaces(id) {
+    await requestJson(`/api/media/${encodeURIComponent(id)}/faces/rescan`, { method: 'POST' });
+}
+export async function upscaleVideo(id, target) {
+    await requestJson(`/api/video/${encodeURIComponent(id)}/upscale`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ target }),
+    });
 }
 /** Include/exclude an item from rotation; returns the new enabled state. */
 export async function toggleEnabled(id) {
@@ -268,7 +357,7 @@ async function uploadFile(file, onProgress) {
             return { error: `upload failed at ${Math.round(((i + 1) / total) * 100)}% (${res.status})` };
         onProgress?.((i + 1) / total);
     }
-    const res = await fetch(`/api/upload/finish?id=${id}&name=${encodeURIComponent(file.name)}&type=${encodeURIComponent(file.type)}`, { method: 'POST' });
+    const res = await fetch(`/api/upload/finish?id=${id}&name=${encodeURIComponent(file.name)}&type=${encodeURIComponent(file.type)}&createdAt=${encodeURIComponent(String(file.lastModified || Date.now()))}`, { method: 'POST' });
     if (!res.ok)
         return { error: `finalize failed (${res.status})` };
     const json = (await res.json());
