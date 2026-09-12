@@ -15,9 +15,7 @@
 
 import { CAST_NAMESPACE, isSeekOffsetSec, type ControlMessage } from '@4kframe/shared';
 
-interface CafCustomEvent {
-  data: unknown;
-}
+interface CafCustomEvent { data: unknown; }
 interface CafPlaybackConfig {
   autoPauseDuration?: number;
   autoResumeDuration?: number;
@@ -90,12 +88,9 @@ declare global {
 const CAST_VIDEO_LAYER_STYLE_ID = 'cast-video-layer-fix';
 
 /**
- * Chromecast's WebView and hardware decoder do not always agree on normal DOM compositing.
- * In particular, an opaque canvas/backdrop or a 3D transform on the HTMLVideoElement can
- * result in perfectly audible playback whose decoded frames never reach the screen.
- *
- * Keep this workaround Cast-only so ordinary browser displays retain the richer blur
- * backdrop. The still-frame fallback remains available when videoWidth stays at zero.
+ * Keep Cast video on the simplest possible hardware-overlay-friendly surface. Chromecast
+ * devices can decode frames successfully yet paint only black when the video element is
+ * transformed or when an opaque WebGL/backdrop layer sits over the hardware plane.
  */
 function stabilizeCastVideoLayer(mediaElement: HTMLMediaElement): void {
   const video = mediaElement as HTMLVideoElement;
@@ -117,10 +112,19 @@ function stabilizeCastVideoLayer(mediaElement: HTMLMediaElement): void {
         z-index: 1 !important;
       }
       body.cast-video-active #video {
+        position: fixed !important;
+        inset: 0 !important;
+        left: 0 !important;
+        top: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
         visibility: visible !important;
         opacity: 1 !important;
         z-index: 12 !important;
-        transform: var(--cast-video-transform, none) !important;
+        transform: none !important;
+        clip-path: none !important;
+        object-fit: contain !important;
+        object-position: center center !important;
       }
       body.cast-video-active #app {
         background: transparent !important;
@@ -134,44 +138,27 @@ function stabilizeCastVideoLayer(mediaElement: HTMLMediaElement): void {
     document.head.appendChild(style);
   }
 
-  let syncing = false;
   const sync = (): void => {
-    if (syncing) return;
-    syncing = true;
-    try {
-      const visible = mediaElement.classList.contains('visible');
-      const missingDecodedFrames = visible
-        && !mediaElement.paused
-        && mediaElement.currentTime > 0.75
-        && video.videoWidth === 0;
+    const visible = mediaElement.classList.contains('visible');
+    const missingDecodedFrames = visible
+      && !mediaElement.paused
+      && mediaElement.currentTime > 0.75
+      && video.videoWidth === 0;
 
-      document.body.classList.toggle('cast-video-active', visible);
-      document.body.classList.toggle('cast-video-fallback', missingDecodedFrames);
+    document.body.classList.toggle('cast-video-active', visible);
+    document.body.classList.toggle('cast-video-fallback', missingDecodedFrames);
 
-      if (visible) {
-        document.documentElement.style.setProperty('background', 'transparent', 'important');
-        document.body.style.setProperty('background', 'transparent', 'important');
-      } else {
-        document.documentElement.style.removeProperty('background');
-        document.body.style.removeProperty('background');
-      }
-
-      const rawTransform = mediaElement.style.transform || 'none';
-      const safeTransform = rawTransform.replace(/\s*translateZ\([^)]*\)/g, '').trim() || 'none';
-      if (mediaElement.style.getPropertyValue('--cast-video-transform') !== safeTransform) {
-        mediaElement.style.setProperty('--cast-video-transform', safeTransform);
-      }
-
-      if (visible) {
-        canvas?.style.setProperty('visibility', 'hidden', 'important');
-        if (!missingDecodedFrames) backdrop?.style.setProperty('visibility', 'hidden', 'important');
-        else backdrop?.style.removeProperty('visibility');
-      } else {
-        canvas?.style.removeProperty('visibility');
-        backdrop?.style.removeProperty('visibility');
-      }
-    } finally {
-      syncing = false;
+    if (visible) {
+      document.documentElement.style.setProperty('background', 'transparent', 'important');
+      document.body.style.setProperty('background', 'transparent', 'important');
+      canvas?.style.setProperty('visibility', 'hidden', 'important');
+      if (!missingDecodedFrames) backdrop?.style.setProperty('visibility', 'hidden', 'important');
+      else backdrop?.style.removeProperty('visibility');
+    } else {
+      document.documentElement.style.removeProperty('background');
+      document.body.style.removeProperty('background');
+      canvas?.style.removeProperty('visibility');
+      backdrop?.style.removeProperty('visibility');
     }
   };
 
@@ -195,7 +182,6 @@ function mediaContentType(url: string): string {
  * The slideshow historically assigned video.src directly. On Chromecast that leaves the
  * WebView in charge of decoding/compositing; on some devices the audio plays while decoded
  * video frames never reach the panel. Route each source through CAF PlayerManager instead.
- * CAF then owns the media session and its MPL/Shaka/native playback pipeline.
  */
 function routeVideoSourcesThroughCaf(
   mediaElement: HTMLMediaElement,
@@ -216,8 +202,6 @@ function routeVideoSourcesThroughCaf(
     if (absolute === lastManagedUrl) return;
     lastManagedUrl = absolute;
 
-    // main.ts has already selected this clip. Stop the direct HTMLMediaElement path before
-    // it can settle into the broken audio-only WebView compositor, then reload via CAF.
     mediaElement.pause();
     const media = new messages.MediaInformation();
     media.contentId = absolute;
@@ -231,8 +215,6 @@ function routeVideoSourcesThroughCaf(
 
     loading = true;
     void playerManager.load(request).catch((error: unknown) => {
-      // If CAF itself refuses the item, leave the original source in place and let the
-      // display's existing retry/skip path handle it rather than freezing the slideshow.
       console.error('CAF PlayerManager failed to load video; falling back to direct playback.', error);
       void mediaElement.play().catch(() => {});
     }).finally(() => {
@@ -246,11 +228,7 @@ function routeVideoSourcesThroughCaf(
   route();
 }
 
-/**
- * Start the Cast receiver, bridging custom messages to `forward`. Because the CAF script
- * may still be loading when the app boots, we retry briefly before giving up (a no-op on
- * non-Cast displays, which never load the SDK).
- */
+/** Start the Cast receiver and let CAF own video playback on Cast hardware. */
 export function initCastReceiver(
   mediaElement: HTMLMediaElement,
   forward: (msg: ControlMessage) => void,
@@ -261,7 +239,7 @@ export function initCastReceiver(
     const ctor = framework?.CastReceiverContext;
     const messages = framework?.messages;
     if (!ctor || !messages) {
-      if (attempts++ < 20) setTimeout(tryStart, 150); // ~3s, then give up.
+      if (attempts++ < 20) setTimeout(tryStart, 150);
       return;
     }
     try {
@@ -275,9 +253,8 @@ export function initCastReceiver(
       });
       ctx.start({
         mediaElement,
-        // Do NOT set skipPlayersLoad here. CAF's managed MPL/Shaka/native playback path is
-        // required on Cast devices; disabling it is what left our HTML video compositor in
-        // charge and produced audio with a black picture on affected TVs.
+        // Intentionally leave MPL/Shaka/native player loading enabled. CAF's managed player
+        // is the reliable Cast path; skipPlayersLoad=true was our old audio-black path.
         statusText: 'Ready to display photos and videos',
       });
     } catch (error) {
