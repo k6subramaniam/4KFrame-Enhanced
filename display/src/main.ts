@@ -56,6 +56,11 @@ let tvAudioUnlocked = false;
 let playbackBlocked = false;
 /** Set when playback runs but no video frame ever decodes (audio-only on this TV). */
 let videoTrackMissing = false;
+/** Base transform for the active video, so the repaint pump can append to it. */
+let videoBaseTransform = '';
+let repaintPumpHandle = 0;
+let repaintPumpUsesFrameCallback = false;
+let repaintNudge = false;
 let videoRetryItemId: string | null = null;
 let videoRetryCount = 0;
 let videoSkipTimer: ReturnType<typeof window.setTimeout> | undefined;
@@ -498,7 +503,8 @@ function layoutVideo(item: MediaItem): void {
   video.style.top = `${dy + fitted.h / 2}px`;
   video.style.width = `${quarterTurn ? fitted.h : fitted.w}px`;
   video.style.height = `${quarterTurn ? fitted.w : fitted.h}px`;
-  video.style.transform = `translate(-50%, -50%) rotate(${transform.rotation}deg) scale(${transform.flipHorizontal ? -1 : 1}, ${transform.flipVertical ? -1 : 1})`;
+  videoBaseTransform = `translate(-50%, -50%) rotate(${transform.rotation}deg) scale(${transform.flipHorizontal ? -1 : 1}, ${transform.flipVertical ? -1 : 1})`;
+  video.style.transform = videoBaseTransform;
   video.style.objectFit = 'fill';
   video.style.objectPosition = '50% 50%';
   video.style.clipPath = '';
@@ -563,6 +569,56 @@ function initVideoDiagnostics(): void {
 }
 
 /**
+ * Keep the compositor producing frames while a video is on screen.
+ *
+ * Some TV browsers only composite the hardware video overlay when the page itself paints.
+ * A slideshow parked on a video paints nothing, so the picture stays black while the audio
+ * plays — which is exactly why `?debug=1` "fixed" it: that panel rewrote its text twice a
+ * second and incidentally drove the repaints.
+ *
+ * The nudge is a sub-pixel translateZ on the video's own layer: visually identical (there
+ * is no perspective, so Z has no effect), but it marks the layer dirty so a frame is
+ * produced. Driven off requestVideoFrameCallback where available so it ticks with the
+ * video's own cadence rather than the display refresh rate.
+ */
+function startVideoRepaintPump(): void {
+  stopVideoRepaintPump();
+  const tick = (): void => {
+    if (!showingVideo || paused) { repaintPumpHandle = 0; return; }
+    repaintNudge = !repaintNudge;
+    video.style.transform = `${videoBaseTransform} translateZ(${repaintNudge ? '0.01px' : '0px'})`;
+    schedule();
+  };
+  const schedule = (): void => {
+    const vfc = (video as HTMLVideoElement & {
+      requestVideoFrameCallback?: (cb: () => void) => number;
+    }).requestVideoFrameCallback;
+    if (typeof vfc === 'function') {
+      repaintPumpUsesFrameCallback = true;
+      repaintPumpHandle = vfc.call(video, tick);
+    } else {
+      repaintPumpUsesFrameCallback = false;
+      repaintPumpHandle = window.requestAnimationFrame(tick);
+    }
+  };
+  schedule();
+}
+
+function stopVideoRepaintPump(): void {
+  if (!repaintPumpHandle) return;
+  const cancelVfc = (video as HTMLVideoElement & {
+    cancelVideoFrameCallback?: (handle: number) => void;
+  }).cancelVideoFrameCallback;
+  if (repaintPumpUsesFrameCallback && typeof cancelVfc === 'function') {
+    cancelVfc.call(video, repaintPumpHandle);
+  } else if (!repaintPumpUsesFrameCallback) {
+    window.cancelAnimationFrame(repaintPumpHandle);
+  }
+  repaintPumpHandle = 0;
+  if (videoBaseTransform) video.style.transform = videoBaseTransform;
+}
+
+/**
  * Some TV browsers decode a clip's audio but not its video track (HEVC / 10-bit / high
  * profile). That plays sound over a black screen with no error event at all, so watch for
  * playback that is running without any decoded frame and show the still frame instead.
@@ -597,6 +653,8 @@ function hideVideo(): void {
   video.onerror = null;
   video.classList.remove('visible');
   video.removeAttribute('poster'); // don't flash the previous clip's frame on the next one
+  stopVideoRepaintPump();
+  videoBaseTransform = '';
   playbackBlocked = false;
   videoTrackMissing = false;
   videoBg.classList.remove('visible');
@@ -734,7 +792,7 @@ function handleEvent(event: FrameEvent): void {
       receivedPausedEvent = true;
       paused = event.paused;
       if (showingVideo) {
-        if (paused) video.pause();
+        if (paused) { video.pause(); stopVideoRepaintPump(); }
         else void attemptVideoPlayback();
       } else if (paused) {
         motionAnim?.pause();
@@ -760,6 +818,7 @@ video.addEventListener('loadedmetadata', () => reportVideoPlayback(true));
 // "autoplay blocked" notice from here rather than trying to track every play() path.
 video.addEventListener('playing', () => {
   playbackBlocked = false;
+  startVideoRepaintPump();
   // Don't clobber the "can't decode this format" notice — `playing` re-fires after every
   // buffering stall, which would otherwise wipe it moments after it appears.
   if (videoTrackMissing) return;
