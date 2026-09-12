@@ -65,7 +65,7 @@
       .tile.selected { outline:3px solid var(--accent); outline-offset:1px; }
       .tile .badge-transform { top:auto; bottom:2rem; left:.4rem; }
       #media-transform-tools { margin:.75rem 0; }
-      body.controls-open { overflow:hidden; }
+      body.controls-open { overflow:hidden; overscroll-behavior:none; }
       #controls-toggle {
         display:block; position:fixed; right:1rem; z-index:35;
         /* Clear the iOS home indicator, which otherwise overlaps the button. */
@@ -83,13 +83,16 @@
         position:fixed; left:50%; right:auto; bottom:0; z-index:40; width:min(46rem,100%); max-height:min(86dvh,46rem);
         display:flex; flex-direction:column; padding:.8rem 1rem; padding-bottom:calc(.9rem + env(safe-area-inset-bottom));
         background:var(--glass); border:1px solid var(--line); border-bottom:0; border-radius:1.4rem 1.4rem 0 0;
-        box-shadow:0 -1.5rem 5rem rgba(0,0,0,.52); overflow:hidden; backdrop-filter:blur(26px) saturate(1.15);
+        box-shadow:0 -1.5rem 5rem rgba(0,0,0,.52); overflow-x:hidden; overflow-y:auto; overscroll-behavior-y:contain;
+        -webkit-overflow-scrolling:touch; touch-action:pan-y; scroll-padding-bottom:calc(1rem + env(safe-area-inset-bottom));
+        backdrop-filter:blur(26px) saturate(1.15);
         transform:translate(-50%,calc(100% + 1rem)); transition:transform .24s cubic-bezier(.2,.8,.2,1);
       }
-      #control-sheet::before { content:""; width:2.6rem; height:.28rem; border-radius:999px; background:rgba(255,255,255,.24); align-self:center; margin:0 auto .55rem; }
+      #control-sheet::before { content:""; width:2.6rem; height:.28rem; border-radius:999px; background:rgba(255,255,255,.24); align-self:center; margin:0 auto .55rem; flex-shrink:0; }
+      #control-sheet > * { flex-shrink:0; }
       #control-sheet.open { transform:translate(-50%,0); }
       #control-sheet[hidden] { display:none; }
-      #control-sheet-header { display:flex; align-items:center; justify-content:space-between; gap:.75rem; padding:.05rem 0 .75rem; }
+      #control-sheet-header { position:sticky; top:0; z-index:2; display:flex; align-items:center; justify-content:space-between; gap:.75rem; padding:.4rem 0 .75rem; margin-top:-.35rem; background:var(--glass); }
       #control-sheet-header h2 { margin:0; font-size:1.05rem; letter-spacing:-.01em; }
       #controls-close { width:44px; min-width:44px; height:44px; padding:0; border-radius:999px; background:rgba(255,255,255,.055); font-size:1.05rem; }
       #playback { margin:0 0 .7rem; padding:.45rem; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.45rem; border:1px solid var(--line); border-radius:1rem; background:rgba(255,255,255,.03); }
@@ -142,9 +145,9 @@
       .crop-preview-empty { border:1px dashed var(--line); border-radius:.75rem; padding:1rem; text-align:center; }
       .crop-preview-actions { flex-wrap:wrap; }
       .crop-preview-actions button { min-width:44px; min-height:44px; }
-      /* The sheet is a fixed-height flex column with overflow:hidden at every width, so
-         #settings must scroll at every width too — not only on phones. */
-      #settings { min-height:0; overflow:auto; -webkit-overflow-scrolling:touch; }
+      /* The sheet owns scrolling so playback, face naming, volume and transform
+         controls move as one surface instead of fighting nested scroll areas. */
+      #settings { min-height:auto; overflow:visible; }
       #toasts { position:fixed; left:50%; transform:translateX(-50%); bottom:calc(1rem + env(safe-area-inset-bottom));
         z-index:60; display:flex; flex-direction:column; gap:.5rem; width:min(92vw, 30rem); pointer-events:none; }
       .toast { pointer-events:auto; background:var(--panel); border:1px solid var(--line); border-left:4px solid var(--accent);
@@ -179,7 +182,7 @@
       .faces-person { padding:.65rem; border:1px solid var(--line); border-radius:.8rem; background:rgba(0,0,0,.14); }
       .faces-person-head { display:grid; grid-template-columns:minmax(7rem,1fr) minmax(8rem,1fr) auto; gap:.5rem; align-items:center; }
       .faces-person-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.82rem; }
-      .faces-person input { width:100%; min-width:0; font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--line); border-radius:.55rem; padding:.45rem .55rem; }
+      .faces-person input { width:100%; min-width:0; min-height:44px; font:inherit; font-size:16px; color:var(--fg); background:var(--bg); border:1px solid var(--line); border-radius:.55rem; padding:.45rem .55rem; scroll-margin-block:6rem; }
       .faces-person-save { min-height:40px; padding:.35rem .65rem; }
       .faces-timestamps { display:flex; flex-wrap:wrap; gap:.35rem; margin-top:.5rem; }
       .faces-timestamps button { min-height:34px; padding:.28rem .5rem; border-radius:999px; font-size:.74rem; font-variant-numeric:tabular-nums; }
@@ -268,6 +271,9 @@
         #hint { margin:.5rem 0 .75rem; }
         #playback { grid-template-columns:repeat(4,minmax(0,1fr)); }
         #playback button { padding:.35rem; }
+        #control-sheet { max-height:calc(100dvh - .75rem - env(safe-area-inset-top)); }
+        .faces-person-head { grid-template-columns:minmax(0,1fr) auto; }
+        .faces-person-name { grid-column:1 / -1; }
         #settings { padding-bottom:.25rem; }
         #settings .panel:last-child { margin-bottom:0; }
         .grid { grid-template-columns:repeat(auto-fill,minmax(112px,1fr)); gap:.5rem; }

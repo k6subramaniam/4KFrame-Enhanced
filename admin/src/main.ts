@@ -1167,7 +1167,10 @@ function renderFacesPanel(): void {
 }
 
 async function syncFacesPreview(playback: Playback | null): Promise<void> {
-  renderFacesPanel();
+  // Playback polling runs once a second. Rebuilding #faces-list here destroys the
+  // focused name input on every tick, which makes mobile keyboard input unusable.
+  // Render the panel only when the item/library/faces data changes; polling only
+  // needs to keep the preview time and face overlay synchronized.
   if (!facesEnabled || !facesPreview || activeItem?.kind !== 'video') return;
   const display = playback?.display;
   if (playback && display && display.itemId === activeItem.id) {
