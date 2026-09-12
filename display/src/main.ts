@@ -54,6 +54,8 @@ let tvAudioFallbackActive = false;
 let tvAudioUnlocked = false;
 /** Set when the browser refuses even muted playback, so a later gesture can retry it. */
 let playbackBlocked = false;
+/** Set when playback runs but no video frame ever decodes (audio-only on this TV). */
+let videoTrackMissing = false;
 let videoRetryItemId: string | null = null;
 let videoRetryCount = 0;
 let videoSkipTimer: ReturnType<typeof window.setTimeout> | undefined;
@@ -351,6 +353,7 @@ function displayMediaUrl(file: string): string {
 async function renderVideo(item: MediaItem): Promise<void> {
   showingVideo = true;
   lastVideoItem = item;
+  videoTrackMissing = false; // video→video transitions skip hideVideo()
   if (videoRetryItemId !== item.id) {
     videoRetryItemId = item.id;
     videoRetryCount = 0;
@@ -457,7 +460,13 @@ function layoutVideo(item: MediaItem): void {
   const r = contentRect(viewport.w, viewport.h, config.frameAspect);
   const fillMode = effectiveVideoFit(config.fillMode);
   const zoom = clampN(config.zoom, MIN_ZOOM, MAX_ZOOM);
-  const fitted = fittedMediaSize(item, r.w, r.h, fillMode, zoom);
+  const raw = fittedMediaSize(item, r.w, r.h, fillMode, zoom);
+  // An item with missing/zero stored dimensions makes the fit math produce NaN, which the
+  // browser then ignores — leaving the element unsized. Fall back to filling the frame so
+  // the picture is always laid out somewhere real.
+  const fitted = Number.isFinite(raw.w) && Number.isFinite(raw.h) && raw.w >= 1 && raw.h >= 1
+    ? raw
+    : { w: r.w, h: r.h };
   const pan = smartVideoObjectPosition(item, r, fillMode);
   const overflowX = Math.max(0, fitted.w - r.w);
   const overflowY = Math.max(0, fitted.h - r.h);
@@ -477,11 +486,76 @@ function layoutVideo(item: MediaItem): void {
 
   // Opaque backdrop hides the stale photo behind any bars; blurred poster in blur mode.
   videoBg.classList.add('visible');
+  videoBg.style.filter = '';
+  videoBg.style.transform = '';
+  videoBg.style.backgroundSize = '';
+  videoBg.style.backgroundRepeat = '';
   if (config.fillMode === 'blur' && item.poster) {
     videoBg.style.backgroundImage = `url("${displayMediaUrl(item.poster)}")`;
   } else {
     videoBg.style.backgroundImage = 'none';
   }
+}
+
+/**
+ * On-screen video diagnostics, enabled with `?debug=1`.
+ *
+ * A TV browser has no devtools, so the numbers needed to tell these cases apart have to be
+ * readable from the couch:
+ *   decoded 0x0 while playing  -> the TV cannot decode this video track (audio-only)
+ *   rect 0x0 or off-screen     -> the element is mis-laid-out, not a decode problem
+ *   opacity 0 / visible=false  -> it is playing but hidden
+ */
+function initVideoDiagnostics(): void {
+  if (!new URLSearchParams(window.location.search).has('debug')) return;
+  const panel = document.createElement('pre');
+  panel.id = 'debug-panel';
+  document.body.appendChild(panel);
+
+  const tick = (): void => {
+    const rect = video.getBoundingClientRect();
+    const cs = window.getComputedStyle(video);
+    const err = video.error;
+    panel.textContent = [
+      `file      ${lastVideoItem?.file ?? '(no video showing)'}`,
+      `meta dims ${lastVideoItem?.width ?? '?'} x ${lastVideoItem?.height ?? '?'}`,
+      `DECODED   ${video.videoWidth} x ${video.videoHeight}${video.videoWidth ? '' : '   <-- NO VIDEO TRACK DECODED'}`,
+      `rect      ${Math.round(rect.width)} x ${Math.round(rect.height)} at ${Math.round(rect.left)},${Math.round(rect.top)}`,
+      `css size  ${video.style.width || '(auto)'} x ${video.style.height || '(auto)'}`,
+      `opacity   ${cs.opacity}   visible=${video.classList.contains('visible')}   display=${cs.display}`,
+      `playback  paused=${video.paused} muted=${video.muted} t=${video.currentTime.toFixed(1)} ready=${video.readyState} net=${video.networkState}`,
+      `error     ${err ? `code ${err.code} ${err.message}` : 'none'}`,
+      `poster    ${video.poster ? video.poster.split('/').pop() : '(none)'}`,
+      `config    fill=${config.fillMode} aspect=${config.frameAspect} zoom=${config.zoom} rot=${config.screenRotation}`,
+    ].join('\n');
+  };
+  tick();
+  window.setInterval(tick, 500);
+}
+
+/**
+ * Some TV browsers decode a clip's audio but not its video track (HEVC / 10-bit / high
+ * profile). That plays sound over a black screen with no error event at all, so watch for
+ * playback that is running without any decoded frame and show the still frame instead.
+ */
+function checkVideoTrackDecoding(): void {
+  if (!showingVideo || !lastVideoItem || video.paused) return;
+  if (video.videoWidth > 0) { videoTrackMissing = false; return; }
+  // Give the decoder a moment before declaring the track unusable.
+  if (video.currentTime < 0.6 || videoTrackMissing) return;
+
+  videoTrackMissing = true;
+  const posterFile = lastVideoItem.poster ?? lastVideoItem.thumb;
+  console.warn(`No decoded video frames for ${lastVideoItem.file} — audio-only playback.`);
+  if (posterFile) {
+    // Paint the poster full-frame (unblurred) so the TV shows the picture, not black.
+    videoBg.style.filter = 'none';
+    videoBg.style.transform = 'none';
+    videoBg.style.backgroundSize = 'contain';
+    videoBg.style.backgroundRepeat = 'no-repeat';
+    videoBg.style.backgroundImage = `url("${displayMediaUrl(posterFile)}")`;
+  }
+  setStatus('This TV can’t decode that video format — showing the still frame.');
 }
 
 function hideVideo(): void {
@@ -495,6 +569,7 @@ function hideVideo(): void {
   video.classList.remove('visible');
   video.removeAttribute('poster'); // don't flash the previous clip's frame on the next one
   playbackBlocked = false;
+  videoTrackMissing = false;
   videoBg.classList.remove('visible');
   video.pause();
   video.removeAttribute('src');
@@ -654,12 +729,15 @@ video.addEventListener('loadedmetadata', () => reportVideoPlayback(true));
 // "autoplay blocked" notice from here rather than trying to track every play() path.
 video.addEventListener('playing', () => {
   playbackBlocked = false;
-  // Unconditional: statusText() is '' unless paused/holding, so this both clears a stale
-  // "autoplay blocked" notice and restores the right badge, without tracking who set it.
+  // Don't clobber the "can't decode this format" notice — `playing` re-fires after every
+  // buffering stall, which would otherwise wipe it moments after it appears.
+  if (videoTrackMissing) return;
+  // Unconditional otherwise: statusText() is '' unless paused/holding, so this both clears
+  // a stale "autoplay blocked" notice and restores the right badge.
   setStatus(statusText());
 });
 video.addEventListener('durationchange', () => reportVideoPlayback(true));
-video.addEventListener('timeupdate', () => reportVideoPlayback());
+video.addEventListener('timeupdate', () => { reportVideoPlayback(); checkVideoTrackDecoding(); });
 video.addEventListener('seeked', () => reportVideoPlayback(true));
 
 /**
@@ -1452,4 +1530,5 @@ window.addEventListener('pointerdown', unlockTvAudioFromUserGesture, { capture: 
 window.addEventListener('touchstart', unlockTvAudioFromUserGesture, { capture: true, passive: true });
 window.addEventListener('keydown', unlockTvAudioFromUserGesture, { capture: true });
 initCastReceiver(video, sendControl);
+initVideoDiagnostics();
 connect();
