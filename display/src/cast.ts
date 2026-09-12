@@ -1,16 +1,5 @@
 /**
  * Chromecast Custom Web Receiver bridge.
- *
- * The display page doubles as a Cast receiver. When loaded on a Chromecast the CAF
- * receiver framework is present (injected on Chromecast user-agents by index.html); this
- * starts the receiver and listens on {@link CAST_NAMESPACE}. Incoming {@link ControlMessage}s
- * are forwarded onto the same backend WebSocket the display already uses, so a Cast sender
- * drives the frame through the identical control protocol as the admin app.
- *
- * In a normal browser the framework is absent and this is a no-op.
- *
- * To go live, register an application id at the Google Cast SDK Developer Console and
- * point it at the deployed display URL (see `packaging/cast/`).
  */
 
 import { CAST_NAMESPACE, isSeekOffsetSec, type ControlMessage } from '@4kframe/shared';
@@ -86,11 +75,13 @@ declare global {
 }
 
 const CAST_VIDEO_LAYER_STYLE_ID = 'cast-video-layer-fix';
+const CAST_REPAINT_HEARTBEAT_ID = 'cast-repaint-heartbeat';
 
 /**
- * Keep Cast video on the simplest possible hardware-overlay-friendly surface. Chromecast
- * devices can decode frames successfully yet paint only black when the video element is
- * transformed or when an opaque WebGL/backdrop layer sits over the hardware plane.
+ * Keep Cast video on a simple hardware-overlay-friendly surface and keep Chromium's
+ * compositor awake. On the affected TV, ?debug=1 fixes playback because the diagnostics
+ * panel changes text and reads layout twice a second. Reproduce that paint/layout activity
+ * with a one-pixel, effectively invisible heartbeat instead of requiring the debug overlay.
  */
 function stabilizeCastVideoLayer(mediaElement: HTMLMediaElement): void {
   const video = mediaElement as HTMLVideoElement;
@@ -134,9 +125,59 @@ function stabilizeCastVideoLayer(mediaElement: HTMLMediaElement): void {
         opacity: 1 !important;
         z-index: 13 !important;
       }
+      #${CAST_REPAINT_HEARTBEAT_ID} {
+        position: fixed !important;
+        right: 0 !important;
+        bottom: 0 !important;
+        width: 1px !important;
+        height: 1px !important;
+        min-width: 1px !important;
+        min-height: 1px !important;
+        overflow: hidden !important;
+        pointer-events: none !important;
+        z-index: 2147483647 !important;
+        opacity: .01 !important;
+        contain: strict !important;
+      }
     `;
     document.head.appendChild(style);
   }
+
+  let heartbeat = document.getElementById(CAST_REPAINT_HEARTBEAT_ID) as HTMLElement | null;
+  if (!heartbeat) {
+    heartbeat = document.createElement('span');
+    heartbeat.id = CAST_REPAINT_HEARTBEAT_ID;
+    heartbeat.setAttribute('aria-hidden', 'true');
+    heartbeat.textContent = '\u200b';
+    document.body.appendChild(heartbeat);
+  }
+
+  let heartbeatTimer: ReturnType<typeof window.setInterval> | undefined;
+  let heartbeatPhase = false;
+
+  const repaintPulse = (): void => {
+    if (!heartbeat || !mediaElement.classList.contains('visible')) return;
+    heartbeatPhase = !heartbeatPhase;
+    // Match the useful part of the debug panel: mutate painted DOM, then synchronously read
+    // layout. Do not transform or otherwise dirty the video element itself.
+    heartbeat.textContent = heartbeatPhase ? '\u200b' : '\u2060';
+    heartbeat.style.backgroundColor = heartbeatPhase
+      ? 'rgba(0,0,0,0.01)'
+      : 'rgba(1,1,1,0.01)';
+    void heartbeat.getBoundingClientRect();
+  };
+
+  const startHeartbeat = (): void => {
+    if (heartbeatTimer !== undefined) return;
+    repaintPulse();
+    heartbeatTimer = window.setInterval(repaintPulse, 250);
+  };
+
+  const stopHeartbeat = (): void => {
+    if (heartbeatTimer === undefined) return;
+    window.clearInterval(heartbeatTimer);
+    heartbeatTimer = undefined;
+  };
 
   const sync = (): void => {
     const visible = mediaElement.classList.contains('visible');
@@ -154,11 +195,13 @@ function stabilizeCastVideoLayer(mediaElement: HTMLMediaElement): void {
       canvas?.style.setProperty('visibility', 'hidden', 'important');
       if (!missingDecodedFrames) backdrop?.style.setProperty('visibility', 'hidden', 'important');
       else backdrop?.style.removeProperty('visibility');
+      startHeartbeat();
     } else {
       document.documentElement.style.removeProperty('background');
       document.body.style.removeProperty('background');
       canvas?.style.removeProperty('visibility');
       backdrop?.style.removeProperty('visibility');
+      stopHeartbeat();
     }
   };
 
@@ -178,11 +221,6 @@ function mediaContentType(url: string): string {
   return 'video/mp4';
 }
 
-/**
- * The slideshow historically assigned video.src directly. On Chromecast that leaves the
- * WebView in charge of decoding/compositing; on some devices the audio plays while decoded
- * video frames never reach the panel. Route each source through CAF PlayerManager instead.
- */
 function routeVideoSourcesThroughCaf(
   mediaElement: HTMLMediaElement,
   playerManager: CafPlayerManager,
@@ -228,7 +266,6 @@ function routeVideoSourcesThroughCaf(
   route();
 }
 
-/** Start the Cast receiver and let CAF own video playback on Cast hardware. */
 export function initCastReceiver(
   mediaElement: HTMLMediaElement,
   forward: (msg: ControlMessage) => void,
@@ -253,8 +290,6 @@ export function initCastReceiver(
       });
       ctx.start({
         mediaElement,
-        // Intentionally leave MPL/Shaka/native player loading enabled. CAF's managed player
-        // is the reliable Cast path; skipPlayersLoad=true was our old audio-black path.
         statusText: 'Ready to display photos and videos',
       });
     } catch (error) {
@@ -264,7 +299,6 @@ export function initCastReceiver(
   tryStart();
 }
 
-/** Validate an untrusted Cast payload into a known {@link ControlMessage}. */
 export function parseControl(data: unknown): ControlMessage | null {
   const raw = typeof data === 'string' ? safeParse(data) : data;
   if (!raw || typeof raw !== 'object') return null;
