@@ -109,6 +109,25 @@ function logicalViewport(): { w: number; h: number } {
 
 function applyScreenTransform(): void {
   const quarterTurn = config.screenRotation === 90 || config.screenRotation === 270;
+  const identity = config.screenRotation === 0
+    && !config.screenFlipHorizontal
+    && !config.screenFlipVertical;
+
+  if (identity) {
+    // No rotation or flip: leave #app on its plain `inset: 0` CSS with no transform at all.
+    // A transform — even an identity one — forces a compositing context, and TV browsers
+    // commonly fail to composite hardware-decoded video inside a transformed ancestor
+    // (the audio plays but no frame is ever painted).
+    app.style.inset = '';
+    app.style.left = '';
+    app.style.top = '';
+    app.style.width = '';
+    app.style.height = '';
+    app.style.transformOrigin = '';
+    app.style.transform = '';
+    return;
+  }
+
   app.style.inset = 'auto';
   app.style.left = '50%';
   app.style.top = '50%';
@@ -490,9 +509,16 @@ function layoutVideo(item: MediaItem): void {
   videoBg.style.transform = '';
   videoBg.style.backgroundSize = '';
   videoBg.style.backgroundRepeat = '';
+  // Some TVs composite video on a hardware overlay *beneath* the page, visible only where
+  // the page is transparent — an opaque layer over it yields sound with a black picture.
+  // Hide the GL canvas and drop the black backdrop while a video is up; the body is
+  // already black, so letterbox bars look identical either way.
+  canvas.style.visibility = 'hidden';
   if (config.fillMode === 'blur' && item.poster) {
+    videoBg.style.backgroundColor = '';
     videoBg.style.backgroundImage = `url("${displayMediaUrl(item.poster)}")`;
   } else {
+    videoBg.style.backgroundColor = 'transparent';
     videoBg.style.backgroundImage = 'none';
   }
 }
@@ -527,6 +553,9 @@ function initVideoDiagnostics(): void {
       `error     ${err ? `code ${err.code} ${err.message}` : 'none'}`,
       `poster    ${video.poster ? video.poster.split('/').pop() : '(none)'}`,
       `config    fill=${config.fillMode} aspect=${config.frameAspect} zoom=${config.zoom} rot=${config.screenRotation}`,
+      `compositing app-transform=${window.getComputedStyle(app).transform === 'none' ? 'none' : 'SET'}`
+        + ` canvas=${window.getComputedStyle(canvas).visibility}`
+        + ` backdrop=${window.getComputedStyle(videoBg).backgroundColor}`,
     ].join('\n');
   };
   tick();
@@ -571,6 +600,8 @@ function hideVideo(): void {
   playbackBlocked = false;
   videoTrackMissing = false;
   videoBg.classList.remove('visible');
+  videoBg.style.backgroundColor = '';
+  canvas.style.visibility = ''; // photos render through the GL canvas again
   video.pause();
   video.removeAttribute('src');
   video.load();
