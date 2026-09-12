@@ -70,8 +70,7 @@ jobs:
               """        #playback button { padding:.35rem; }\n        #control-sheet { max-height:calc(100dvh - .75rem - env(safe-area-inset-top)); }\n        .faces-person-head { grid-template-columns:minmax(0,1fr) auto; }\n        .faces-person-name { grid-column:1 / -1; }\n        #settings { padding-bottom:.25rem; }\n""",
           )
 
-          # Restore the normal CI workflow in the hotfix commit so this temporary
-          # self-applying workflow does not remain in the repository.
+          # Restore the normal CI workflow in the final hotfix commit.
           Path(".github/workflows/ci.yml").write_text('''name: CI\n\non:\n  push:\n    branches: ["**"]\n  pull_request:\n\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 22\n          cache: npm\n      - run: npm install\n      # Shared must be built first so server/display/admin can resolve its types.\n      - run: npm run build:shared\n      - run: npm run typecheck\n      - run: npm test\n      - run: npm run build\n''')
           PY
       - uses: actions/setup-node@v4
@@ -81,7 +80,8 @@ jobs:
       - run: npm install
       - run: npm run build:shared
       - run: npm run typecheck
-      - run: npm test
+      - run: npm run test --workspace admin
+      - run: npm run build --workspace admin
       - run: npm run build
       - name: Commit verified hotfix
         shell: bash
