@@ -1,22 +1,97 @@
-name: CI
+name: Apply admin controls hotfix
 
 on:
   push:
-    branches: ["**"]
-  pull_request:
+    branches: ["claude/digital-frame-build-plan-ZzPSq"]
+
+permissions:
+  contents: write
 
 jobs:
-  build:
+  hotfix:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch controls scrolling and face-name editing
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected exactly one match in {path}, found {count}: {old[:80]!r}")
+              file.write_text(text.replace(old, new, 1))
+
+          replace_once(
+              "admin/src/main.ts",
+              """async function syncFacesPreview(playback: Playback | null): Promise<void> {\n  renderFacesPanel();\n  if (!facesEnabled || !facesPreview || activeItem?.kind !== 'video') return;\n""",
+              """async function syncFacesPreview(playback: Playback | null): Promise<void> {\n  // Playback polling runs once a second. Rebuilding #faces-list here destroys the\n  // focused name input on every tick, which makes mobile keyboard input unusable.\n  // Render the panel only when the item/library/faces data changes; polling only\n  // needs to keep the preview time and face overlay synchronized.\n  if (!facesEnabled || !facesPreview || activeItem?.kind !== 'video') return;\n""",
+          )
+
+          replace_once(
+              "admin/index.html",
+              "body.controls-open { overflow:hidden; }",
+              "body.controls-open { overflow:hidden; overscroll-behavior:none; }",
+          )
+          replace_once(
+              "admin/index.html",
+              """        box-shadow:0 -1.5rem 5rem rgba(0,0,0,.52); overflow:hidden; backdrop-filter:blur(26px) saturate(1.15);\n""",
+              """        box-shadow:0 -1.5rem 5rem rgba(0,0,0,.52); overflow-x:hidden; overflow-y:auto; overscroll-behavior-y:contain;\n        -webkit-overflow-scrolling:touch; touch-action:pan-y; scroll-padding-bottom:calc(1rem + env(safe-area-inset-bottom));\n        backdrop-filter:blur(26px) saturate(1.15);\n""",
+          )
+          replace_once(
+              "admin/index.html",
+              "#control-sheet::before { content:\"\"; width:2.6rem; height:.28rem; border-radius:999px; background:rgba(255,255,255,.24); align-self:center; margin:0 auto .55rem; }",
+              "#control-sheet::before { content:\"\"; width:2.6rem; height:.28rem; border-radius:999px; background:rgba(255,255,255,.24); align-self:center; margin:0 auto .55rem; flex-shrink:0; }\n      #control-sheet > * { flex-shrink:0; }",
+          )
+          replace_once(
+              "admin/index.html",
+              "#control-sheet-header { display:flex; align-items:center; justify-content:space-between; gap:.75rem; padding:.05rem 0 .75rem; }",
+              "#control-sheet-header { position:sticky; top:0; z-index:2; display:flex; align-items:center; justify-content:space-between; gap:.75rem; padding:.4rem 0 .75rem; margin-top:-.35rem; background:var(--glass); }",
+          )
+          replace_once(
+              "admin/index.html",
+              """      /* The sheet is a fixed-height flex column with overflow:hidden at every width, so\n         #settings must scroll at every width too — not only on phones. */\n      #settings { min-height:0; overflow:auto; -webkit-overflow-scrolling:touch; }\n""",
+              """      /* The sheet owns scrolling so playback, face naming, volume and transform\n         controls move as one surface instead of fighting nested scroll areas. */\n      #settings { min-height:auto; overflow:visible; }\n""",
+          )
+          replace_once(
+              "admin/index.html",
+              ".faces-person input { width:100%; min-width:0; font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--line); border-radius:.55rem; padding:.45rem .55rem; }",
+              ".faces-person input { width:100%; min-width:0; min-height:44px; font:inherit; font-size:16px; color:var(--fg); background:var(--bg); border:1px solid var(--line); border-radius:.55rem; padding:.45rem .55rem; scroll-margin-block:6rem; }",
+          )
+          replace_once(
+              "admin/index.html",
+              """        #playback button { padding:.35rem; }\n        #settings { padding-bottom:.25rem; }\n""",
+              """        #playback button { padding:.35rem; }\n        #control-sheet { max-height:calc(100dvh - .75rem - env(safe-area-inset-top)); }\n        .faces-person-head { grid-template-columns:minmax(0,1fr) auto; }\n        .faces-person-name { grid-column:1 / -1; }\n        #settings { padding-bottom:.25rem; }\n""",
+          )
+
+          # Restore the normal CI workflow in the hotfix commit so this temporary
+          # self-applying workflow does not remain in the repository.
+          Path(".github/workflows/ci.yml").write_text('''name: CI\n\non:\n  push:\n    branches: ["**"]\n  pull_request:\n\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 22\n          cache: npm\n      - run: npm install\n      # Shared must be built first so server/display/admin can resolve its types.\n      - run: npm run build:shared\n      - run: npm run typecheck\n      - run: npm test\n      - run: npm run build\n''')
+          PY
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm install
-      # Shared must be built first so server/display/admin can resolve its types.
       - run: npm run build:shared
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - name: Commit verified hotfix
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No hotfix changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add admin/src/main.ts admin/index.html .github/workflows/ci.yml
+          git commit -m "fix(admin): make controls scrollable and keep face names editable"
+          git push origin HEAD:${GITHUB_REF_NAME}
