@@ -23,7 +23,7 @@ import {
   normalizeTransform,
   orientedDimensions,
 } from '@4kframe/shared';
-import { GLRenderer } from './gl.js';
+import { GLRenderer, type GLRect, type GLVideoOrientation } from './gl.js';
 import { compose, contentRect } from './compositor.js';
 import { applyOverlays, setCaption, setStatus } from './overlays.js';
 import { initCastReceiver } from './cast.js';
@@ -33,6 +33,7 @@ import { attachMediaGestures } from './gestures.js';
 const canvas = document.getElementById('gl') as HTMLCanvasElement;
 const video = document.getElementById('video') as HTMLVideoElement;
 const videoBg = document.getElementById('video-bg') as HTMLElement;
+const paintTick = document.getElementById('paint-tick') as HTMLElement | null;
 const renderer = new GLRenderer(canvas);
 const app = document.getElementById('app') as HTMLElement;
 
@@ -56,11 +57,21 @@ let tvAudioUnlocked = false;
 let playbackBlocked = false;
 /** Set when playback runs but no video frame ever decodes (audio-only on this TV). */
 let videoTrackMissing = false;
-/** Base transform for the active video, so the repaint pump can append to it. */
-let videoBaseTransform = '';
-let repaintPumpHandle = 0;
-let repaintPumpUsesFrameCallback = false;
-let repaintNudge = false;
+/** Where the active clip's picture goes on the GL canvas, and how it is oriented. */
+let glVideoDest: GLRect | null = null;
+let glVideoClip: GLRect | null = null;
+let glVideoOrientation: GLVideoOrientation = { rotation: 0, flipHorizontal: false, flipVertical: false };
+/** False once this engine has proven it cannot sample video frames into a texture. */
+let glVideoSupported = true;
+/** Whether the GL path is carrying the picture for the clip on screen now. */
+let glVideoActive = false;
+let glVideoBlankSamples = 0;
+let glVideoSamplesTaken = 0;
+let glVideoNextSampleAt = 0;
+let videoFramePumpHandle = 0;
+let videoFramePumpUsesFrameCallback = false;
+let paintTickTimer: ReturnType<typeof window.setInterval> | undefined;
+let paintTickFlip = false;
 let videoRetryItemId: string | null = null;
 let videoRetryCount = 0;
 let videoSkipTimer: ReturnType<typeof window.setTimeout> | undefined;
@@ -384,6 +395,12 @@ async function renderVideo(item: MediaItem): Promise<void> {
   }
   window.clearTimeout(videoSkipTimer);
   videoSkipTimer = undefined;
+  // Each clip gets its own go at the GL path, and its own fresh black-output checks.
+  glVideoActive = glVideoSupported;
+  glVideoBlankSamples = 0;
+  glVideoSamplesTaken = 0;
+  glVideoNextSampleAt = 0;
+  startPaintTick();
   // Establish the scoped media cookie before assigning src. Chromecast's media stack
   // performs separate HEAD/Range requests that otherwise lose an admin/query handoff.
   await ensureDisplayMediaSession();
@@ -479,6 +496,40 @@ function smartVideoObjectPosition(item: MediaItem, r: { w: number; h: number }, 
   });
 }
 
+/**
+ * Decide what the GL canvas does while a video is on screen.
+ *
+ * Preferred: the canvas carries the picture, lifted above #video-bg and the <video>
+ * element but below the clock/caption overlays (z-index 16). Some TV browsers never
+ * composite an in-page <video> onto the panel — audio plays over a black screen — and
+ * this canvas is the one surface that provably reaches it, since every photo arrives
+ * that way.
+ *
+ * Fallback, once this engine has shown it cannot read video frames into a texture: hide
+ * the canvas so the page stays transparent over the hardware video overlay, which is
+ * what TVs that composite video *beneath* the page need.
+ */
+/**
+ * Whether the Cast receiver has taken the video layer over (see stabilizeCastVideoLayer in
+ * cast.ts). On Chromecast hardware CAF owns playback and pins the <video> element over a
+ * force-hidden canvas with `!important`, so the GL path cannot win and must not waste a
+ * texture upload per frame trying.
+ */
+function castReceiverOwnsVideoLayer(): boolean {
+  return document.body.classList.contains('cast-video-active');
+}
+
+function applyVideoCanvasMode(): void {
+  if (glVideoActive && castReceiverOwnsVideoLayer()) glVideoActive = false;
+  if (glVideoActive) {
+    canvas.style.visibility = '';
+    canvas.style.zIndex = '14';
+  } else {
+    canvas.style.zIndex = '';
+    canvas.style.visibility = 'hidden';
+  }
+}
+
 function layoutVideo(item: MediaItem): void {
   const viewport = logicalViewport();
   const r = contentRect(viewport.w, viewport.h, config.frameAspect);
@@ -503,11 +554,18 @@ function layoutVideo(item: MediaItem): void {
   video.style.top = `${dy + fitted.h / 2}px`;
   video.style.width = `${quarterTurn ? fitted.h : fitted.w}px`;
   video.style.height = `${quarterTurn ? fitted.w : fitted.h}px`;
-  videoBaseTransform = `translate(-50%, -50%) rotate(${transform.rotation}deg) scale(${transform.flipHorizontal ? -1 : 1}, ${transform.flipVertical ? -1 : 1})`;
-  video.style.transform = videoBaseTransform;
+  video.style.transform = `translate(-50%, -50%) rotate(${transform.rotation}deg) scale(${transform.flipHorizontal ? -1 : 1}, ${transform.flipVertical ? -1 : 1})`;
   video.style.objectFit = 'fill';
   video.style.objectPosition = '50% 50%';
   video.style.clipPath = '';
+
+  // The same geometry for the GL path. `fitted` is already in on-screen orientation (it
+  // comes from orientedDimensions), so unlike the element above there is nothing to swap —
+  // drawVideo turns the picture inside this rect via the UV mapping.
+  glVideoDest = { x: dx, y: dy, w: fitted.w, h: fitted.h };
+  glVideoClip = { x: r.x, y: r.y, w: r.w, h: r.h };
+  glVideoOrientation = transform;
+  applyVideoCanvasMode();
 
   // Opaque backdrop hides the stale photo behind any bars; blurred poster in blur mode.
   videoBg.classList.add('visible');
@@ -515,11 +573,6 @@ function layoutVideo(item: MediaItem): void {
   videoBg.style.transform = '';
   videoBg.style.backgroundSize = '';
   videoBg.style.backgroundRepeat = '';
-  // Some TVs composite video on a hardware overlay *beneath* the page, visible only where
-  // the page is transparent — an opaque layer over it yields sound with a black picture.
-  // Hide the GL canvas and drop the black backdrop while a video is up; the body is
-  // already black, so letterbox bars look identical either way.
-  canvas.style.visibility = 'hidden';
   if (config.fillMode === 'blur' && item.poster) {
     videoBg.style.backgroundColor = '';
     videoBg.style.backgroundImage = `url("${displayMediaUrl(item.poster)}")`;
@@ -562,6 +615,11 @@ function initVideoDiagnostics(): void {
       `compositing app-transform=${window.getComputedStyle(app).transform === 'none' ? 'none' : 'SET'}`
         + ` canvas=${window.getComputedStyle(canvas).visibility}`
         + ` backdrop=${window.getComputedStyle(videoBg).backgroundColor}`,
+      `picture   path=${glVideoActive ? 'gl-canvas' : 'video-element'}`
+        + ` gl=${glVideoSupported ? 'ok' : 'UNUSABLE'}`
+        + ` blank=${glVideoBlankSamples}/${glVideoSamplesTaken}`
+        + ` pump=${videoFramePumpHandle ? 'on' : 'off'}`
+        + ` tick=${paintTickTimer === undefined ? 'off' : 'on'}`,
     ].join('\n');
   };
   tick();
@@ -569,24 +627,92 @@ function initVideoDiagnostics(): void {
 }
 
 /**
- * Keep the compositor producing frames while a video is on screen.
+ * Repaint real page content while a video is on screen.
  *
- * Some TV browsers only composite the hardware video overlay when the page itself paints.
- * A slideshow parked on a video paints nothing, so the picture stays black while the audio
- * plays — which is exactly why `?debug=1` "fixed" it: that panel rewrote its text twice a
- * second and incidentally drove the repaints.
+ * This is the one intervention known to work on the reporting TV: with `?debug=1` the
+ * picture appears, and the only thing that flag adds is a panel that rewrites its text and
+ * reads layout twice a second. A slideshow parked on a video otherwise paints nothing at
+ * all — no transition, no Ken Burns — and the panel is the page's only source of repaints.
  *
- * The nudge is a sub-pixel translateZ on the video's own layer: visually identical (there
- * is no perspective, so Z has no effect), but it marks the layer dirty so a frame is
- * produced. Driven off requestVideoFrameCallback where available so it ticks with the
- * video's own cadence rather than the display refresh rate.
+ * `d26dc90` tried to reproduce that by alternating a sub-pixel translateZ on the video's
+ * transform, and it did not work: a transform is a compositor-only property, applied by
+ * updating a layer matrix without re-rastering anything. Mutating text and forcing a style
+ * flush is a content repaint, which is a different thing entirely. So do exactly what the
+ * panel does, on an element that is always present.
  */
-function startVideoRepaintPump(): void {
-  stopVideoRepaintPump();
+function startPaintTick(): void {
+  if (paintTickTimer || !paintTick) return;
+  const el = paintTick;
+  paintTickTimer = window.setInterval(() => {
+    paintTickFlip = !paintTickFlip;
+    el.textContent = paintTickFlip ? '.' : '·';
+    // Force the style/layout flush the diagnostics panel was incidentally forcing.
+    void el.getBoundingClientRect().width;
+    void window.getComputedStyle(el).opacity;
+  }, 250);
+}
+
+function stopPaintTick(): void {
+  if (paintTickTimer !== undefined) window.clearInterval(paintTickTimer);
+  paintTickTimer = undefined;
+  if (paintTick) paintTick.textContent = '';
+}
+
+/**
+ * Give up on the GL path for the rest of the session and fall back to the <video> element.
+ *
+ * Reached when texImage2D refuses the video or yields nothing but black — TV decoders that
+ * hand frames straight to the compositor on a protected path do the latter silently.
+ */
+function disableGlVideo(reason: unknown): void {
+  if (!glVideoSupported && !glVideoActive) return;
+  console.warn('Cannot read video frames into WebGL; falling back to the <video> element.', reason);
+  glVideoSupported = false;
+  glVideoActive = false;
+  applyVideoCanvasMode();
+}
+
+/** Blit the current video frame onto the GL canvas, with a few black-output spot checks. */
+function drawGlVideoFrame(): void {
+  // Re-checked per frame: the Cast receiver claims the layer asynchronously, so it can
+  // take over after a clip has already started on the GL path.
+  if (glVideoActive && castReceiverOwnsVideoLayer()) applyVideoCanvasMode();
+  if (!glVideoActive || !glVideoDest || !glVideoClip || video.videoWidth === 0) return;
+  try {
+    renderer.drawVideo(video, glVideoDest, glVideoClip, glVideoOrientation);
+  } catch (error) {
+    disableGlVideo(error);
+    return;
+  }
+
+  // A clip can legitimately open on black, so sample a few times a second apart and only
+  // conclude the frames are unreadable if every sample of every check came back black.
+  if (glVideoSamplesTaken >= 3 || video.currentTime < 0.5) return;
+  const now = performance.now();
+  if (now < glVideoNextSampleAt) return;
+  glVideoNextSampleAt = now + 1000;
+  glVideoSamplesTaken += 1;
+  if (!renderer.lastVideoDrawIsBlank()) {
+    glVideoSamplesTaken = 3; // a real picture: stop paying for readPixels
+    return;
+  }
+  glVideoBlankSamples += 1;
+  if (glVideoBlankSamples >= 3) disableGlVideo('every sampled pixel was black');
+}
+
+/**
+ * Drive the GL video blit at the clip's own frame cadence.
+ *
+ * requestVideoFrameCallback fires once per decoded frame (24-30Hz for real footage) rather
+ * than at the display refresh rate, so this costs one texture upload per frame the TV was
+ * going to show anyway. Paused playback stops the loop and leaves the last frame standing
+ * on the canvas.
+ */
+function startVideoFramePump(): void {
+  stopVideoFramePump();
   const tick = (): void => {
-    if (!showingVideo || paused) { repaintPumpHandle = 0; return; }
-    repaintNudge = !repaintNudge;
-    video.style.transform = `${videoBaseTransform} translateZ(${repaintNudge ? '0.01px' : '0px'})`;
+    if (!showingVideo || paused) { videoFramePumpHandle = 0; return; }
+    drawGlVideoFrame();
     schedule();
   };
   const schedule = (): void => {
@@ -594,28 +720,27 @@ function startVideoRepaintPump(): void {
       requestVideoFrameCallback?: (cb: () => void) => number;
     }).requestVideoFrameCallback;
     if (typeof vfc === 'function') {
-      repaintPumpUsesFrameCallback = true;
-      repaintPumpHandle = vfc.call(video, tick);
+      videoFramePumpUsesFrameCallback = true;
+      videoFramePumpHandle = vfc.call(video, tick);
     } else {
-      repaintPumpUsesFrameCallback = false;
-      repaintPumpHandle = window.requestAnimationFrame(tick);
+      videoFramePumpUsesFrameCallback = false;
+      videoFramePumpHandle = window.requestAnimationFrame(tick);
     }
   };
   schedule();
 }
 
-function stopVideoRepaintPump(): void {
-  if (!repaintPumpHandle) return;
+function stopVideoFramePump(): void {
+  if (!videoFramePumpHandle) return;
   const cancelVfc = (video as HTMLVideoElement & {
     cancelVideoFrameCallback?: (handle: number) => void;
   }).cancelVideoFrameCallback;
-  if (repaintPumpUsesFrameCallback && typeof cancelVfc === 'function') {
-    cancelVfc.call(video, repaintPumpHandle);
-  } else if (!repaintPumpUsesFrameCallback) {
-    window.cancelAnimationFrame(repaintPumpHandle);
+  if (videoFramePumpUsesFrameCallback && typeof cancelVfc === 'function') {
+    cancelVfc.call(video, videoFramePumpHandle);
+  } else if (!videoFramePumpUsesFrameCallback) {
+    window.cancelAnimationFrame(videoFramePumpHandle);
   }
-  repaintPumpHandle = 0;
-  if (videoBaseTransform) video.style.transform = videoBaseTransform;
+  videoFramePumpHandle = 0;
 }
 
 /**
@@ -653,13 +778,18 @@ function hideVideo(): void {
   video.onerror = null;
   video.classList.remove('visible');
   video.removeAttribute('poster'); // don't flash the previous clip's frame on the next one
-  stopVideoRepaintPump();
-  videoBaseTransform = '';
+  stopVideoFramePump();
+  stopPaintTick();
+  glVideoActive = false;
+  glVideoDest = null;
+  glVideoClip = null;
   playbackBlocked = false;
   videoTrackMissing = false;
   videoBg.classList.remove('visible');
   videoBg.style.backgroundColor = '';
-  canvas.style.visibility = ''; // photos render through the GL canvas again
+  // Photos render through the GL canvas again, back in normal stacking order.
+  canvas.style.visibility = '';
+  canvas.style.zIndex = '';
   video.pause();
   video.removeAttribute('src');
   video.load();
@@ -792,7 +922,7 @@ function handleEvent(event: FrameEvent): void {
       receivedPausedEvent = true;
       paused = event.paused;
       if (showingVideo) {
-        if (paused) { video.pause(); stopVideoRepaintPump(); }
+        if (paused) { video.pause(); stopVideoFramePump(); }
         else void attemptVideoPlayback();
       } else if (paused) {
         motionAnim?.pause();
@@ -818,7 +948,7 @@ video.addEventListener('loadedmetadata', () => reportVideoPlayback(true));
 // "autoplay blocked" notice from here rather than trying to track every play() path.
 video.addEventListener('playing', () => {
   playbackBlocked = false;
-  startVideoRepaintPump();
+  startVideoFramePump();
   // Don't clobber the "can't decode this format" notice — `playing` re-fires after every
   // buffering stall, which would otherwise wipe it moments after it appears.
   if (videoTrackMissing) return;

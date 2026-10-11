@@ -50,6 +50,22 @@
         padding: 1.2vh 1.4vw; background: rgba(0,0,0,0.82); color: #7CFC9B;
         font: 400 1.9vh/1.45 ui-monospace, Menlo, Consolas, monospace;
         white-space: pre; border-radius: 0.8vh; pointer-events: none; }
+      /* Repaint pump target (see the markup). It has to genuinely rasterise, so it can't
+         be display:none, visibility:hidden or opacity:0 — instead it is a 2px near-black
+         speck in the very corner of a black screen, which TV overscan eats anyway. Above
+         the overlays so nothing can occlude it. */
+      #paint-tick {
+        position: fixed;
+        right: 0;
+        bottom: 0;
+        z-index: 17;
+        width: 2px;
+        height: 2px;
+        overflow: hidden;
+        font: 2px/2px monospace;
+        color: #050505;
+        pointer-events: none;
+      }
       video {
         position: absolute;
         inset: 0;
@@ -469,6 +485,10 @@
       <div id="caption" class="overlay hidden"></div>
       <div id="qr" class="overlay hidden"><img alt="Scan to manage" /></div>
       <div id="status" class="overlay hidden"></div>
+      <!-- Repaint pump target. Some TV browsers only put a video on the panel when the
+           page itself paints, and a slideshow parked on a video paints nothing; main.ts
+           rewrites this element's text four times a second while a video is up. -->
+      <span id="paint-tick" aria-hidden="true"></span>
 
       <section id="public-controls" aria-label="Public slideshow controls">
         <div id="public-control-dock">

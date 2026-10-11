@@ -17,18 +17,58 @@ const { outputText: code } = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
 });
 
-test('starts CAF with the active page media element and HTML playback options', async () => {
+/**
+ * Enough of a DOM for the receiver to run under node:test. The receiver now stabilizes the
+ * page's video layer and routes sources through CAF, so it touches document, MutationObserver
+ * and the media element — none of which this environment provides.
+ */
+function stubDom() {
+  const style = () => {
+    const props = new Map();
+    return { setProperty: (k, v) => props.set(k, v), removeProperty: (k) => props.delete(k), props };
+  };
+  const el = (id) => ({ id, style: style(), classList: { contains: () => false, toggle: () => false }, appendChild: () => {} });
+  const byId = new Map([['gl', el('gl')], ['video-bg', el('video-bg')]]);
+  globalThis.document = {
+    getElementById: (id) => byId.get(id) ?? null,
+    createElement: (tag) => ({ tag, style: style(), classList: { add: () => {}, toggle: () => false } }),
+    head: { appendChild: (node) => byId.set(node.id, node) },
+    body: { ...el('body'), classList: { contains: () => false, toggle: () => false }, appendChild: () => {} },
+    documentElement: el('html'),
+  };
+  globalThis.MutationObserver = class { observe() {} disconnect() {} };
+}
+
+test('starts CAF with the active page media element and routes sources through the player manager', async () => {
   const starts = [];
   const listeners = [];
-  const mediaElement = { tagName: 'VIDEO' };
+  const loads = [];
+  const mediaElement = {
+    tagName: 'VIDEO',
+    paused: true,
+    currentTime: 0,
+    videoWidth: 0,
+    classList: { contains: () => false },
+    addEventListener: () => {},
+    getAttribute: () => null,
+    pause: () => {},
+    play: () => Promise.resolve(),
+  };
+  stubDom();
   globalThis.window = {
+    location: { href: 'https://frame.test/' },
     cast: {
       framework: {
         CastReceiverContext: {
           getInstance: () => ({
             addCustomMessageListener: (...args) => listeners.push(args),
+            getPlayerManager: () => ({ load: (r) => { loads.push(r); return Promise.resolve(); } }),
             start: (options) => starts.push(options),
           }),
+        },
+        messages: {
+          MediaInformation: class { },
+          LoadRequestData: class { },
         },
       },
     },
@@ -39,9 +79,11 @@ test('starts CAF with the active page media element and HTML playback options', 
 
   assert.equal(listeners.length, 1);
   assert.equal(listeners[0][0], 'urn:x-cast:test');
+  // CAF's managed player must stay enabled: skipPlayersLoad was the old audio-over-black path.
   assert.deepEqual(starts, [{
     mediaElement,
-    skipPlayersLoad: true,
     statusText: 'Ready to display photos and videos',
   }]);
+  // No src yet, so nothing should have been handed to the player manager.
+  assert.deepEqual(loads, []);
 });

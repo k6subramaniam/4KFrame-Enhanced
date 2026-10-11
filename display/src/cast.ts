@@ -75,13 +75,14 @@ declare global {
 }
 
 const CAST_VIDEO_LAYER_STYLE_ID = 'cast-video-layer-fix';
-const CAST_REPAINT_HEARTBEAT_ID = 'cast-repaint-heartbeat';
 
 /**
- * Keep Cast video on a simple hardware-overlay-friendly surface and keep Chromium's
- * compositor awake. On the affected TV, ?debug=1 fixes playback because the diagnostics
- * panel changes text and reads layout twice a second. Reproduce that paint/layout activity
- * with a one-pixel, effectively invisible heartbeat instead of requiring the debug overlay.
+ * Keep Cast video on the simplest possible hardware-overlay-friendly surface. Chromecast
+ * devices can decode frames successfully yet paint only black when the video element is
+ * transformed or when an opaque WebGL/backdrop layer sits over the hardware plane.
+ *
+ * Keeping the compositor awake is not done here: main.ts repaints #paint-tick while any
+ * video is on screen, Cast or not, which covers this page too.
  */
 function stabilizeCastVideoLayer(mediaElement: HTMLMediaElement): void {
   const video = mediaElement as HTMLVideoElement;
@@ -125,59 +126,9 @@ function stabilizeCastVideoLayer(mediaElement: HTMLMediaElement): void {
         opacity: 1 !important;
         z-index: 13 !important;
       }
-      #${CAST_REPAINT_HEARTBEAT_ID} {
-        position: fixed !important;
-        right: 0 !important;
-        bottom: 0 !important;
-        width: 1px !important;
-        height: 1px !important;
-        min-width: 1px !important;
-        min-height: 1px !important;
-        overflow: hidden !important;
-        pointer-events: none !important;
-        z-index: 2147483647 !important;
-        opacity: .01 !important;
-        contain: strict !important;
-      }
     `;
     document.head.appendChild(style);
   }
-
-  let heartbeat = document.getElementById(CAST_REPAINT_HEARTBEAT_ID) as HTMLElement | null;
-  if (!heartbeat) {
-    heartbeat = document.createElement('span');
-    heartbeat.id = CAST_REPAINT_HEARTBEAT_ID;
-    heartbeat.setAttribute('aria-hidden', 'true');
-    heartbeat.textContent = '\u200b';
-    document.body.appendChild(heartbeat);
-  }
-
-  let heartbeatTimer: ReturnType<typeof window.setInterval> | undefined;
-  let heartbeatPhase = false;
-
-  const repaintPulse = (): void => {
-    if (!heartbeat || !mediaElement.classList.contains('visible')) return;
-    heartbeatPhase = !heartbeatPhase;
-    // Match the useful part of the debug panel: mutate painted DOM, then synchronously read
-    // layout. Do not transform or otherwise dirty the video element itself.
-    heartbeat.textContent = heartbeatPhase ? '\u200b' : '\u2060';
-    heartbeat.style.backgroundColor = heartbeatPhase
-      ? 'rgba(0,0,0,0.01)'
-      : 'rgba(1,1,1,0.01)';
-    void heartbeat.getBoundingClientRect();
-  };
-
-  const startHeartbeat = (): void => {
-    if (heartbeatTimer !== undefined) return;
-    repaintPulse();
-    heartbeatTimer = window.setInterval(repaintPulse, 250);
-  };
-
-  const stopHeartbeat = (): void => {
-    if (heartbeatTimer === undefined) return;
-    window.clearInterval(heartbeatTimer);
-    heartbeatTimer = undefined;
-  };
 
   const sync = (): void => {
     const visible = mediaElement.classList.contains('visible');
@@ -195,13 +146,11 @@ function stabilizeCastVideoLayer(mediaElement: HTMLMediaElement): void {
       canvas?.style.setProperty('visibility', 'hidden', 'important');
       if (!missingDecodedFrames) backdrop?.style.setProperty('visibility', 'hidden', 'important');
       else backdrop?.style.removeProperty('visibility');
-      startHeartbeat();
     } else {
       document.documentElement.style.removeProperty('background');
       document.body.style.removeProperty('background');
       canvas?.style.removeProperty('visibility');
       backdrop?.style.removeProperty('visibility');
-      stopHeartbeat();
     }
   };
 
