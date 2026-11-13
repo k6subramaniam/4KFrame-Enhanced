@@ -8,19 +8,24 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
-      - name: Apply reviewed feature patch
+      - name: Align browser fixtures with heartbeat and gesture-gated audio
         run: |
           python3 - <<'PY'
-          import base64, hashlib, lzma, pathlib, subprocess
-          root = pathlib.Path('.')
-          encoded = (root/'.github/usage-patch.1').read_text() + (root/'.github/usage-patch.2').read_text()
-          patch = lzma.decompress(base64.b64decode(encoded))
-          assert hashlib.sha256(patch).hexdigest() == '69678d26c9c83fa8e118d65856d89c4943e939805fd264bbaf6eedfaa96b6b1c'
-          pathlib.Path('/tmp/media-usage.patch').write_bytes(patch)
-          subprocess.run(['git','apply','--check','--unidiff-zero','/tmp/media-usage.patch'],check=True)
-          subprocess.run(['git','apply','--unidiff-zero','/tmp/media-usage.patch'],check=True)
+          from pathlib import Path
+          p=Path('display/tests/quick-actions.browser.html')
+          s=p.read_text().replace('JSON.stringify(normalize(sent)) === JSON.stringify(expected)', "JSON.stringify(normalize(sent.filter(message => message.type !== 'displayHeartbeat'))) === JSON.stringify(expected)")
+          p.write_text(s)
+          p=Path('display/tests/video-config.browser.html')
+          s=p.read_text().replace('let rejectNextPlay = false;', "let rejectAudiblePlay = false;\n      let activated = false;\n      Object.defineProperty(navigator, 'userActivation', {\n        configurable: true, get: () => ({ hasBeenActive: activated, isActive: activated }),\n      });")
+          s=s.replace("if (rejectNextPlay) {\n          rejectNextPlay = false;", "if (rejectAudiblePlay && !video.muted) {")
+          s=s.replace("rejectNextPlay = true;\n        emit", "emit({ type: 'config', config: { ...defaultConfig(), videoAudioMode: 'tv', videoLoop: false } });\n        const silentBeforeActivation = video.muted && playCalls === 1;\n        activated = true;\n        rejectAudiblePlay = true;\n        emit")
+          s=s.replace('&& playCalls === 3;', '&& playCalls === 4;').replace('const passed = initialMutedPlayback', 'const passed = initialMutedPlayback\n          && silentBeforeActivation').replace('          initialMutedPlayback,', '          initialMutedPlayback,\n          silentBeforeActivation,')
+          p.write_text(s)
           PY
       - uses: actions/setup-node@v4
         with:
@@ -28,30 +33,31 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build:shared
-      - name: Typecheck all workspaces
-        run: npm run typecheck
-      - name: Run all regression tests
+      - run: npm run typecheck
+      - name: Regression tests (fail on any failed test)
         run: npm test 2>&1 | tee /tmp/media-usage-tests.log
-      - name: Build production bundles
-        run: npm run build 2>&1 | tee /tmp/media-usage-build.log
-      - name: Commit validated source on feature branch only
+      - run: npm run build
+      - name: Browser test dependencies
+        run: |
+          python3 -m pip install playwright
+          command -v ffmpeg || (sudo apt-get update -qq && sudo apt-get install -y ffmpeg)
+      - name: Real server desktop, mobile and playback smoke tests
+        run: python3 .github/qa-media-activity.py
+      - name: Commit validated fixes and remove temporary transport
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add MEDIA_ACTIVITY.md admin/index.html admin/src admin/tests display/src display/tests server/src shared/src
-          git commit -m 'feat: persistent media usage counts, filters and streamlined controls'
+          git rm .github/usage-patch.1 .github/usage-patch.2 .github/workflows/media-usage-validation.yml
+          git add display/tests/quick-actions.browser.html display/tests/video-config.browser.html
+          git commit -m 'test: validate real media controls and align browser fixtures'
           git push origin HEAD:feat/media-usage-controls-20261113
-          git rev-parse HEAD | tee /tmp/media-usage-commit.txt
-      - name: Package isolated runtime for browser QA
-        run: |
-          tar --exclude=node_modules/@tensorflow --exclude=node_modules/@vladmandic --exclude=node_modules/@img --exclude=node_modules/sharp --exclude=node_modules/.cache -czf /tmp/frame-validation.tar.gz admin/dist display/dist shared/dist server/dist node_modules
+          git rev-parse HEAD > /tmp/media-usage-commit.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: frame-validation
+          name: frame-browser-qa
           path: |
-            /tmp/frame-validation.tar.gz
+            qa-evidence
             /tmp/media-usage-tests.log
-            /tmp/media-usage-build.log
             /tmp/media-usage-commit.txt
           retention-days: 2
