@@ -193,6 +193,8 @@ export async function compose(items: MediaItem[], opts: ComposeOptions): Promise
     return canvas;
   }
 
+  canvas.dataset.renderedIds = JSON.stringify(valid.slice(0, 2).map(pair => pair.item.id));
+
   // Blurred-fill: a blurred copy of the primary image covers the entire screen first.
   if (opts.fillMode === 'blur') drawBlurredBackground(ctx, valid[0].img, valid[0].item, canvas.width, canvas.height);
 

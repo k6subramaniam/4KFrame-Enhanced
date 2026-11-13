@@ -25,6 +25,7 @@ import {
   detectLanAddress, detectLanIp, faceMatchEnabled,
 } from './env.js';
 import { initStore, getConfig, setConfig } from './store.js';
+import { registerActivity } from './activity.js';
 import { registerApi } from './routes/api.js';
 import { registerWs } from './ws.js';
 import { startSlideshow } from './slideshow.js';
@@ -129,6 +130,7 @@ export async function buildApp(https?: TlsMaterial): Promise<FastifyInstance> {
   }
 
   await registerApi(app);
+  await registerActivity(app);
   // After registerApi so its `/api/*` auth hook (registered on the same root instance)
   // already covers these routes.
   await registerLiveCast(app);

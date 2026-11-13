@@ -5,6 +5,8 @@
  * of photos and videos, the settings panel, and Google Cast sender wiring.
  */
 
+import { ACTIVITY_SORTS, compareActivity, type ActivitySort, type MediaUsage } from '@4kframe/shared';
+import { installActivityControls, installQuickPlayer, syncQuickPlayer, usageMarkup, syncUsageBadges, mergeUsage, recordActivity, openMediaPreview } from './activity.js';
 import type { AdminStatus, DisplayPlaybackState, FrameBackup, FrameConfig, FrameEvent, MediaItem, ProcessingJob } from '@4kframe/shared';
 import {
   fetchItems, fetchTrash, fetchCurrent, castItem, deleteItem, upload, thumbUrl,
@@ -53,7 +55,7 @@ type SortMode =
   | 'date-desc' | 'date-asc'
   | 'filename-asc' | 'filename-desc'
   | 'size-desc' | 'size-asc'
-  | 'resolution-desc';
+  | 'resolution-desc' | ActivitySort;
 let mode: Mode = 'cast';
 let peopleFilter: PeopleFilter = 'all';
 let sortMode: SortMode = 'date-desc';
@@ -63,7 +65,6 @@ let trashItems: MediaItem[] = [];
 let trashRetentionDays = 30;
 let mediaFilters: MediaFilterState = { ...DEFAULT_MEDIA_FILTERS };
 let selectionMode = false;
-const selectedIds = new Set<string>();
 const selectedMediaIds = new Set<string>();
 const selectedTrashIds = new Set<string>();
 let activeItem: MediaItem | undefined;
@@ -362,7 +363,19 @@ function wireOpsDashboard(): void {
   opsTimer = window.setInterval(() => { void refreshOpsDashboard(); }, 5000);
 }
 
+function applyActivityUpdates(updates: Array<{ id: string; usage: MediaUsage }>): void {
+  for (const update of updates) {
+    const item = items.find(item => item.id === update.id);
+    if (item) item.usage = mergeUsage(item.usage, update.usage);
+    if (activeItem?.id === update.id) activeItem.usage = mergeUsage(activeItem.usage, update.usage);
+  }
+  syncUsageBadges(items);
+  syncQuickPlayer(activeItem);
+  if (ACTIVITY_SORTS.includes(sortMode) || mediaFilters.activity) document.getElementById('activity-refresh')?.removeAttribute('hidden');
+}
+
 function renderGrid(): void {
+  document.getElementById('activity-refresh')?.setAttribute('hidden', '');
   grid.innerHTML = '';
   const visibleItems = sortItems(filterLibraryItems(filterPeople(items), mediaFilters));
   renderPeopleSummary(visibleItems);
@@ -410,21 +423,25 @@ function renderGrid(): void {
       (item.faces?.length ? `<span class="badge badge-face">☺ ${item.faces.length}</span>` : '') +
       ((item.rotation || item.flipHorizontal || item.flipVertical)
         ? `<span class="badge badge-transform">${item.rotation ?? 0}°${item.flipHorizontal ? ' ↔' : ''}${item.flipVertical ? ' ↕' : ''}</span>` : '') +
-      dur +
+      dur + usageMarkup(item) +
       `<button class="select-control" type="button" aria-label="${selected ? 'Deselect' : 'Select'} ${escapeHtml(item.file)}">${selected ? '✓' : ''}</button>` +
       `<button class="incl" title="${excluded ? 'Not a Favorite — tap to add to automatic playback' : 'Favorite — participates in automatic playback'}" aria-label="${excluded ? 'Add to Favorites' : 'Remove from Favorites'}">${excluded ? '☆' : '★'}</button>`;
-    tile.addEventListener('click', () => selectionMode ? toggleSelection(item.id) : onTileClick(item));
+    tile.addEventListener('click', () => {
+      if (selectionMode) toggleSelection(item.id);
+      else void onTileClick(item).catch(error => toast((error as Error).message, { error: true }));
+    });
     // Keyboard parity with pointer input: Enter performs the current mode's action
     // (cast/view/delete), Space selects. Previously both only selected, so a keyboard
     // user could never actually cast or delete anything.
     tile.addEventListener('keydown', (event) => {
+      if (event.target !== tile) return;
       if (event.key === ' ') {
         event.preventDefault();
         toggleSelection(item.id);
       } else if (event.key === 'Enter') {
         event.preventDefault();
         if (selectionMode) toggleSelection(item.id);
-        else void onTileClick(item);
+        else void onTileClick(item).catch(error => toast((error as Error).message, { error: true }));
       }
     });
     tile.querySelector('.select-control')?.addEventListener('click', (e) => {
@@ -454,14 +471,15 @@ function syncPlayingTileHighlight(): void {
 function toggleSelection(id: string): void {
   selectionMode = true;
   if (selectedMediaIds.has(id)) selectedMediaIds.delete(id);
-  else selectedMediaIds.add(id);
+  else { selectedMediaIds.add(id); void recordActivity([id], 'select'); }
   if (!selectedMediaIds.size) selectionMode = false;
   renderGrid();
 }
 
 function renderBulkToolbar(): void {
   if (!bulkToolbar || !selectionCount) return;
-  selectionCount.textContent = `${selectedMediaIds.size} selected`;
+  syncTransformToolbar();
+  selectionCount.textContent = `${selectedMediaIds.size} selected now`;
   bulkToolbar.classList.toggle('active', selectionMode);
   bulkToolbar.querySelectorAll<HTMLButtonElement>('[data-requires-selection]').forEach((button) => {
     button.disabled = selectedMediaIds.size === 0;
@@ -472,6 +490,7 @@ const filenameCollator = new Intl.Collator(undefined, { numeric: true, sensitivi
 
 function sortItems(source: MediaItem[]): MediaItem[] {
   return [...source].sort((a, b) => {
+    if (ACTIVITY_SORTS.includes(sortMode)) return compareActivity(a, b, sortMode as ActivitySort);
     if (sortMode === 'date-asc' || sortMode === 'date-desc') {
       const direction = sortMode === 'date-asc' ? 1 : -1;
       const dateCompare = (itemDate(a, mediaFilters.dateField) - itemDate(b, mediaFilters.dateField)) * direction;
@@ -538,6 +557,7 @@ function renderMediaFilterSummary(visibleItems: MediaItem[]): void {
   if (mediaFilters.kind !== 'all') parts.push(mediaFilters.kind === 'photo' ? 'photos' : 'videos');
   if (mediaFilters.uploader !== 'all') parts.push(mediaFilters.uploader);
   if (mediaFilters.size !== 'all') parts.push(mediaFilters.size.replaceAll('-', ' '));
+  if (mediaFilters.activity && Object.values(mediaFilters.activity).some(value => value !== '' && value !== undefined)) parts.push('activity filters applied');
   mediaFilterSummary.textContent = parts.join(' · ');
 }
 
@@ -653,6 +673,11 @@ function wireMediaFilters(): void {
   });
   document.getElementById('media-filter-reset')?.addEventListener('click', () => {
     mediaFilters = { ...DEFAULT_MEDIA_FILTERS };
+    peopleFilter = 'all'; labelFilter = ''; sortMode = 'date-desc';
+    if (peopleFilterSelect) peopleFilterSelect.value = 'all';
+    if (sortSelect) sortSelect.value = sortMode;
+    syncPeopleLabels();
+    pruneSelectionToCurrentFilters();
     syncMediaFilterOptions();
     syncMediaFilterControls();
     renderGrid();
@@ -771,10 +796,13 @@ function wirePlaybackPreviewSocket(): void {
           syncPeopleLabels();
           renderGrid();
           renderFacesPanel();
+        } else if (msg.type === 'activity') {
+          applyActivityUpdates(msg.items);
         } else if (msg.type === 'show') {
           const nextActiveItem = msg.items.find((item) => item.kind === 'video') ?? msg.items[0];
           if (nextActiveItem?.id !== activeItem?.id) lastVideoPlayback = null;
           activeItem = nextActiveItem;
+          syncQuickPlayer(activeItem);
           syncPlayingTileHighlight();
           renderVideoScrubber(lastVideoPlayback);
           renderFacesPanel();
@@ -1435,6 +1463,7 @@ async function syncPlayback(): Promise<void> {
     loop.classList.toggle('active', p.holding);
     loop.setAttribute('aria-pressed', String(p.holding));
   }
+  syncQuickPlayer(activeItem, p.paused);
   const nav = playbackNavigationState(p);
   const videoSeek = nav.action === 'video-seek';
   const previous = document.getElementById('pb-prev') as HTMLButtonElement | null;
@@ -1459,17 +1488,18 @@ async function syncPlayback(): Promise<void> {
 
 async function onTileClick(item: MediaItem): Promise<void> {
   if (selectionMode) {
-    if (selectedIds.has(item.id)) selectedIds.delete(item.id); else selectedIds.add(item.id);
+    if (selectedMediaIds.has(item.id)) selectedMediaIds.delete(item.id); else selectedMediaIds.add(item.id);
     renderGrid();
     syncTransformToolbar();
     return;
   }
+  if (mode === 'cast' || mode === 'view') void recordActivity([item.id], 'click');
   if (mode === 'cast') {
     // Prefer a live Cast session (native Google Cast); fall back to the LAN REST flow.
     const sent = await castControl({ type: 'cast', id: item.id });
     if (!sent) await castItem(item.id);
   } else if (mode === 'view') {
-    window.open(`/photos/${item.file}`, '_blank');
+    openMediaPreview(item);
   } else if (mode === 'delete') {
     if (await confirmToast('Move this item to Trash? It can be restored for 30 days.', { confirmLabel: 'Move to Trash', danger: true })) {
       try {
@@ -1486,13 +1516,13 @@ async function onTileClick(item: MediaItem): Promise<void> {
 function syncTransformToolbar(): void {
   document.getElementById('media-transform-tools')?.classList.toggle('selection-active', selectionMode);
   const count = document.getElementById('media-selection-count');
-  if (count) count.textContent = selectionMode ? `${selectedIds.size} selected` : 'Current item';
+  if (count) count.textContent = selectionMode ? `${selectedMediaIds.size} selected` : 'Current item';
 }
 
 async function applyMediaTransform(action: 'left' | 'right' | 'horizontal' | 'vertical'): Promise<void> {
   const current = await fetchCurrent();
   const targetIds = selectionMode
-    ? [...selectedIds]
+    ? [...selectedMediaIds]
     : items.filter((item) => current.current.includes(item.file)).map((item) => item.id);
   if (!targetIds.length) return;
   const targets = targetIds.map((id) => items.find((item) => item.id === id)).filter((item): item is MediaItem => Boolean(item));
@@ -1511,7 +1541,7 @@ async function applyMediaTransform(action: 'left' | 'right' | 'horizontal' | 've
 function wireMediaTransforms(): void {
   document.getElementById('media-select')?.addEventListener('click', () => {
     selectionMode = !selectionMode;
-    if (!selectionMode) selectedIds.clear();
+    if (!selectionMode) selectedMediaIds.clear();
     renderGrid();
     syncTransformToolbar();
   });
@@ -1553,8 +1583,11 @@ async function refresh(): Promise<void> {
 function wireBulkActions(): void {
   const visibleIds = () => sortItems(filterLibraryItems(filterPeople(items), mediaFilters)).map((item) => item.id);
   document.getElementById('select-visible')?.addEventListener('click', () => {
+    const matching = visibleIds();
+    const added = matching.filter(id => !selectedMediaIds.has(id));
     selectedMediaIds.clear();
-    for (const id of visibleIds()) selectedMediaIds.add(id);
+    for (const id of matching) selectedMediaIds.add(id);
+    if (added.length) void recordActivity(added, 'select');
     selectionMode = selectedMediaIds.size > 0;
     renderGrid();
   });
@@ -1627,6 +1660,7 @@ function renderTrash(): void {
       `<button class="select-control" type="button" aria-label="${selected ? 'Deselect' : 'Select'} ${escapeHtml(item.originalFilename ?? item.file)}">${selected ? '✓' : ''}</button>`;
     tile.addEventListener('click', () => toggleTrashSelection(item.id));
     tile.addEventListener('keydown', (event) => {
+      if (event.target !== tile) return;
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
         toggleTrashSelection(item.id);
@@ -1885,6 +1919,22 @@ async function start(): Promise<void> {
     wireMediaFilters();
     wireMediaTransforms();
     wireBulkActions();
+    installActivityControls((filter, sort) => {
+      mediaFilters.activity = filter;
+      if (sort) { sortMode = sort; if (sortSelect) sortSelect.value = sort; }
+      applyFilterChange();
+    });
+    installQuickPlayer({
+      previous: () => { void skipPlayback(-1); }, next: () => { void skipPlayback(1); },
+      find: () => {
+        if (!activeItem) return;
+        document.getElementById('media-filter-reset')?.click();
+        const tile = [...grid.querySelectorAll<HTMLElement>('[data-media-id]')].find(tile => tile.dataset.mediaId === activeItem?.id);
+        tile?.scrollIntoView({ behavior: 'smooth', block: 'center' }); tile?.focus({ preventScroll: true });
+      },
+    });
+    window.addEventListener('media-activity', event => applyActivityUpdates((event as CustomEvent).detail));
+    document.getElementById('activity-refresh')?.addEventListener('click', applyFilterChange);
     wireTrashActions();
     setMode('cast');
   }

@@ -1,6 +1,7 @@
 export * from './filename.js';
 export * from './config.js';
 export * from './api.js';
+export * from './activity.js';
 export * from './smartFraming.js';
 export * from './settingsUi.js';
 export * from './cropMath.js';

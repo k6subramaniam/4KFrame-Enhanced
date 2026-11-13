@@ -12,6 +12,8 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
   defaultConfig,
+  mediaUsage,
+  type ActivityKind,
   normalizeTransform,
   type DisplayTransform,
   type FrameBackup,
@@ -21,6 +23,7 @@ import {
 import { DB_FILE, DATA_DIR, MEDIA_DIR } from './env.js';
 
 interface DbDocument {
+  activityReceipts?: Array<{ key: string; at: number }>;
   config: FrameConfig;
   items: MediaItem[];
   /** Recoverable media removed from the active library. Assets stay on disk until purge. */
@@ -58,6 +61,7 @@ export async function initStore(): Promise<void> {
       items: (parsed.items ?? []).map((item) => ({ ...item, ...normalizeTransform(item) })),
       trash: (parsed.trash ?? []).map((item) => ({ ...item, ...normalizeTransform(item) })),
       order: parsed.order ?? (parsed.items ?? []).map((i) => i.id),
+      activityReceipts: parsed.activityReceipts ?? [],
       googleTokens: parsed.googleTokens,
       authSecret: parsed.authSecret,
     };
@@ -75,7 +79,7 @@ function db(): DbDocument {
 /** Serialise the current document to disk, chained to avoid concurrent writes. */
 function flush(): Promise<void> {
   const snapshot = JSON.stringify(db(), null, 2);
-  writeChain = writeChain.then(async () => {
+  writeChain = writeChain.catch(() => {}).then(async () => {
     const tmp = path.join(DATA_DIR, `.frame.${process.pid}.tmp`);
     await fs.writeFile(tmp, snapshot, 'utf8');
     await fs.rename(tmp, DB_FILE);
@@ -358,4 +362,37 @@ export async function restoreSafeBackup(input: unknown): Promise<{
     restoredTrash: validTrash.length,
     skippedMissingAssets,
   };
+}
+
+/** Increment atomically in memory before awaiting the serialized, atomic disk replacement.
+ * Receipts and counts share a snapshot. A duplicate also flushes so a failed disk write
+ * cannot be acknowledged solely from memory. Receipts are bounded to 20k / 24 hours.
+ */
+export async function recordMediaActivity(ids: string[], kind: ActivityKind, eventId: string): Promise<MediaItem[]> {
+  const d = db();
+  const unique = [...new Set(ids)];
+  const targets = unique.map(id => getItem(id));
+  if (!unique.length || targets.some(item => !item)) throw new Error('Media not found.');
+  const items = targets as MediaItem[];
+  if (items.some(item => (kind === 'view' && item.kind !== 'photo') || (kind === 'play' && item.kind !== 'video'))) {
+    throw new Error('Activity kind does not match media.');
+  }
+  const now = Date.now();
+  const key = `${kind}:${eventId}`;
+  const receipts = (d.activityReceipts ?? []).filter(receipt => receipt.at >= now - 86_400_000);
+  if (!receipts.some(receipt => receipt.key === key)) {
+    const fields = { view: ['viewCount', 'lastViewedAt'], play: ['playCount', 'lastPlayedAt'],
+      click: ['clickCount', 'lastClickedAt'], select: ['selectedCount', 'lastSelectedAt'] } as const;
+    const [counter, timestamp] = fields[kind];
+    for (const item of items) {
+      const usage = mediaUsage(item);
+      usage[counter] = Math.min(Number.MAX_SAFE_INTEGER, usage[counter] + 1);
+      usage[timestamp] = now;
+      item.usage = usage;
+    }
+    receipts.push({ key, at: now });
+    d.activityReceipts = receipts.slice(-20_000);
+  }
+  await flush();
+  return items;
 }

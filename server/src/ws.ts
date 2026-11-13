@@ -24,9 +24,10 @@ import {
   type TransitionName,
   isQuarterTurn,
 } from '@4kframe/shared';
+import { recordDisplayActivity } from './activity.js';
 import { hub } from './hub.js';
 import { getConfig, setConfig } from './store.js';
-import { cast, next, previous, progress, getCurrent, refresh, setPaused, playSequence, clearQueue } from './slideshow.js';
+import { cast, next, previous, progress, getCurrent, getPresentationId, refresh, setPaused, playSequence, clearQueue } from './slideshow.js';
 import * as auth from './auth.js';
 import { clearDisplayPlayback, reportDisplayPlayback } from './displayPlayback.js';
 import { getActiveLiveCast } from './liveCast.js';
@@ -55,7 +56,7 @@ const ADMIN_CONTROL_TYPES = new Set<ControlMessage['type']>(['progress', 'cast',
 // LAN mode), or when the operator explicitly opts back into the legacy behavior. This keeps
 // a public/cloud deployment from exposing remote-control and config mutations over /ws.
 const PUBLIC_DISPLAY_CONTROL_TYPES = new Set<ControlMessage['type']>([
-  'next', 'previous', 'pause', 'resume', 'seek', 'publicConfig', 'playbackState', 'displayHeartbeat',
+  'next', 'previous', 'pause', 'resume', 'seek', 'publicConfig', 'playbackState', 'displayHeartbeat', 'mediaViewed',
 ]);
 const PUBLIC_CONFIG_KEYS = new Set([
   'photoPeriod',
@@ -215,7 +216,7 @@ export async function registerWs(app: FastifyInstance): Promise<void> {
     // Send current state on connect.
     send({ type: 'config', config: getConfig() });
     const current = getCurrent();
-    if (current.length) send({ type: 'show', items: current, interactive: false });
+    if (current.length) send({ type: 'show', items: current, interactive: false, presentationId: getPresentationId() });
     // A display joining mid-cast should show it immediately rather than waiting for the
     // next push (it would otherwise miss the one-off broadcast entirely).
     const liveCast = getActiveLiveCast();
@@ -228,6 +229,7 @@ export async function registerWs(app: FastifyInstance): Promise<void> {
       } catch {
         return;
       }
+      if (!msg || typeof msg !== 'object') return;
       if (!PUBLIC_DISPLAY_CONTROL_TYPES.has(msg.type) && !ADMIN_CONTROL_TYPES.has(msg.type)) return;
       if (ADMIN_CONTROL_TYPES.has(msg.type) && !authed) return;
 
@@ -240,6 +242,13 @@ export async function registerWs(app: FastifyInstance): Promise<void> {
           break;
         case 'pause': setPaused(true); break;
         case 'resume': setPaused(false); break;
+        case 'mediaViewed': {
+          try {
+            const ids = await recordDisplayActivity(msg.presentationId, msg.ids);
+            if (ids.length) send({ type: 'activityAck', presentationId: msg.presentationId, ids });
+          } catch (error) { app.log.error({ err: error }, 'Could not persist media activity'); }
+          break;
+        }
         case 'displayHeartbeat':
           reportDisplayHeartbeat();
           break;

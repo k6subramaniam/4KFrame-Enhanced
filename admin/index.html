@@ -282,6 +282,7 @@
         #selection-count { flex-basis:100%; }
       }
     </style>
+    <link rel="stylesheet" href="/src/activity.css" />
   </head>
   <body>
     <header>
@@ -441,6 +442,42 @@
                     <button id="media-filter-reset" type="button">Reset filters</button>
             </div>
           </div>
+          <div id="activity-controls">
+            <div class="activity-topline"><label class="field search-field">Search library<input id="media-search" type="search" placeholder="Filename, caption or person…" maxlength="200" /></label>          <label class="field">Sort media
+            <select id="media-sort">
+              <option value="date-desc">Selected date — newest first</option>
+              <option value="date-asc">Selected date — oldest first</option>
+              <option value="filename-asc">Filename — A to Z</option>
+              <option value="filename-desc">Filename — Z to A</option>
+              <option value="size-desc">File size — largest first</option>
+              <option value="size-asc">File size — smallest first</option>
+              <option value="resolution-desc">Resolution — highest first</option>
+              <option value="activity-desc">Views / plays — most first</option>
+              <option value="activity-asc">Views / plays — least first</option>
+              <option value="clicks-desc">Clicks — most first</option>
+              <option value="clicks-asc">Clicks — least first</option>
+              <option value="selected-desc">Selections — most first</option>
+              <option value="selected-asc">Selections — least first</option>
+              <option value="recent-activity">Recently viewed / played</option>
+            </select>
+          </label>
+              <button type="button" id="library-layout" aria-pressed="false">List view</button>
+              <button id="select-visible" type="button">Select all matching</button>
+            </div>
+            <div class="activity-presets" aria-label="Quick activity filters">
+              <button type="button" data-activity-preset="never">Never viewed / played</button>
+              <button type="button" data-activity-preset="popular">Most viewed / played</button>
+              <button type="button" data-activity-preset="least">Least viewed / played</button>
+              <button type="button" data-activity-preset="selected">Most selected</button>
+              <button type="button" data-activity-preset="unselected">Never selected</button>
+              <button type="button" data-activity-preset="recent">Recently played</button>
+            </div>
+            <details class="activity-ranges"><summary>Filter by exact counts or ranges</summary><div class="count-range-grid">
+<fieldset><legend>Views / plays</legend><label>Minimum<input type="number" inputmode="numeric" min="0" step="1" data-count-bound="activityMin" aria-label="Minimum views / plays" placeholder="0" /></label><label>Maximum<input type="number" inputmode="numeric" min="0" step="1" data-count-bound="activityMax" aria-label="Maximum views / plays" placeholder="Any" /></label></fieldset><fieldset><legend>Clicks</legend><label>Minimum<input type="number" inputmode="numeric" min="0" step="1" data-count-bound="clicksMin" aria-label="Minimum clicks" placeholder="0" /></label><label>Maximum<input type="number" inputmode="numeric" min="0" step="1" data-count-bound="clicksMax" aria-label="Maximum clicks" placeholder="Any" /></label></fieldset><fieldset><legend>Selections</legend><label>Minimum<input type="number" inputmode="numeric" min="0" step="1" data-count-bound="selectedMin" aria-label="Minimum selections" placeholder="0" /></label><label>Maximum<input type="number" inputmode="numeric" min="0" step="1" data-count-bound="selectedMax" aria-label="Maximum selections" placeholder="Any" /></label></fieldset>
+            </div><p class="muted activity-help">Views / plays count successful frame displays and opened previews. Clicks count open / cast actions; selections count newly checked items, including Select all. Thumbnails, deselection and pause / resume do not count. Totals start from this update, not from upload date.</p></details>
+            <p id="activity-error" role="alert"></p>
+          </div>
+          <details class="advanced-filters"><summary>Date, media type, source &amp; storage</summary>
           <div class="library-filters">
             <label class="field">Date type
               <select id="media-date-field">
@@ -485,12 +522,14 @@
             <button type="button" data-date-preset="this-month">This month</button>
             <button type="button" data-date-preset="last-month">Previous month</button>
             <button type="button" data-date-preset="clear">Any date</button>
-            <span class="muted" id="media-filter-summary">All media</span>
+
           </div>
+          </details>
+          <div class="activity-results"><span class="muted" id="media-filter-summary" role="status">All media</span><button id="activity-refresh" type="button" hidden>Activity updated · Refresh results</button></div>
         </div>
       </section>
-      <section class="panel" id="people-panel">
-        <h2>Smart Face Match</h2>
+      <details class="panel" id="people-panel"><summary>People &amp; face filters</summary>
+
         <div class="row people-controls">
           <label class="field">People filter
             <select id="people-filter">
@@ -503,20 +542,10 @@
           <label class="field">Label
             <select id="label-filter" disabled><option value="">Any label</option></select>
           </label>
-          <label class="field">Sort media
-            <select id="media-sort">
-              <option value="date-desc">Selected date — newest first</option>
-              <option value="date-asc">Selected date — oldest first</option>
-              <option value="filename-asc">Filename — A to Z</option>
-              <option value="filename-desc">Filename — Z to A</option>
-              <option value="size-desc">File size — largest first</option>
-              <option value="size-asc">File size — smallest first</option>
-              <option value="resolution-desc">Resolution — highest first</option>
-            </select>
-          </label>
+
           <span class="muted" id="people-summary">Face matching is opt-in on the server.</span>
         </div>
-      </section>
+      </details>
       <p class="muted" id="hint">Cast mode: click a photo to show it on the frame.</p>
       <div id="media-transform-tools" class="row" role="toolbar" aria-label="Media orientation controls">
         <button id="media-select" type="button" aria-label="Toggle media selection mode">Select</button>
@@ -528,7 +557,6 @@
       </div>
       <div id="bulk-toolbar" role="toolbar" aria-label="Selected media actions">
         <span id="selection-count" aria-live="polite">0 selected</span>
-        <button id="select-visible" type="button">Select all matching</button>
         <button id="clear-selection" type="button">Clear</button>
         <button id="bulk-delete" type="button" data-requires-selection disabled>Delete selected</button>
         <button id="bulk-favorite" type="button" data-requires-selection disabled>Add to Favorites</button>

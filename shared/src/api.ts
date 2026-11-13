@@ -10,6 +10,7 @@
 
 import type { ApiDataPayload, FrameConfig } from './config.js';
 import type { MediaKind } from './filename.js';
+import type { MediaUsage } from './activity.js';
 import type { QuarterTurn } from './transforms.js';
 
 export interface FaceBox {
@@ -54,6 +55,8 @@ export type VideoUpscaleTarget = (typeof VIDEO_UPSCALE_TARGETS)[number];
 
 /** A single media item in the library. */
 export interface MediaItem {
+  /** Persisted usage totals; absent on legacy media, interpreted as zero. */
+  usage?: MediaUsage;
   id: string;
   kind: MediaKind;
   width: number;
@@ -226,6 +229,7 @@ export type ControlMessage =
   | { type: 'resume' }
   | { type: 'playbackState'; itemId: string; currentTime: number; duration: number; seekable: boolean }
   | { type: 'displayHeartbeat' }
+  | { type: 'mediaViewed'; presentationId: string; ids: string[] }
   | { type: 'cast'; id: string }
   | { type: 'playSequence'; ids: string[] }
   | { type: 'clearQueue' }
@@ -253,7 +257,9 @@ export type ControlMessage =
 
 /** Events the server pushes to displays and controllers. */
 export type FrameEvent =
-  | { type: 'show'; items: MediaItem[]; interactive: boolean }
+  | { type: 'show'; items: MediaItem[]; interactive: boolean; presentationId?: string }
+  | { type: 'activity'; items: Array<{ id: string; usage: MediaUsage }> }
+  | { type: 'activityAck'; presentationId: string; ids: string[] }
   | { type: 'seek'; offsetSec: SeekOffsetSec }
   | { type: 'config'; config: FrameConfig }
   | { type: 'library'; items: MediaItem[] }

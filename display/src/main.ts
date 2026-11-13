@@ -23,6 +23,7 @@ import {
   normalizeTransform,
   orientedDimensions,
 } from '@4kframe/shared';
+import { DisplayActivityTracker } from './activity.js';
 import { GLRenderer, type GLRect, type GLVideoOrientation } from './gl.js';
 import { compose, contentRect } from './compositor.js';
 import { applyOverlays, setCaption, setStatus } from './overlays.js';
@@ -86,6 +87,24 @@ function sendControl(msg: ControlMessage): void {
     socket.send(JSON.stringify(msg));
   }
 }
+
+const activityTracker = new DisplayActivityTracker(sendControl);
+window.setInterval(() => activityTracker.retry(), 5000);
+let activeVideoPresentationId: string | undefined;
+let renderedPhotoActivity: { ids: string[]; presentationId?: string } | undefined;
+
+function reportRenderedVideo(): void {
+  if (!liveCastActive && document.visibilityState !== 'hidden' && showingVideo && lastVideoItem
+    && !video.paused && !video.error && video.readyState >= 2 && video.videoWidth > 0 && video.currentTime > 0
+    && activeVideoPresentationId === lastShowEvent?.presentationId
+    && lastShowEvent?.items.some(item => item.id === lastVideoItem?.id)) {
+    activityTracker.rendered([lastVideoItem.id], lastShowEvent.presentationId);
+  }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden' || liveCastActive) return;
+  if (!showingVideo && renderedPhotoActivity) activityTracker.rendered(renderedPhotoActivity.ids, renderedPhotoActivity.presentationId);
+});
 
 function reportVideoPlayback(force = false): void {
   if (!showingVideo || !lastVideoItem) return;
@@ -168,6 +187,8 @@ function composeCurrent(items: MediaItem[]): Promise<HTMLCanvasElement> {
 }
 
 async function renderItems(items: MediaItem[], interactive: boolean): Promise<void> {
+  const presentationId = lastShowEvent?.presentationId;
+  renderedPhotoActivity = undefined;
   stopMotion();
   const videoItem = items.find((i) => i.kind === 'video');
   if (videoItem) {
@@ -181,6 +202,7 @@ async function renderItems(items: MediaItem[], interactive: boolean): Promise<vo
   lastVideoItem = null;
 
   const toFrame = await composeCurrent(items);
+  if (presentationId !== lastShowEvent?.presentationId || liveCastActive) return;
   const duration = interactive ? config.interactiveTransitionPeriod : config.transitionPeriod;
   if (prevFrame) {
     await renderer.transition(prevFrame, toFrame, String(config.transition), duration);
@@ -202,6 +224,12 @@ async function renderItems(items: MediaItem[], interactive: boolean): Promise<vo
       if (!paused) goNext();
     }, 2500);
     return;
+  }
+
+  if (presentationId === lastShowEvent?.presentationId && !liveCastActive) {
+    const ids = JSON.parse(toFrame.dataset.renderedIds ?? '[]') as string[];
+    renderedPhotoActivity = { ids, presentationId };
+    if (document.visibilityState !== 'hidden') activityTracker.rendered(ids, presentationId);
   }
 
   // Ken Burns motion only for single photos (not dual layout), and never while paused.
@@ -386,6 +414,8 @@ function displayMediaUrl(file: string): string {
 }
 
 async function renderVideo(item: MediaItem): Promise<void> {
+  const presentationId = lastShowEvent?.presentationId;
+  activeVideoPresentationId = undefined;
   showingVideo = true;
   lastVideoItem = item;
   videoTrackMissing = false; // video→video transitions skip hideVideo()
@@ -404,6 +434,7 @@ async function renderVideo(item: MediaItem): Promise<void> {
   // Establish the scoped media cookie before assigning src. Chromecast's media stack
   // performs separate HEAD/Range requests that otherwise lose an admin/query handoff.
   await ensureDisplayMediaSession();
+  if (presentationId !== lastShowEvent?.presentationId || liveCastActive) return;
   layoutVideo(item);
   syncActiveVideoPlaybackProperties();
   video.onerror = () => handleVideoError(item);
@@ -413,6 +444,7 @@ async function renderVideo(item: MediaItem): Promise<void> {
   if (posterFile) video.poster = displayMediaUrl(posterFile);
   else video.removeAttribute('poster');
   video.src = displayMediaUrl(item.file);
+  activeVideoPresentationId = presentationId;
   lastPlaybackReportAt = 0;
   video.classList.add('visible');
   await attemptVideoPlayback();
@@ -899,7 +931,11 @@ function handleEvent(event: FrameEvent): void {
       // Always remember the latest real payload, even while a live cast covers the screen,
       // so ending the cast can repaint instantly without waiting for the next rotation.
       lastShowEvent = event;
+      activityTracker.begin(event.presentationId);
       if (!liveCastActive) renderItems(event.items, event.interactive).catch((err) => console.error(err));
+      break;
+    case 'activityAck':
+      activityTracker.acknowledge(event.presentationId, event.ids);
       break;
     case 'liveCast':
       startLiveCast(event.liveCast);
@@ -957,7 +993,7 @@ video.addEventListener('playing', () => {
   setStatus(statusText());
 });
 video.addEventListener('durationchange', () => reportVideoPlayback(true));
-video.addEventListener('timeupdate', () => { reportVideoPlayback(); checkVideoTrackDecoding(); });
+video.addEventListener('timeupdate', () => { reportVideoPlayback(); checkVideoTrackDecoding(); reportRenderedVideo(); });
 video.addEventListener('seeked', () => reportVideoPlayback(true));
 
 /**
