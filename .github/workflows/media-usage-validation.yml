@@ -13,8 +13,9 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
-      - name: Align browser fixtures with heartbeat and gesture-gated audio
+      - name: Align browser fixtures and refine narrow-screen layout
         run: |
+          python3 .github/refine-media-ui.py
           python3 - <<'PY'
           from pathlib import Path
           p=Path('display/tests/quick-actions.browser.html')
@@ -47,9 +48,9 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git rm .github/usage-patch.1 .github/usage-patch.2 .github/workflows/media-usage-validation.yml
-          git add display/tests/quick-actions.browser.html display/tests/video-config.browser.html
-          git commit -m 'test: validate real media controls and align browser fixtures'
+          git rm .github/usage-patch.1 .github/usage-patch.2 .github/refine-media-ui.py .github/workflows/media-usage-validation.yml
+          git add admin/index.html admin/src/activity.css display/tests/quick-actions.browser.html display/tests/video-config.browser.html
+          git commit -m 'fix: refine mobile library layout and validate actual playback counters'
           git push origin HEAD:feat/media-usage-controls-20261113
           git rev-parse HEAD > /tmp/media-usage-commit.txt
       - uses: actions/upload-artifact@v4
