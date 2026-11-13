@@ -1,0 +1,18 @@
+name: Media usage validation
+on:
+  push:
+    branches: [feat/media-usage-controls-20261113]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package source for review
+        run: git archive --format=tar.gz HEAD > /tmp/frame-source.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frame-source
+          path: /tmp/frame-source.tar.gz
+          retention-days: 1
