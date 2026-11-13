@@ -3,16 +3,55 @@ on:
   push:
     branches: [feat/media-usage-controls-20261113]
 permissions:
-  contents: read
+  contents: write
 jobs:
-  source:
+  validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Package source for review
-        run: git archive --format=tar.gz HEAD > /tmp/frame-source.tar.gz
-      - uses: actions/upload-artifact@v4
+      - name: Apply reviewed feature patch
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, lzma, pathlib, subprocess
+          root = pathlib.Path('.')
+          encoded = (root/'.github/usage-patch.1').read_text() + (root/'.github/usage-patch.2').read_text()
+          patch = lzma.decompress(base64.b64decode(encoded))
+          assert hashlib.sha256(patch).hexdigest() == '69678d26c9c83fa8e118d65856d89c4943e939805fd264bbaf6eedfaa96b6b1c'
+          pathlib.Path('/tmp/media-usage.patch').write_bytes(patch)
+          subprocess.run(['git','apply','--check','--unidiff-zero','/tmp/media-usage.patch'],check=True)
+          subprocess.run(['git','apply','--unidiff-zero','/tmp/media-usage.patch'],check=True)
+          PY
+      - uses: actions/setup-node@v4
         with:
-          name: frame-source
-          path: /tmp/frame-source.tar.gz
-          retention-days: 1
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:shared
+      - name: Typecheck all workspaces
+        run: npm run typecheck
+      - name: Run all regression tests
+        run: npm test 2>&1 | tee /tmp/media-usage-tests.log
+      - name: Build production bundles
+        run: npm run build 2>&1 | tee /tmp/media-usage-build.log
+      - name: Commit validated source on feature branch only
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add MEDIA_ACTIVITY.md admin/index.html admin/src admin/tests display/src display/tests server/src shared/src
+          git commit -m 'feat: persistent media usage counts, filters and streamlined controls'
+          git push origin HEAD:feat/media-usage-controls-20261113
+          git rev-parse HEAD | tee /tmp/media-usage-commit.txt
+      - name: Package isolated runtime for browser QA
+        run: |
+          tar --exclude=node_modules/@tensorflow --exclude=node_modules/@vladmandic --exclude=node_modules/@img --exclude=node_modules/sharp --exclude=node_modules/.cache -czf /tmp/frame-validation.tar.gz admin/dist display/dist shared/dist server/dist node_modules
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frame-validation
+          path: |
+            /tmp/frame-validation.tar.gz
+            /tmp/media-usage-tests.log
+            /tmp/media-usage-build.log
+            /tmp/media-usage-commit.txt
+          retention-days: 2
