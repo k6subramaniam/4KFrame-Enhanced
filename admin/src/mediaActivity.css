@@ -72,3 +72,28 @@ main { padding-bottom:calc(7rem + env(safe-area-inset-bottom)); }
 #control-sheet .active-crop-preview { scroll-margin-top:8rem; }
 #controls-launcher:focus-visible,#controls-resize:focus-visible,#controls-shortcuts button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 #control-sheet:not(.controls-expanded) { max-height:min(72vh,46rem); max-height:min(72dvh,46rem); }
+
+/* Saved favorites and fast multi-select actions; expanded controls remain unchanged. */
+#favorites-panel { padding:1rem; margin:.85rem 0; border:1px solid var(--line); background:var(--panel); border-radius:1rem; }
+.favorites-heading { display:flex; align-items:center; flex-wrap:wrap; gap:.5rem; }
+.favorites-heading h2 { flex:1 1 160px; font-size:1rem; margin:0; }
+#favorites-total { margin-left:.35rem; color:var(--muted); font-size:.85rem; font-variant-numeric:tabular-nums; }
+.favorites-heading button,.favorites-options button { min-height:44px; font-size:.8rem; }
+.favorites-help { margin:.65rem 0 0; font-size:.76rem; line-height:1.5; }
+.favorites-options { display:grid; grid-template-columns:1fr 1fr auto auto; gap:.6rem; align-items:end; margin-top:.8rem; }
+.favorites-options select { width:100%; min-width:0; min-height:44px; font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--line); border-radius:.6rem; padding:.5rem; }
+.favorites-options label { min-width:0; }
+#favorites-ordered,#favorites-save { background:rgba(91,156,255,.2); border-color:rgba(91,156,255,.45); }
+#favorites-panel button:disabled { opacity:.45; cursor:not-allowed; }
+#grid .incl { z-index:1; }
+#grid .incl::before { background:rgba(0,0,0,.8); }
+#grid .incl[aria-pressed="true"] { color:#ffd778; }
+#grid .incl:disabled { opacity:.5; cursor:wait; }
+#favorites-save-bar { position:fixed; bottom:calc(5.5rem + env(safe-area-inset-bottom)); z-index:29; left:50%; transform:translateX(-50%); width:min(740px,calc(100% - 1rem)); display:flex; align-items:center; gap:.5rem; padding:.55rem; background:var(--glass); border:1px solid var(--line); border-radius:.9rem; box-shadow:0 .5rem 2rem rgba(0,0,0,.4); backdrop-filter:blur(18px); }
+#favorites-save-bar[hidden],body.controls-open #favorites-save-bar { display:none; }
+#favorites-selected-count { flex:1; min-width:0; font-size:.8rem; }
+#favorites-save-bar button { min-height:44px; font-size:.8rem; padding:.45rem .6rem; }
+body.favorites-selecting main { padding-bottom:calc(12rem + env(safe-area-inset-bottom)); }
+@media(max-width:700px) { .favorites-options { grid-template-columns:repeat(2,minmax(0,1fr)); } .favorites-heading h2 { flex-basis:100%; } .favorites-heading button { flex:1; } }
+/* The quick-save bar replaces a tall sticky bulk toolbar on small screens. */
+@media(max-width:700px) { #bulk-toolbar { position:static; } }

@@ -190,8 +190,8 @@ async function applyConfigPatch(patch: Partial<FrameConfig>): Promise<void> {
   const updated = { ...cfg, ...patch };
   if (patch.fillMode) updated.frameFill = patch.fillMode === 'cover';
   await setConfig(updated);
-  refresh();
   hub.emitEvent({ type: 'config', config: getConfig() });
+  refresh();
 }
 
 export async function registerWs(app: FastifyInstance): Promise<void> {

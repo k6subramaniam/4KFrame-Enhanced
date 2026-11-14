@@ -5,10 +5,11 @@
  * of photos and videos, the settings panel, and Google Cast sender wiring.
  */
 
+import { isFavorite, playableFavorites, type PlaybackOrder, type PlaybackMediaMode, type FavoritesSort } from '@4kframe/shared';
 import type { AdminStatus, DisplayPlaybackState, FrameBackup, FrameConfig, FrameEvent, MediaItem, ProcessingJob } from '@4kframe/shared';
 import {
   fetchItems, fetchTrash, fetchCurrent, castItem, deleteItem, upload, thumbUrl,
-  skipNext, skipPrev, getPlayback, setPaused, setHold, seekBy, seekTo, toggleEnabled,
+  skipNext, skipPrev, getPlayback, setPaused, setHold, seekBy, seekTo, playFavorites,
   me, login, logout, type AuthState, type Playback,
   patchMediaTransforms,
   setItemsEnabled, deleteItems, restoreTrashItems, purgeTrashItems, emptyTrash, playSequence,
@@ -66,6 +67,10 @@ let items: MediaItem[] = [];
 let trashItems: MediaItem[] = [];
 let trashRetentionDays = 30;
 let mediaFilters: MediaFilterState = { ...DEFAULT_MEDIA_FILTERS };
+let favoritesOnly = false;
+let savingFavorites = false;
+let startingFavorites = false;
+const pendingFavorites = new Set<string>();
 let selectionMode = false;
 let nowPlayingOnly = false;
 let renderLimit = 60;
@@ -371,7 +376,7 @@ function wireOpsDashboard(): void {
 function visibleLibraryItems(): MediaItem[] {
   // Now playing is a temporary focus, not an intersection with a possibly empty filter.
   if (nowPlayingOnly) return items.filter((item) => item.id === activeItem?.id);
-  return sortItems(filterLibraryItems(filterPeople(items), mediaFilters));
+  return sortItems(filterLibraryItems(filterPeople(favoritesOnly ? items.filter(isFavorite) : items), mediaFilters));
 }
 
 function mergeActivityUpdates(updates: MediaActivityUpdate[]): void {
@@ -502,7 +507,7 @@ function renderGrid(): void {
         ? `<span class="badge badge-transform">${item.rotation ?? 0}°${item.flipHorizontal ? ' ↔' : ''}${item.flipVertical ? ' ↕' : ''}</span>` : '') +
       dur +
       `<button class="select-control" type="button" aria-pressed="${selected}" aria-label="${selected ? 'Deselect' : 'Select'} ${escapeHtml(item.file)}">${selected ? '✓' : ''}</button>` +
-      `<button class="incl" title="${excluded ? 'Not a Favorite — tap to add to automatic playback' : 'Favorite — participates in automatic playback'}" aria-label="${excluded ? 'Add to Favorites' : 'Remove from Favorites'}">${excluded ? '☆' : '★'}</button></div>` +
+      `<button type="button" class="incl" aria-pressed="${!excluded}" ${(pendingFavorites.has(item.id) || savingFavorites) ? 'disabled' : ''} title="${excluded ? 'Save to Favorites' : 'Saved to Favorites — tap to remove'}" aria-label="${excluded ? 'Save to Favorites' : 'Remove from Favorites'}">${excluded ? '☆' : '★'}</button></div>` +
       `<div class="tile-info"><strong class="tile-name" title="${escapeHtml(item.originalFilename ?? item.file)}">${escapeHtml(item.originalFilename ?? item.file)}</strong>` +
       `<span class="tile-on-tv" ${playing ? '' : 'hidden'}>On TV</span>` +
       `<div class="tile-activity" data-activity-counts>${activityBadges(item)}</div>` +
@@ -528,11 +533,23 @@ function renderGrid(): void {
     });
     tile.querySelector('.incl')?.addEventListener('click', async (e) => {
       e.stopPropagation();
+      if (pendingFavorites.has(item.id) || savingFavorites) return;
+      const enabled = !isFavorite(items.find((candidate) => candidate.id === item.id) ?? item);
+      pendingFavorites.add(item.id);
+      syncFavoritesUi();
+      (e.currentTarget as HTMLButtonElement).disabled = true;
       try {
-        await toggleEnabled(item.id);
-        await refresh();
+        // Explicit assignment is idempotent; a repeated network request cannot toggle twice.
+        await setItemsEnabled([item.id], enabled);
+        const current = items.find((candidate) => candidate.id === item.id);
+        if (current) current.enabled = enabled;
+        toast(enabled ? 'Saved to Favorites.' : 'Removed from Favorites.');
       } catch (err) {
         toast(`Could not update Favorites: ${(err as Error).message}`, { error: true });
+      } finally {
+        pendingFavorites.delete(item.id);
+        syncFavoriteCards();
+        if (favoritesOnly && !enabled) applyFilterChange();
       }
     });
     for (const [selector, action] of [['.play-now', 'cast'], ['.preview-now', 'view']] as const) {
@@ -572,11 +589,12 @@ function toggleSelection(id: string): void {
 }
 
 function renderBulkToolbar(): void {
+  syncFavoritesUi();
   if (!bulkToolbar || !selectionCount) return;
   selectionCount.textContent = `${selectedMediaIds.size} selected now`;
   bulkToolbar.classList.toggle('active', selectionMode);
   bulkToolbar.querySelectorAll<HTMLButtonElement>('[data-requires-selection]').forEach((button) => {
-    button.disabled = selectedMediaIds.size === 0;
+    button.disabled = savingFavorites || pendingFavorites.size > 0 || selectedMediaIds.size === 0;
   });
 }
 
@@ -654,6 +672,7 @@ function renderMediaFilterSummary(visibleItems: MediaItem[]): void {
   if (mediaFilters.size !== 'all') parts.push(mediaFilters.size.replaceAll('-', ' '));
   if (mediaFilters.query) parts.push(`matching “${mediaFilters.query}”`);
   if (ACTIVITY_RANGES.flat().some((key) => mediaFilters[key] !== undefined)) parts.push('count filters applied');
+  if (favoritesOnly && !nowPlayingOnly) parts.push('favorites only');
   if (nowPlayingOnly) parts.push('now playing');
   mediaFilterSummary.textContent = parts.join(' · ');
 }
@@ -772,6 +791,7 @@ function wireMediaFilters(): void {
   });
   document.getElementById('media-filter-reset')?.addEventListener('click', () => {
     mediaFilters = { ...DEFAULT_MEDIA_FILTERS };
+    favoritesOnly = false;
     nowPlayingOnly = false;
     sortMode = 'date-desc';
     if (sortSelect) sortSelect.value = sortMode;
@@ -897,6 +917,7 @@ function wirePlaybackPreviewSocket(): void {
         const msg = JSON.parse(event.data as string) as FrameEvent;
         if (msg.type === 'config') {
           activeConfig = msg.config;
+          syncFavoritesUi(true);
           syncTvVolumeControl();
           void renderPhonePreview();
           void getPlayback().then(syncFacesPreview).catch(() => {});
@@ -906,6 +927,8 @@ function wirePlaybackPreviewSocket(): void {
           mergeActivityUpdates(msg.updates);
         } else if (msg.type === 'library') {
           items = msg.items;
+          const existingIds = new Set(items.map((item) => item.id));
+          for (const id of selectedMediaIds) if (!existingIds.has(id)) selectedMediaIds.delete(id);
           if (activeItem) activeItem = items.find((item) => item.id === activeItem?.id) ?? activeItem;
           syncPeopleLabels();
           renderGrid();
@@ -1688,6 +1711,7 @@ async function refresh(): Promise<void> {
   syncPlayingTileHighlight();
   syncActivityDock();
   activeConfig = current.data as Partial<FrameConfig>;
+  syncFavoritesUi(true);
   renderedCropPreviewItemId = activeItem?.id;
   await renderSettings(settingsRoot, current.data, activeItem);
   await renderPhonePreview();
@@ -1696,6 +1720,118 @@ async function refresh(): Promise<void> {
   updatePlaybackLabels();
   controlsController?.setOpen(controlsController.isOpen());
   await syncPlayback();
+}
+
+/** Favorites updates must not rebuild the expanded settings or lose face-name inputs. */
+function syncFavoriteCards(): void {
+  const byId = new Map(items.map((item) => [item.id, item]));
+  grid.querySelectorAll<HTMLElement>('.tile[data-media-id]').forEach((tile) => {
+    const item = byId.get(tile.dataset.mediaId!);
+    if (!item) return;
+    const saved = isFavorite(item);
+    tile.classList.toggle('excluded', !saved);
+    const button = tile.querySelector<HTMLButtonElement>('.incl');
+    if (button) {
+      button.textContent = saved ? '★' : '☆';
+      button.setAttribute('aria-pressed', String(saved));
+      button.setAttribute('aria-label', saved ? 'Remove from Favorites' : 'Save to Favorites');
+      button.title = saved ? 'Saved to Favorites — tap to remove' : 'Save to Favorites';
+      button.disabled = savingFavorites || pendingFavorites.has(item.id);
+    }
+  });
+  syncFavoritesUi();
+}
+
+function syncFavoritesUi(syncConfig = false): void {
+  const favoriteCount = items.filter(isFavorite).length;
+  const total = document.getElementById('favorites-total');
+  if (total) total.textContent = String(favoriteCount);
+  const filter = document.getElementById('favorites-filter');
+  filter?.setAttribute('aria-pressed', String(favoritesOnly));
+  filter?.classList.toggle('active', favoritesOnly);
+  if (filter) filter.textContent = favoritesOnly ? 'Show all media' : 'Show favorites';
+  const select = document.getElementById('favorites-select');
+  select?.setAttribute('aria-pressed', String(selectionMode));
+  if (select) select.textContent = selectionMode ? 'Done selecting' : 'Select media';
+  const media = document.getElementById('favorites-media') as HTMLSelectElement | null;
+  const sort = document.getElementById('favorites-sort') as HTMLSelectElement | null;
+  if (syncConfig) {
+    if (media) media.value = activeConfig.playbackMediaMode ?? 'both';
+    if (sort) sort.value = activeConfig.favoritesSort ?? 'library';
+  }
+  const ready = playableFavorites(items, (media?.value ?? 'both') as PlaybackMediaMode).length;
+  for (const id of ['favorites-ordered', 'favorites-shuffle']) {
+    const button = document.getElementById(id) as HTMLButtonElement | null;
+    if (button) button.disabled = startingFavorites || savingFavorites || !ready;
+  }
+  const status = document.getElementById('favorites-status');
+  if (status) status.textContent = favoriteCount
+    ? `${favoriteCount} saved · ${ready} ready for chosen media type. Saved playback: ${activeConfig.playbackOrder === 'shuffle' ? 'Shuffle' : 'In order'}.`
+    : 'No favorites yet. Star a card or select media and save favorites.';
+  const bar = document.getElementById('favorites-save-bar');
+  if (bar) bar.hidden = selectedMediaIds.size === 0;
+  document.body.classList.toggle('favorites-selecting', selectedMediaIds.size > 0);
+  const count = document.getElementById('favorites-selected-count');
+  if (count) count.textContent = `${selectedMediaIds.size} selected`;
+  for (const id of ['favorites-save', 'bulk-favorite', 'bulk-unfavorite']) {
+    const button = document.getElementById(id) as HTMLButtonElement | null;
+    if (button) button.disabled = savingFavorites || pendingFavorites.size > 0 || selectedMediaIds.size === 0;
+  }
+  const save = document.getElementById('favorites-save');
+  if (save) save.textContent = savingFavorites ? 'Saving…' : '★ Save favorites';
+}
+
+async function saveSelectedFavorites(enabled: boolean): Promise<void> {
+  if (savingFavorites || !selectedMediaIds.size || pendingFavorites.size) return;
+  const ids = [...selectedMediaIds];
+  savingFavorites = true;
+  syncFavoriteCards();
+  try {
+    await setItemsEnabled(ids, enabled);
+    const saved = new Set(ids);
+    for (const item of items) if (saved.has(item.id)) item.enabled = enabled;
+    // Only clear the saved selection; media newly selected during the request is retained.
+    for (const id of ids) selectedMediaIds.delete(id);
+    selectionMode = selectedMediaIds.size > 0;
+    toast(`${ids.length} item${ids.length === 1 ? '' : 's'} ${enabled ? 'saved to' : 'removed from'} Favorites.`);
+  } catch (error) {
+    // Large selections are batched; reconcile partial success without claiming a full save.
+    try { items = await fetchItems(); } catch { /* Keep the user's selection available to retry. */ }
+    toast(`Favorites save incomplete: ${(error as Error).message}. Your selection is kept for retry.`, { error: true });
+  } finally {
+    savingFavorites = false;
+    renderGrid();
+    syncTransformToolbar();
+  }
+}
+
+function wireFavorites(): void {
+  document.getElementById('favorites-filter')?.addEventListener('click', () => {
+    favoritesOnly = !favoritesOnly; nowPlayingOnly = false; applyFilterChange();
+  });
+  document.getElementById('favorites-select')?.addEventListener('click', () => {
+    document.getElementById('media-select')?.click();
+  });
+  document.getElementById('favorites-save')?.addEventListener('click', () => void saveSelectedFavorites(true));
+  document.getElementById('favorites-clear')?.addEventListener('click', () => document.getElementById('clear-selection')?.click());
+  document.getElementById('favorites-media')?.addEventListener('change', () => syncFavoritesUi());
+  for (const [id, order] of [['favorites-ordered', 'ordered'], ['favorites-shuffle', 'shuffle']] as const) {
+    document.getElementById(id)?.addEventListener('click', async () => {
+      if (startingFavorites || savingFavorites) return;
+      const media = (document.getElementById('favorites-media') as HTMLSelectElement).value as PlaybackMediaMode;
+      const sort = (document.getElementById('favorites-sort') as HTMLSelectElement).value as FavoritesSort;
+      startingFavorites = true; syncFavoritesUi();
+      try {
+        const result = await playFavorites(order as PlaybackOrder, media, sort);
+        activeConfig = result.config;
+        syncFavoritesUi(true);
+        toast(`${result.count} favorites sent to the frame · ${order === 'shuffle' ? 'Shuffle' : 'In order'}.`);
+        await syncPlayback();
+      } catch (error) {
+        toast(`Could not start favorites: ${(error as Error).message}`, { error: true });
+      } finally { startingFavorites = false; syncFavoritesUi(); }
+    });
+  }
 }
 
 function wireBulkActions(): void {
@@ -1736,8 +1872,8 @@ function wireBulkActions(): void {
       toast(`Moved ${ids.length} item${ids.length === 1 ? '' : 's'} to Trash.`);
     }
   });
-  document.getElementById('bulk-favorite')?.addEventListener('click', () => void run(() => setItemsEnabled([...selectedMediaIds], true)));
-  document.getElementById('bulk-unfavorite')?.addEventListener('click', () => void run(() => setItemsEnabled([...selectedMediaIds], false)));
+  document.getElementById('bulk-favorite')?.addEventListener('click', () => void saveSelectedFavorites(true));
+  document.getElementById('bulk-unfavorite')?.addEventListener('click', () => void saveSelectedFavorites(false));
   document.getElementById('bulk-play')?.addEventListener('click', () => void run(async () => {
     const ids = [...selectedMediaIds];
     if (!await castControl({ type: 'playSequence', ids })) await playSequence(ids);
@@ -2060,6 +2196,7 @@ async function start(): Promise<void> {
     document.getElementById('media-quick-dock')?.classList.remove('hidden');
     wireMediaTransforms();
     wireBulkActions();
+    wireFavorites();
     wireTrashActions();
     setMode('cast');
   }
