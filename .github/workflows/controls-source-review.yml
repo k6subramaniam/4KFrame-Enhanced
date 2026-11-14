@@ -1,0 +1,17 @@
+name: Controls source review
+on:
+  push:
+    branches: [fix/admin-expand-controls]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: git archive --format=tar HEAD > /tmp/controls-source.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: controls-source
+          path: /tmp/controls-source.tar
+          retention-days: 1
