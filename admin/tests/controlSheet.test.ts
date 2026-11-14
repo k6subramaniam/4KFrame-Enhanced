@@ -114,5 +114,31 @@ test('wireControlSheet opens with the floating toggle and closes with close, bac
   doc.dispatchEvent(keydown('Escape'));
   assert.equal(controller.isOpen(), false);
   assert.equal(sheet.hidden, true);
-  assert.equal(toggle.focusCount, 2);
+  assert.equal(toggle.focusCount, 3);
+});
+
+
+test('expanded and compact sizes retain the open state and never reconstruct controls', () => {
+  const sheet = new FakeElement();
+  const body = new FakeElement();
+  const controller = wireControlSheet({
+    sheet: sheet as unknown as HTMLElement,
+    body: body as unknown as HTMLElement,
+    document: new EventTarget() as Document,
+  }, true);
+  assert.equal(controller.isOpen(), true);
+  assert.equal(controller.isExpanded(), true);
+  assert.equal(sheet.classList.contains('controls-expanded'), true);
+  controller.setExpanded(false);
+  assert.equal(controller.isExpanded(), false);
+  assert.equal(controller.isOpen(), true);
+  assert.equal(sheet.inert, false);
+  controller.setOpen(true); // A library refresh preserves the user's panel size.
+  assert.equal(controller.isExpanded(), false);
+  controller.setOpen(false);
+  controller.setOpen(true);
+  assert.equal(controller.isExpanded(), false);
+  controller.setExpanded(true);
+  assert.equal(sheet.classList.contains('controls-expanded'), true);
+  assert.equal(body.classList.contains('controls-open'), true);
 });
