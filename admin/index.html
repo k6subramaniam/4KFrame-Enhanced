@@ -337,6 +337,12 @@
             <div id="ops-jobs-value" class="ops-card-value">—</div>
           </div>
         </div>
+        <div class="activity-overview" aria-label="Lifetime recorded media activity">
+          <div><strong id="activity-total-views">0</strong><span>Photo views</span></div>
+          <div><strong id="activity-total-plays">0</strong><span>Video plays</span></div>
+          <div><strong id="activity-total-clicks">0</strong><span>Clicks</span></div>
+          <div><strong id="activity-total-selections">0</strong><span>Selections</span></div>
+        </div>
         <div class="ops-now">
           <img id="ops-now-thumb" alt="" hidden />
           <div id="ops-now-placeholder" style="width:54px;height:42px;border-radius:.55rem;background:#05070b;display:grid;place-items:center;color:var(--muted)">—</div>
@@ -388,7 +394,7 @@
           <button id="live-cast-stop" type="button">Stop</button>
         </div>
       </section>
-      <button id="controls-toggle" type="button" aria-controls="control-sheet" aria-expanded="false">Controls</button>
+
       <div id="controls-backdrop" aria-hidden="true"></div>
       <section id="control-sheet" role="dialog" aria-modal="true" aria-label="Frame controls" aria-hidden="true" hidden inert>
         <div id="control-sheet-header">
@@ -441,6 +447,69 @@
                     <button id="media-filter-reset" type="button">Reset filters</button>
             </div>
           </div>
+          <div class="activity-search-row">
+            <label class="field activity-search">Search media<input id="media-search" type="search" maxlength="200" placeholder="Filename or caption" autocomplete="off" /></label>
+            <label class="field">Media type
+              <select id="media-kind-filter">
+                <option value="all">Photos + videos</option>
+                <option value="photo">Photos only</option>
+                <option value="video">Videos only</option>
+              </select>
+            </label>
+          <label class="field">Sort media
+            <select id="media-sort">
+              <option value="date-desc">Selected date — newest first</option>
+              <option value="date-asc">Selected date — oldest first</option>
+              <option value="filename-asc">Filename — A to Z</option>
+              <option value="filename-desc">Filename — Z to A</option>
+              <option value="size-desc">File size — largest first</option>
+              <option value="size-asc">File size — smallest first</option>
+              <option value="resolution-desc">Resolution — highest first</option>
+              <option value="views-desc">Views / plays — most first</option>
+              <option value="views-asc">Views / plays — least first</option>
+              <option value="clicks-desc">Clicks — most first</option>
+              <option value="clicks-asc">Clicks — least first</option>
+              <option value="selections-desc">Selections — most first</option>
+              <option value="selections-asc">Selections — least first</option>
+              <option value="recent-viewed">Viewed / played — most recent</option>
+            </select>
+          </label>
+          </div>
+          <div class="activity-shortcuts" role="group" aria-label="Quick activity filters">
+            <button type="button" data-activity-preset="all">Any count</button>
+            <button type="button" data-activity-preset="unviewed">Never viewed / played</button>
+            <button type="button" data-activity-preset="unclicked">Never clicked</button>
+            <button type="button" data-activity-preset="unselected">Never selected</button>
+            <button type="button" id="activity-now" aria-pressed="false">Now playing</button>
+          </div>
+          <details id="activity-ranges" class="activity-details">
+            <summary>Count ranges</summary>
+            <form id="activity-filter-form">
+              <div class="activity-range-grid">
+                <fieldset><legend>Views / plays</legend><div class="count-range-row">
+                  <label>Minimum<input id="activity-minViews" type="number" min="0" step="1" max="9007199254740991" inputmode="numeric" placeholder="0" /></label>
+                  <label>Maximum<input id="activity-maxViews" type="number" min="0" step="1" max="9007199254740991" inputmode="numeric" placeholder="Any" /></label>
+                </div></fieldset>
+                <fieldset><legend>Clicks</legend><div class="count-range-row">
+                  <label>Minimum<input id="activity-minClicks" type="number" min="0" step="1" max="9007199254740991" inputmode="numeric" placeholder="0" /></label>
+                  <label>Maximum<input id="activity-maxClicks" type="number" min="0" step="1" max="9007199254740991" inputmode="numeric" placeholder="Any" /></label>
+                </div></fieldset>
+                <fieldset><legend>Selections</legend><div class="count-range-row">
+                  <label>Minimum<input id="activity-minSelections" type="number" min="0" step="1" max="9007199254740991" inputmode="numeric" placeholder="0" /></label>
+                  <label>Maximum<input id="activity-maxSelections" type="number" min="0" step="1" max="9007199254740991" inputmode="numeric" placeholder="Any" /></label>
+                </div></fieldset>
+              </div>
+              <button type="submit">Apply count filters</button>
+              <span id="activity-filter-error" role="alert"></span>
+            </form>
+            <p class="muted activity-help">Views and plays count confirmed TV appearances, once per appearance. Clicks count opening or playing a tile. Selections count additions to a selection, not deselections. Older history cannot be reconstructed.</p>
+          </details>
+          <div class="activity-result-row">
+            <span class="muted" id="media-filter-summary" role="status">All media</span>
+            <button id="activity-update" type="button" hidden>Activity changed · update results</button>
+          </div>
+          <span id="activity-sync-status" class="muted" role="status"></span>
+          <details class="activity-details"><summary>Date and source filters</summary>
           <div class="library-filters">
             <label class="field">Date type
               <select id="media-date-field">
@@ -453,13 +522,6 @@
             </label>
             <label class="field">To
               <input id="media-date-end" type="date" />
-            </label>
-            <label class="field">Media type
-              <select id="media-kind-filter">
-                <option value="all">Photos + videos</option>
-                <option value="photo">Photos only</option>
-                <option value="video">Videos only</option>
-              </select>
             </label>
             <label class="field">Uploader / source
               <select id="media-uploader-filter"><option value="all">All uploaders</option></select>
@@ -485,12 +547,12 @@
             <button type="button" data-date-preset="this-month">This month</button>
             <button type="button" data-date-preset="last-month">Previous month</button>
             <button type="button" data-date-preset="clear">Any date</button>
-            <span class="muted" id="media-filter-summary">All media</span>
           </div>
+          </details>
         </div>
       </section>
-      <section class="panel" id="people-panel">
-        <h2>Smart Face Match</h2>
+      <details class="panel activity-details" id="people-panel">
+        <summary>People and face labels</summary>
         <div class="row people-controls">
           <label class="field">People filter
             <select id="people-filter">
@@ -503,20 +565,9 @@
           <label class="field">Label
             <select id="label-filter" disabled><option value="">Any label</option></select>
           </label>
-          <label class="field">Sort media
-            <select id="media-sort">
-              <option value="date-desc">Selected date — newest first</option>
-              <option value="date-asc">Selected date — oldest first</option>
-              <option value="filename-asc">Filename — A to Z</option>
-              <option value="filename-desc">Filename — Z to A</option>
-              <option value="size-desc">File size — largest first</option>
-              <option value="size-asc">File size — smallest first</option>
-              <option value="resolution-desc">Resolution — highest first</option>
-            </select>
-          </label>
           <span class="muted" id="people-summary">Face matching is opt-in on the server.</span>
         </div>
-      </section>
+      </details>
       <p class="muted" id="hint">Cast mode: click a photo to show it on the frame.</p>
       <div id="media-transform-tools" class="row" role="toolbar" aria-label="Media orientation controls">
         <button id="media-select" type="button" aria-label="Toggle media selection mode">Select</button>
@@ -537,6 +588,7 @@
         <span class="muted">Favorites participate in automatic playback.</span>
       </div>
       <div id="grid" class="grid"></div>
+      <button id="media-load-more" type="button" hidden>Show more</button>
       <section class="panel" id="trash-panel" aria-label="Trash">
         <div class="library-panel-content">
           <div class="library-panel-head">
@@ -558,5 +610,12 @@
          focus; confirmations render buttons inside and are focus-managed by main.ts. -->
     <div id="toasts" aria-live="polite" aria-atomic="false"></div>
     <script type="module" src="/src/main.ts"></script>
+    <nav id="media-quick-dock" class="hidden" aria-label="Media playback controls">
+      <button id="activity-playing" type="button" title="Filter the library to the current item"><span>On TV</span><strong id="activity-now-title">Nothing playing</strong></button>
+      <button id="activity-prev" type="button" aria-label="Previous media" title="Skip to previous media">⏮</button>
+      <button id="activity-play" type="button" aria-label="Pause playback" disabled>⏸</button>
+      <button id="activity-next" type="button" aria-label="Next media" title="Skip to next media">⏭</button>
+    <button id="controls-toggle" type="button" aria-controls="control-sheet" aria-expanded="false">Controls</button>
+    </nav>
   </body>
 </html>

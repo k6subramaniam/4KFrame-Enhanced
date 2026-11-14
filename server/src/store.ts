@@ -12,6 +12,9 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
   defaultConfig,
+  getMediaActivity,
+  type InteractionKind,
+  type MediaActivityUpdate,
   normalizeTransform,
   type DisplayTransform,
   type FrameBackup,
@@ -21,6 +24,8 @@ import {
 import { DB_FILE, DATA_DIR, MEDIA_DIR } from './env.js';
 
 interface DbDocument {
+  /** Bounded idempotency window for retried admin interactions. */
+  activityReceipts?: { id: string; fingerprint: string }[];
   config: FrameConfig;
   items: MediaItem[];
   /** Recoverable media removed from the active library. Assets stay on disk until purge. */
@@ -60,6 +65,7 @@ export async function initStore(): Promise<void> {
       order: parsed.order ?? (parsed.items ?? []).map((i) => i.id),
       googleTokens: parsed.googleTokens,
       authSecret: parsed.authSecret,
+      activityReceipts: Array.isArray(parsed.activityReceipts) ? parsed.activityReceipts.slice(-4096) : [],
     };
   } catch {
     doc = { config: defaultConfig(), items: [], trash: [], order: [] };
@@ -75,7 +81,8 @@ function db(): DbDocument {
 /** Serialise the current document to disk, chained to avoid concurrent writes. */
 function flush(): Promise<void> {
   const snapshot = JSON.stringify(db(), null, 2);
-  writeChain = writeChain.then(async () => {
+  // A transient write failure must not poison every subsequent persistence attempt.
+  writeChain = writeChain.catch(() => {}).then(async () => {
     const tmp = path.join(DATA_DIR, `.frame.${process.pid}.tmp`);
     await fs.writeFile(tmp, snapshot, 'utf8');
     await fs.rename(tmp, DB_FILE);
@@ -102,7 +109,8 @@ export function listItems(): MediaItem[] {
   const byId = new Map(items.map((i) => [i.id, i]));
   const ordered = order.map((id) => byId.get(id)).filter((i): i is MediaItem => Boolean(i));
   // Append any items missing from the order (defensive).
-  for (const i of items) if (!order.includes(i.id)) ordered.push(i);
+  const orderedIds = new Set(order);
+  for (const i of items) if (!orderedIds.has(i.id)) ordered.push(i);
   return ordered;
 }
 
@@ -358,4 +366,59 @@ export async function restoreSafeBackup(input: unknown): Promise<{
     restoredTrash: validTrash.length,
     skippedMissingAssets,
   };
+}
+
+
+function activityUpdates(items: MediaItem[]): MediaActivityUpdate[] {
+  return items.map((item) => ({ id: item.id, activity: getMediaActivity(item) }));
+}
+const increment = (value: number): number => Math.min(Number.MAX_SAFE_INTEGER, value + 1);
+
+/** Mutate before the first await; concurrent requests cannot lose an increment. */
+export async function recordMediaInteraction(ids: string[], kind: InteractionKind, eventId: string): Promise<
+  | { ok: false; error: 'missing' | 'conflict' }
+  | { ok: true; duplicate: boolean; updates: MediaActivityUpdate[] }
+> {
+  const d = db();
+  const uniqueIds = [...new Set(ids)];
+  const targets = uniqueIds.map(getItem);
+  if (targets.some((item) => !item)) return { ok: false, error: 'missing' };
+  const items = targets as MediaItem[];
+  const fingerprint = JSON.stringify([kind, [...uniqueIds].sort()]);
+  const receipts = d.activityReceipts ??= [];
+  const receipt = receipts.find((entry) => entry.id === eventId);
+  if (receipt) {
+    if (receipt.fingerprint !== fingerprint) return { ok: false, error: 'conflict' };
+    // Await any in-flight write; retry a failed flush before acknowledging the receipt.
+    await writeChain.catch(() => flush());
+    return { ok: true, duplicate: true, updates: activityUpdates(items) };
+  }
+  const now = Date.now();
+  for (const item of items) {
+    const a = getMediaActivity(item);
+    if (kind === 'click') { a.clickCount = increment(a.clickCount); a.lastClickedAt = now; }
+    else { a.selectionCount = increment(a.selectionCount); a.lastSelectedAt = now; }
+    item.activity = a;
+  }
+  receipts.push({ id: eventId, fingerprint });
+  if (receipts.length > 4096) receipts.splice(0, receipts.length - 4096);
+  await flush();
+  return { ok: true, duplicate: false, updates: activityUpdates(items) };
+}
+
+/** Once per slideshow appearance, not once per socket, retry, loop or pause/resume. */
+export async function recordMediaPresentation(id: string, presentationId: string): Promise<MediaActivityUpdate[]> {
+  const item = getItem(id);
+  if (!item) return [];
+  const a = getMediaActivity(item);
+  if (a.lastPresentationId === presentationId) {
+    await writeChain.catch(() => flush());
+    return [];
+  }
+  if (item.kind === 'video') { a.playCount = increment(a.playCount); a.lastPlayedAt = Date.now(); }
+  else { a.viewCount = increment(a.viewCount); a.lastViewedAt = Date.now(); }
+  a.lastPresentationId = presentationId;
+  item.activity = a;
+  await flush();
+  return activityUpdates([item]);
 }

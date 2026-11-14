@@ -50,6 +50,11 @@ let holding = false;
 let receivedConfigEvent = false;
 let receivedPausedEvent = false;
 let lastPlaybackReportAt = 0;
+let renderGeneration = 0;
+let activePresentationId = '';
+let videoSourceReady = false;
+let visiblePhotoIds: string[] = [];
+
 let displayHeartbeatTimer: ReturnType<typeof window.setInterval> | undefined;
 let tvAudioFallbackActive = false;
 let tvAudioUnlocked = false;
@@ -85,6 +90,17 @@ function sendControl(msg: ControlMessage): void {
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify(msg));
   }
+}
+
+/** Heartbeats retry the same receipt; the server deduplicates it durably. */
+function reportVisibleMedia(): void {
+  if (!activePresentationId || activePresentationId !== lastShowEvent?.presentationId
+    || liveCastActive || document.visibilityState === 'hidden') return;
+  const ids = showingVideo
+    ? (videoSourceReady && !video.paused && !paused && video.readyState >= 2 && video.videoWidth > 0
+      && video.currentTime > 0 && lastVideoItem ? [lastVideoItem.id] : [])
+    : visiblePhotoIds;
+  for (const itemId of ids) sendControl({ type: 'mediaPresented', itemId, presentationId: activePresentationId });
 }
 
 function reportVideoPlayback(force = false): void {
@@ -167,12 +183,16 @@ function composeCurrent(items: MediaItem[]): Promise<HTMLCanvasElement> {
   });
 }
 
-async function renderItems(items: MediaItem[], interactive: boolean): Promise<void> {
+async function renderItems(items: MediaItem[], interactive: boolean, presentationId = ''): Promise<void> {
+  const generation = ++renderGeneration;
+  activePresentationId = presentationId;
+  visiblePhotoIds = [];
+  videoSourceReady = false;
   stopMotion();
   const videoItem = items.find((i) => i.kind === 'video');
   if (videoItem) {
     lastItems = null;
-    await renderVideo(videoItem);
+    await renderVideo(videoItem, generation);
     return;
   }
 
@@ -181,6 +201,7 @@ async function renderItems(items: MediaItem[], interactive: boolean): Promise<vo
   lastVideoItem = null;
 
   const toFrame = await composeCurrent(items);
+  if (generation !== renderGeneration || liveCastActive) return;
   const duration = interactive ? config.interactiveTransitionPeriod : config.transitionPeriod;
   if (prevFrame) {
     await renderer.transition(prevFrame, toFrame, String(config.transition), duration);
@@ -203,6 +224,10 @@ async function renderItems(items: MediaItem[], interactive: boolean): Promise<vo
     }, 2500);
     return;
   }
+
+  if (generation !== renderGeneration || liveCastActive) return;
+  visiblePhotoIds = JSON.parse(toFrame.dataset.loadedMediaIds ?? '[]') as string[];
+  reportVisibleMedia();
 
   // Ken Burns motion only for single photos (not dual layout), and never while paused.
   if (items.length === 1 && !paused) startMotion();
@@ -385,7 +410,7 @@ function displayMediaUrl(file: string): string {
     : base;
 }
 
-async function renderVideo(item: MediaItem): Promise<void> {
+async function renderVideo(item: MediaItem, generation: number): Promise<void> {
   showingVideo = true;
   lastVideoItem = item;
   videoTrackMissing = false; // video→video transitions skip hideVideo()
@@ -404,6 +429,7 @@ async function renderVideo(item: MediaItem): Promise<void> {
   // Establish the scoped media cookie before assigning src. Chromecast's media stack
   // performs separate HEAD/Range requests that otherwise lose an admin/query handoff.
   await ensureDisplayMediaSession();
+  if (generation !== renderGeneration || liveCastActive) return;
   layoutVideo(item);
   syncActiveVideoPlaybackProperties();
   video.onerror = () => handleVideoError(item);
@@ -413,9 +439,11 @@ async function renderVideo(item: MediaItem): Promise<void> {
   if (posterFile) video.poster = displayMediaUrl(posterFile);
   else video.removeAttribute('poster');
   video.src = displayMediaUrl(item.file);
+  videoSourceReady = true;
   lastPlaybackReportAt = 0;
   video.classList.add('visible');
   await attemptVideoPlayback();
+  if (generation !== renderGeneration || liveCastActive) return;
   setCaption([item], config);
   reportVideoPlayback(true);
   syncPublicControls();
@@ -834,6 +862,9 @@ function startLiveCast(info: LiveCastInfo): void {
   if (!liveCastImg || !liveCastVideo) return;
   clearTimeout(liveCastTimer);
   liveCastActive = info;
+  renderGeneration += 1;
+  visiblePhotoIds = [];
+  videoSourceReady = false;
   stopMotion();
 
   // If the bytes can't be fetched (expired, replaced, auth), bail out immediately rather
@@ -879,7 +910,7 @@ function endLiveCast(): void {
     el.removeAttribute('src');
   }
   liveCastVideo?.pause();
-  if (lastShowEvent) renderItems(lastShowEvent.items, false).catch((err) => console.error(err));
+  if (lastShowEvent) renderItems(lastShowEvent.items, false, lastShowEvent.presentationId).catch((err) => console.error(err));
   else rerender().catch((err) => console.error(err));
 }
 
@@ -899,7 +930,7 @@ function handleEvent(event: FrameEvent): void {
       // Always remember the latest real payload, even while a live cast covers the screen,
       // so ending the cast can repaint instantly without waiting for the next rotation.
       lastShowEvent = event;
-      if (!liveCastActive) renderItems(event.items, event.interactive).catch((err) => console.error(err));
+      if (!liveCastActive) renderItems(event.items, event.interactive, event.presentationId).catch((err) => console.error(err));
       break;
     case 'liveCast':
       startLiveCast(event.liveCast);
@@ -957,7 +988,8 @@ video.addEventListener('playing', () => {
   setStatus(statusText());
 });
 video.addEventListener('durationchange', () => reportVideoPlayback(true));
-video.addEventListener('timeupdate', () => { reportVideoPlayback(); checkVideoTrackDecoding(); });
+video.addEventListener('timeupdate', () => { reportVideoPlayback(); checkVideoTrackDecoding(); reportVisibleMedia(); });
+document.addEventListener('visibilitychange', reportVisibleMedia);
 video.addEventListener('seeked', () => reportVideoPlayback(true));
 
 /**
@@ -1701,6 +1733,7 @@ function connect(): void {
       // Do not rely only on HTMLMediaElement timeupdate. Some TV browsers throttle it
       // during buffering/system overlays, which used to make the companion seek bar vanish.
       reportVideoPlayback(true);
+      reportVisibleMedia();
     }
   };
   ws.onopen = () => {

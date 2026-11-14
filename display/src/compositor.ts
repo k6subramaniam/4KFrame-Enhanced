@@ -182,6 +182,7 @@ export async function compose(items: MediaItem[], opts: ComposeOptions): Promise
 
   const photos = items.filter((i) => i.kind === 'photo' || i.poster);
   const imgs = await Promise.all(photos.map((p) => loadImage(imageUrl(p)).catch(() => null)));
+  canvas.dataset.loadedMediaIds = JSON.stringify(photos.filter((_photo, i) => imgs[i] !== null).map((photo) => photo.id));
   const valid = imgs
     .map((img, i) => (img ? { img, item: photos[i] } : null))
     .filter((pair): pair is { img: HTMLImageElement; item: MediaItem } => Boolean(pair));
