@@ -18,13 +18,16 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { aspectRatio, type MediaItem } from '@4kframe/shared';
+import { aspectRatio, playableFavorites, type MediaItem } from '@4kframe/shared';
+import { ShuffleRotation } from './shuffle.js';
 import { getConfig, listItems, getItem } from './store.js';
 import { hub } from './hub.js';
 
 let presentationId = '';
 export function getCurrentPresentationId(): string { return presentationId; }
 
+const shuffle = new ShuffleRotation();
+let manuallyCast = false;
 let pointer = 0;
 let current: MediaItem[] = [];
 let timer: NodeJS.Timeout | undefined;
@@ -75,17 +78,8 @@ function targetAspect(): number | null {
 
 /** Items eligible for automatic rotation (excluded items and unselected media kinds are filtered out). */
 function rotation(): MediaItem[] {
-  const mode = getConfig().playbackMediaMode;
-  return listItems()
-    .filter((i) => i.enabled !== false)
-    // Never hand an in-progress compatibility/upscale file to the TV. The processing job
-    // refreshes the slideshow when the finished rendition is ready.
-    .filter((i) => i.kind !== 'video' || (!i.transcoding && !i.upscaling))
-    .filter((i) => {
-      if (mode === 'photos') return i.kind === 'photo';
-      if (mode === 'videos') return i.kind === 'video';
-      return true;
-    });
+  const cfg = getConfig();
+  return playableFavorites(listItems(), cfg.playbackMediaMode, cfg.favoritesSort);
 }
 
 /** Choose the item(s) to display at `index` within the rotation. */
@@ -206,7 +200,16 @@ export function advance(delta: number, interactive: boolean): void {
     clearTimer();
     return;
   }
-  pointer = (pointer + delta + items.length) % items.length;
+  if (getConfig().playbackOrder === 'shuffle') {
+    const id = shuffle.step(items.map((item) => item.id), current[0]?.id, delta);
+    if (delta < 0 && id === current[0]?.id) return;
+    pointer = Math.max(0, items.findIndex((item) => item.id === id));
+  } else {
+    const at = items.findIndex((item) => item.id === current[0]?.id);
+    if (at >= 0) pointer = at;
+    pointer = ((pointer + delta) % items.length + items.length) % items.length;
+  }
+  manuallyCast = false;
   current = selectAt(pointer);
   show(interactive);
 }
@@ -232,6 +235,7 @@ export async function cast(id: string): Promise<boolean> {
   const item = getItem(id);
   if (!item) return false;
   clearQueue();
+  manuallyCast = true;
   current = [item];
   const rot = rotation();
   const idx = rot.findIndex((r) => r.id === id);
@@ -260,8 +264,13 @@ export function getCurrent(): MediaItem[] {
 export function startSlideshow(): void {
   clearQueue();
   clearTimer();
-  pointer = 0;
-  current = rotation().length ? selectAt(0) : [];
+  shuffle.reset();
+  manuallyCast = false;
+  const available = rotation();
+  const first = getConfig().playbackOrder === 'shuffle'
+    ? shuffle.step(available.map((item) => item.id), undefined, 1) : available[0]?.id;
+  pointer = Math.max(0, available.findIndex((item) => item.id === first));
+  current = available.length ? selectAt(pointer) : [];
   if (current.length) show(false);
 }
 
@@ -280,14 +289,27 @@ export function refresh(): void {
       return;
     }
   }
-  if (rotation().length === 0) {
+  const available = rotation();
+  if (available.length === 0) {
+    const hadCurrent = current.length > 0;
     current = [];
     clearTimer();
+    if (hadCurrent) hub.emitEvent({ type: 'show', items: [], interactive: false });
     return;
   }
 
   if (current.length === 0) {
     startSlideshow();
+  } else if (!getItem(current[0]!.id) || (!manuallyCast && !available.some((item) => item.id === current[0]!.id))) {
+    // Removing a playing favorite must not leave a stale item on the TV.
+    pointer = Math.min(pointer, available.length - 1);
+    if (getConfig().playbackOrder === 'shuffle') {
+      const id = shuffle.step(available.map((item) => item.id), current[0]?.id, 1);
+      pointer = Math.max(0, available.findIndex((item) => item.id === id));
+    }
+    manuallyCast = false;
+    current = selectAt(pointer);
+    show(false);
   } else {
     schedule();
   }

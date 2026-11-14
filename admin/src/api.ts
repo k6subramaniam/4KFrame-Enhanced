@@ -310,6 +310,17 @@ export async function emptyTrash(): Promise<void> {
   await requestJson('/api/trash', { method: 'DELETE' });
 }
 
+export async function playFavorites(
+  order: import('@4kframe/shared').PlaybackOrder,
+  media: import('@4kframe/shared').PlaybackMediaMode,
+  sort: import('@4kframe/shared').FavoritesSort,
+): Promise<{ count: number; config: import('@4kframe/shared').FrameConfig }> {
+  return requestJson('/api/favorites/play', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ order, media, sort }),
+  });
+}
+
 export async function playSequence(ids: string[]): Promise<void> {
   await requestJson('/api/play-sequence', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }),

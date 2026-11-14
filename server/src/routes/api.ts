@@ -5,6 +5,7 @@
 
 import path from 'node:path';
 import { queryMediaActivity, registerMediaActivity } from '../mediaActivity.js';
+import { registerFavorites } from '../favorites.js';
 import { promises as fs } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import QRCode from 'qrcode';
@@ -424,6 +425,8 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
     return { ok: true, trashed: ids, trashExpiresAt: trashedAt + TRASH_RETENTION_MS };
   });
 
+  registerFavorites(app);
+
   app.post('/api/play-sequence', async (req, reply) => {
     const ids = mediaIds(req.body);
     if (!ids) return reply.code(400).send({ error: 'invalid media ids' });
@@ -443,8 +446,8 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
     if (patch && Object.keys(patch).length) {
       const updated = fromApiData(getConfig(), patch);
       await setConfig(updated);
-      refresh();
       hub.emitEvent({ type: 'config', config: updated });
+      refresh();
     }
     return toApiData(await withStorage());
   });

@@ -70,6 +70,12 @@ export type MotionMode = (typeof MOTION_MODES)[number];
 export const PLAYBACK_MEDIA_MODES = ['both', 'photos', 'videos'] as const;
 export type PlaybackMediaMode = (typeof PLAYBACK_MEDIA_MODES)[number];
 
+/** Persistent order for the starred-media rotation. */
+export const PLAYBACK_ORDERS = ['ordered', 'shuffle'] as const;
+export type PlaybackOrder = (typeof PLAYBACK_ORDERS)[number];
+export const FAVORITES_SORTS = ['library', 'oldest', 'newest', 'filename'] as const;
+export type FavoritesSort = (typeof FAVORITES_SORTS)[number];
+
 /** Where video audio should play, if anywhere. */
 /** Where video audio should be played. */
 export const VIDEO_AUDIO_MODES = ['tv', 'muted', 'phone'] as const;
@@ -143,6 +149,8 @@ export interface FrameConfig {
   motion: MotionMode;
   /** Which media kinds are eligible for automatic playback rotation. */
   playbackMediaMode: PlaybackMediaMode;
+  playbackOrder: PlaybackOrder;
+  favoritesSort: FavoritesSort;
   /** Bias cover crops toward detected faces when no manual pan/zoom override is active. */
   smartFraming: boolean;
   frameWidth: number;
@@ -195,6 +203,8 @@ export function defaultConfig(): FrameConfig {
     panY: 0,
     motion: 'off',
     playbackMediaMode: 'both',
+    playbackOrder: 'ordered',
+    favoritesSort: 'library',
     smartFraming: false,
     frameWidth: 3840,
     frameHeight: 2160,
@@ -239,6 +249,8 @@ export function toApiData(c: FrameConfig): ApiDataPayload {
     panY: String(c.panY),
     motion: c.motion,
     playbackMediaMode: c.playbackMediaMode,
+    playbackOrder: c.playbackOrder ?? 'ordered',
+    favoritesSort: c.favoritesSort ?? 'library',
     smartFraming: String(c.smartFraming),
     frameWidth: String(c.frameWidth),
     frameHeight: String(c.frameHeight),
@@ -325,6 +337,10 @@ export function fromApiData(current: FrameConfig, patch: ApiDataPayload): FrameC
     panY: clamp(num(patch.panY, current.panY), -1, 1),
     motion: parseMotion(patch.motion, current.motion),
     playbackMediaMode: parsePlaybackMediaMode(patch.playbackMediaMode, current.playbackMediaMode),
+    playbackOrder: (PLAYBACK_ORDERS as readonly string[]).includes(patch.playbackOrder)
+      ? patch.playbackOrder as PlaybackOrder : current.playbackOrder ?? 'ordered',
+    favoritesSort: (FAVORITES_SORTS as readonly string[]).includes(patch.favoritesSort)
+      ? patch.favoritesSort as FavoritesSort : current.favoritesSort ?? 'library',
     smartFraming: truthy(patch.smartFraming, current.smartFraming),
     frameFill: parseFillMode(patch, current.fillMode) === 'cover',
     frameWidth: num(patch.frameWidth, current.frameWidth),

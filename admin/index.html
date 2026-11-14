@@ -439,6 +439,30 @@
         </section>
         <div id="settings"></div>
       </section>
+      <section id="favorites-panel" aria-label="Favorites playback">
+        <div class="favorites-heading">
+          <h2>★ Favorites <span id="favorites-total">0</span></h2>
+          <button id="favorites-filter" type="button" aria-pressed="false">Show favorites</button>
+          <button id="favorites-select" type="button" aria-pressed="false">Select media</button>
+        </div>
+        <p class="muted favorites-help">Tap a star on a card to save it. Select several to save them together.</p>
+        <div class="favorites-options">
+          <label class="field">Play favorites
+            <select id="favorites-media"><option value="both">Photos + videos</option><option value="photos">Photos only</option><option value="videos">Videos only</option></select>
+          </label>
+          <label class="field">In-order sequence
+            <select id="favorites-sort"><option value="library">Saved library order</option><option value="oldest">Oldest first</option><option value="newest">Newest first</option><option value="filename">Filename A–Z</option></select>
+          </label>
+          <button id="favorites-ordered" type="button">▶ Play in order</button>
+          <button id="favorites-shuffle" type="button">⇄ Shuffle</button>
+        </div>
+        <p id="favorites-status" class="muted favorites-help" aria-live="polite">Save favorites to start a slideshow.</p>
+      </section>
+      <div id="favorites-save-bar" role="group" aria-label="Quick favorite selection" hidden>
+        <span id="favorites-selected-count" aria-live="polite">0 selected</span>
+        <button id="favorites-save" type="button">★ Save favorites</button>
+        <button id="favorites-clear" type="button" aria-label="Clear selected media">Clear</button>
+      </div>
       <section class="panel" id="media-filter-panel" aria-label="Media library filters">
         <div class="library-panel-content">
           <div class="library-panel-head">
@@ -582,7 +606,7 @@
         <button id="select-visible" type="button">Select all matching</button>
         <button id="clear-selection" type="button">Clear</button>
         <button id="bulk-delete" type="button" data-requires-selection disabled>Delete selected</button>
-        <button id="bulk-favorite" type="button" data-requires-selection disabled>Add to Favorites</button>
+        <button id="bulk-favorite" type="button" data-requires-selection disabled>★ Save to Favorites</button>
         <button id="bulk-unfavorite" type="button" data-requires-selection disabled>Remove from Favorites</button>
         <button id="bulk-play" type="button" data-requires-selection disabled>Play selected in sequence</button>
         <span class="muted">Favorites participate in automatic playback.</span>
