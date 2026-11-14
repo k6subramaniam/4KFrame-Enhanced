@@ -14,12 +14,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Package exact tracked source for review
-        run: git archive --format=tar HEAD > /tmp/4kframe-source.tar
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Package validation runtime
+        run: tar -czf /tmp/4kframe-runtime.tgz node_modules
       - uses: actions/upload-artifact@v4
         with:
-          name: source-review
-          path: /tmp/4kframe-source.tar
+          name: validation-runtime
+          path: /tmp/4kframe-runtime.tgz
           retention-days: 1
   build:
     runs-on: ubuntu-latest
