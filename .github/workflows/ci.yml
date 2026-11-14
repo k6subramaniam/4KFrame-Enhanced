@@ -5,7 +5,22 @@ on:
     branches: ["**"]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
+  source-review:
+    if: github.ref == 'refs/heads/feat/media-activity-controls'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package exact tracked source for review
+        run: git archive --format=tar HEAD > /tmp/4kframe-source.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-review
+          path: /tmp/4kframe-source.tar
+          retention-days: 1
   build:
     runs-on: ubuntu-latest
     steps:
