@@ -2,44 +2,20 @@ name: CI
 
 on:
   push:
-    branches: ["feat/media-activity-controls"]
-
-permissions:
-  contents: read
+    branches: ["**"]
+  pull_request:
 
 jobs:
   build:
-    if: github.ref == 'refs/heads/feat/media-activity-controls'
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: feat/media-activity-controls
-      - name: Apply checksum-verified feature patch
-        if: hashFiles('.github/review/activity-*.b64') != ''
-        run: |
-          python3 - <<'PY'
-          import base64, hashlib, lzma, subprocess
-          from pathlib import Path
-          encoded = ''.join(Path(f'.github/review/activity-{i}.b64').read_text().strip() for i in range(1, 4))
-          patch = lzma.decompress(base64.b64decode(encoded, validate=True))
-          assert hashlib.sha256(patch).hexdigest() == '3df6ec1e301f9530d32022b195afc8c8cd6c6180fc09952e856dd780baa4c781', 'Patch checksum mismatch'
-          Path('/tmp/media-activity.patch').write_bytes(patch)
-          subprocess.run(['git', 'apply', '--check', '--unidiff-zero', '/tmp/media-activity.patch'], check=True)
-          subprocess.run(['git', 'apply', '--index', '--unidiff-zero', '/tmp/media-activity.patch'], check=True)
-          PY
-          git rm .github/review/activity-{1,2,3}.b64
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'feat: persist media activity and streamline library playback controls'
-          git push origin HEAD:feat/media-activity-controls
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - run: npm ci --no-audit --no-fund
+      - run: npm install
+      # Shared must be built first so server/display/admin can resolve its types.
       - run: npm run build:shared
       - run: npm run typecheck
       - run: npm test
