@@ -1,10 +1,11 @@
-import type { MediaItem } from '@4kframe/shared';
+import { matchesActivity, type ActivityFilters, type MediaItem } from '@4kframe/shared';
 
 export type DateField = 'uploaded' | 'created';
 export type MediaKindFilter = 'all' | 'photo' | 'video';
 export type SizeFilter = 'all' | 'under-10mb' | '10-100mb' | '100mb-1gb' | 'over-1gb' | 'unknown';
 
-export interface MediaFilterState {
+export interface MediaFilterState extends ActivityFilters {
+  query?: string;
   dateField: DateField;
   startDate: string;
   endDate: string;
@@ -47,7 +48,10 @@ export function filterLibraryItems(source: MediaItem[], filters: MediaFilterStat
   const start = filters.startDate ? new Date(`${filters.startDate}T00:00:00`).getTime() : Number.NEGATIVE_INFINITY;
   const end = filters.endDate ? new Date(`${filters.endDate}T23:59:59.999`).getTime() : Number.POSITIVE_INFINITY;
 
+  const query = filters.query?.trim().toLocaleLowerCase();
   return source.filter((item) => {
+    if (!matchesActivity(item, filters)) return false;
+    if (query && ![item.originalFilename, item.file, item.caption].some((text) => text?.toLocaleLowerCase().includes(query))) return false;
     const date = itemDate(item, filters.dateField);
     if (Number.isFinite(start) && date < start) return false;
     if (Number.isFinite(end) && date > end) return false;

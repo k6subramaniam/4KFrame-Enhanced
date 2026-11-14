@@ -19,6 +19,10 @@ import {
   updateFaceLabel, rescanFaces,
 } from './api.js';
 import { renderSettings } from './settings.js';
+import { ACTIVITY_RANGES, compareActivity, getMediaActivity, isActivitySort, type ActivitySort, type MediaActivityUpdate } from '@4kframe/shared';
+import { recordInteraction } from './activityClient.js';
+import { activityBadges, syncActivityInputs, updateActivityOverview, wireActivityFilters } from './activityUi.js';
+import './mediaActivity.css';
 import { renderActiveCropPreview } from './cropPreview.js';
 import { toast, confirmToast } from './toast.js';
 import {
@@ -53,7 +57,7 @@ type SortMode =
   | 'date-desc' | 'date-asc'
   | 'filename-asc' | 'filename-desc'
   | 'size-desc' | 'size-asc'
-  | 'resolution-desc';
+  | 'resolution-desc' | ActivitySort;
 let mode: Mode = 'cast';
 let peopleFilter: PeopleFilter = 'all';
 let sortMode: SortMode = 'date-desc';
@@ -63,7 +67,9 @@ let trashItems: MediaItem[] = [];
 let trashRetentionDays = 30;
 let mediaFilters: MediaFilterState = { ...DEFAULT_MEDIA_FILTERS };
 let selectionMode = false;
-const selectedIds = new Set<string>();
+let nowPlayingOnly = false;
+let renderLimit = 60;
+const pendingActivations = new Set<string>();
 const selectedMediaIds = new Set<string>();
 const selectedTrashIds = new Set<string>();
 let activeItem: MediaItem | undefined;
@@ -362,9 +368,94 @@ function wireOpsDashboard(): void {
   opsTimer = window.setInterval(() => { void refreshOpsDashboard(); }, 5000);
 }
 
+function visibleLibraryItems(): MediaItem[] {
+  // Now playing is a temporary focus, not an intersection with a possibly empty filter.
+  if (nowPlayingOnly) return items.filter((item) => item.id === activeItem?.id);
+  return sortItems(filterLibraryItems(filterPeople(items), mediaFilters));
+}
+
+function mergeActivityUpdates(updates: MediaActivityUpdate[]): void {
+  const byId = new Map(items.map((item) => [item.id, item]));
+  for (const update of updates) {
+    const item = byId.get(update.id);
+    if (!item) continue;
+    const current = getMediaActivity(item);
+    // A REST response can arrive after a newer socket event. Counts never regress.
+    item.activity = { ...update.activity,
+      viewCount: Math.max(current.viewCount, update.activity.viewCount),
+      playCount: Math.max(current.playCount, update.activity.playCount),
+      clickCount: Math.max(current.clickCount, update.activity.clickCount),
+      selectionCount: Math.max(current.selectionCount, update.activity.selectionCount),
+    };
+    if (activeItem?.id === item.id) activeItem.activity = item.activity;
+  }
+  grid.querySelectorAll<HTMLElement>('[data-media-id]').forEach((tile) => {
+    const item = byId.get(tile.dataset.mediaId!);
+    const badges = tile.querySelector('[data-activity-counts]');
+    if (item && badges) badges.innerHTML = activityBadges(item);
+  });
+  updateActivityOverview(items);
+  // Keep a tile from disappearing or moving under the user's finger while selecting.
+  // Badges are live; filtered membership/order is refreshed explicitly when activity changes.
+  const update = document.getElementById('activity-update') as HTMLButtonElement | null;
+  if (update && (isActivitySort(sortMode) || ACTIVITY_RANGES.flat().some((key) => mediaFilters[key] !== undefined))) update.hidden = false;
+}
+
+function trackInteraction(ids: string[], kind: 'click' | 'selection'): void {
+  if (!ids.length) return;
+  void recordInteraction(ids, kind).then((updates) => {
+    mergeActivityUpdates(updates);
+    const status = document.getElementById('activity-sync-status');
+    if (status) status.textContent = '';
+  }).catch(() => {
+    const status = document.getElementById('activity-sync-status');
+    if (status) status.textContent = 'Some activity could not be saved. Check your connection.';
+  });
+}
+
+function syncActivityDock(): void {
+  const title = document.getElementById('activity-now-title');
+  if (title) title.textContent = activeItem?.originalFilename ?? activeItem?.caption ?? activeItem?.file ?? 'Nothing playing';
+  const now = document.getElementById('activity-now');
+  now?.classList.toggle('active', nowPlayingOnly);
+  now?.setAttribute('aria-pressed', String(nowPlayingOnly));
+  const ranges = ACTIVITY_RANGES.flat().filter((key) => mediaFilters[key] !== undefined);
+  const preset = !ranges.length ? 'all' : ranges.length === 1 && mediaFilters[ranges[0]] === 0
+    ? ({ maxViews: 'unviewed', maxClicks: 'unclicked', maxSelections: 'unselected' } as Record<string, string>)[ranges[0]] : '';
+  document.querySelectorAll<HTMLButtonElement>('[data-activity-preset]').forEach((button) => {
+    const active = !nowPlayingOnly && button.dataset.activityPreset === preset;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+}
+
+async function activateMedia(item: MediaItem, action: 'cast' | 'view'): Promise<void> {
+  if (pendingActivations.has(item.id)) return;
+  trackInteraction([item.id], 'click');
+  if (action === 'view') {
+    window.open(`/photos/${encodeURIComponent(item.file)}`, '_blank', 'noopener');
+    return;
+  }
+  pendingActivations.add(item.id);
+  try {
+    if (!await castControl({ type: 'cast', id: item.id })) await castItem(item.id);
+  } catch (error) {
+    toast(`Could not play media: ${(error as Error).message}`, { error: true });
+  } finally { pendingActivations.delete(item.id); }
+}
+
 function renderGrid(): void {
   grid.innerHTML = '';
-  const visibleItems = sortItems(filterLibraryItems(filterPeople(items), mediaFilters));
+  const visibleItems = visibleLibraryItems();
+  const update = document.getElementById('activity-update') as HTMLButtonElement | null;
+  if (update) update.hidden = true;
+  const more = document.getElementById('media-load-more') as HTMLButtonElement | null;
+  if (more) {
+    more.hidden = visibleItems.length <= renderLimit;
+    more.textContent = `Show more (${Math.min(renderLimit, visibleItems.length)} of ${visibleItems.length})`;
+  }
+  updateActivityOverview(items);
+  syncActivityDock();
   renderPeopleSummary(visibleItems);
   renderMediaFilterSummary(visibleItems);
   if (!visibleItems.length) {
@@ -379,7 +470,8 @@ function renderGrid(): void {
     renderBulkToolbar();
     return;
   }
-  for (const item of visibleItems) {
+  const fragment = document.createDocumentFragment();
+  for (const item of visibleItems.slice(0, renderLimit)) {
     const tile = document.createElement('div');
     const excluded = item.enabled === false;
     const selected = selectedMediaIds.has(item.id);
@@ -387,10 +479,8 @@ function renderGrid(): void {
     tile.className = `tile ${mode}${excluded ? ' excluded' : ''}${selected ? ' selected' : ''}${playing ? ' playing' : ''}`;
     tile.dataset.mediaId = item.id;
     tile.tabIndex = 0;
-    // role=option requires a listbox ancestor, which #grid isn't — these behave as
-    // buttons, with selection expressed by aria-pressed.
-    tile.setAttribute('role', 'button');
-    tile.setAttribute('aria-pressed', String(selected));
+    // Native actions own their semantics; the focusable group provides shortcuts.
+    tile.setAttribute('role', 'group');
     tile.setAttribute(
       'aria-label',
       `${item.originalFilename ?? item.file}${selected ? ' (selected)' : ''} — Enter to ${MODE_VERBS[mode]}, Space to select`,
@@ -400,7 +490,7 @@ function renderGrid(): void {
     const hasImageThumb = item.kind === 'photo' || !!item.poster;
     const dur = item.kind === 'video' && item.durationSec
       ? `<span class="badge dur">${fmtDuration(item.durationSec)}</span>` : '';
-    tile.innerHTML =
+    tile.innerHTML = '<div class="tile-visual">' +
       (hasImageThumb ? `<img loading="lazy" src="${thumbUrl(item)}" alt="" />` : '<div class="ph">🎞️</div>') +
       (item.kind === 'video'
         ? `<span class="badge">▶ video${item.upscaleTarget ? ` · ✨ ${item.upscaleTarget.toUpperCase()}` : ''}</span>`
@@ -411,13 +501,18 @@ function renderGrid(): void {
       ((item.rotation || item.flipHorizontal || item.flipVertical)
         ? `<span class="badge badge-transform">${item.rotation ?? 0}°${item.flipHorizontal ? ' ↔' : ''}${item.flipVertical ? ' ↕' : ''}</span>` : '') +
       dur +
-      `<button class="select-control" type="button" aria-label="${selected ? 'Deselect' : 'Select'} ${escapeHtml(item.file)}">${selected ? '✓' : ''}</button>` +
-      `<button class="incl" title="${excluded ? 'Not a Favorite — tap to add to automatic playback' : 'Favorite — participates in automatic playback'}" aria-label="${excluded ? 'Add to Favorites' : 'Remove from Favorites'}">${excluded ? '☆' : '★'}</button>`;
+      `<button class="select-control" type="button" aria-pressed="${selected}" aria-label="${selected ? 'Deselect' : 'Select'} ${escapeHtml(item.file)}">${selected ? '✓' : ''}</button>` +
+      `<button class="incl" title="${excluded ? 'Not a Favorite — tap to add to automatic playback' : 'Favorite — participates in automatic playback'}" aria-label="${excluded ? 'Add to Favorites' : 'Remove from Favorites'}">${excluded ? '☆' : '★'}</button></div>` +
+      `<div class="tile-info"><strong class="tile-name" title="${escapeHtml(item.originalFilename ?? item.file)}">${escapeHtml(item.originalFilename ?? item.file)}</strong>` +
+      `<span class="tile-on-tv" ${playing ? '' : 'hidden'}>On TV</span>` +
+      `<div class="tile-activity" data-activity-counts>${activityBadges(item)}</div>` +
+      '<div class="tile-actions"><button type="button" class="play-now">Play on TV</button><button type="button" class="preview-now">Preview</button></div></div>';
     tile.addEventListener('click', () => selectionMode ? toggleSelection(item.id) : onTileClick(item));
     // Keyboard parity with pointer input: Enter performs the current mode's action
     // (cast/view/delete), Space selects. Previously both only selected, so a keyboard
     // user could never actually cast or delete anything.
     tile.addEventListener('keydown', (event) => {
+      if (event.target !== tile) return; // nested controls own their keyboard activation
       if (event.key === ' ') {
         event.preventDefault();
         toggleSelection(item.id);
@@ -440,28 +535,45 @@ function renderGrid(): void {
         toast(`Could not update Favorites: ${(err as Error).message}`, { error: true });
       }
     });
-    grid.appendChild(tile);
+    for (const [selector, action] of [['.play-now', 'cast'], ['.preview-now', 'view']] as const) {
+      tile.querySelector(selector)?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        void activateMedia(item, action);
+      });
+    }
+    fragment.appendChild(tile);
   }
+  grid.appendChild(fragment);
   renderBulkToolbar();
 }
 
 function syncPlayingTileHighlight(): void {
   grid.querySelectorAll<HTMLElement>('.tile[data-media-id]').forEach((tile) => {
-    tile.classList.toggle('playing', Boolean(activeItem?.id && tile.dataset.mediaId === activeItem.id));
+    const playing = Boolean(activeItem?.id && tile.dataset.mediaId === activeItem.id);
+    tile.classList.toggle('playing', playing);
+    const label = tile.querySelector<HTMLElement>('.tile-on-tv');
+    if (label) label.hidden = !playing;
   });
 }
 
 function toggleSelection(id: string): void {
   selectionMode = true;
   if (selectedMediaIds.has(id)) selectedMediaIds.delete(id);
-  else selectedMediaIds.add(id);
+  else { selectedMediaIds.add(id); trackInteraction([id], 'selection'); }
   if (!selectedMediaIds.size) selectionMode = false;
-  renderGrid();
+  grid.querySelectorAll<HTMLElement>('[data-media-id]').forEach((tile) => {
+    const selected = selectedMediaIds.has(tile.dataset.mediaId!);
+    tile.classList.toggle('selected', selected);
+    const button = tile.querySelector<HTMLButtonElement>('.select-control');
+    if (button) { button.textContent = selected ? '✓' : ''; button.setAttribute('aria-pressed', String(selected)); button.setAttribute('aria-label', `${selected ? 'Deselect' : 'Select'} media`); }
+  });
+  renderBulkToolbar();
+  syncTransformToolbar();
 }
 
 function renderBulkToolbar(): void {
   if (!bulkToolbar || !selectionCount) return;
-  selectionCount.textContent = `${selectedMediaIds.size} selected`;
+  selectionCount.textContent = `${selectedMediaIds.size} selected now`;
   bulkToolbar.classList.toggle('active', selectionMode);
   bulkToolbar.querySelectorAll<HTMLButtonElement>('[data-requires-selection]').forEach((button) => {
     button.disabled = selectedMediaIds.size === 0;
@@ -471,6 +583,8 @@ function renderBulkToolbar(): void {
 const filenameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
 function sortItems(source: MediaItem[]): MediaItem[] {
+  const activitySort = sortMode;
+  if (isActivitySort(activitySort)) return [...source].sort((a, b) => compareActivity(a, b, activitySort));
   return [...source].sort((a, b) => {
     if (sortMode === 'date-asc' || sortMode === 'date-desc') {
       const direction = sortMode === 'date-asc' ? 1 : -1;
@@ -538,6 +652,9 @@ function renderMediaFilterSummary(visibleItems: MediaItem[]): void {
   if (mediaFilters.kind !== 'all') parts.push(mediaFilters.kind === 'photo' ? 'photos' : 'videos');
   if (mediaFilters.uploader !== 'all') parts.push(mediaFilters.uploader);
   if (mediaFilters.size !== 'all') parts.push(mediaFilters.size.replaceAll('-', ' '));
+  if (mediaFilters.query) parts.push(`matching “${mediaFilters.query}”`);
+  if (ACTIVITY_RANGES.flat().some((key) => mediaFilters[key] !== undefined)) parts.push('count filters applied');
+  if (nowPlayingOnly) parts.push('now playing');
   mediaFilterSummary.textContent = parts.join(' · ');
 }
 
@@ -555,12 +672,13 @@ function escapeHtml(value: string): string {
 
 function pruneSelectionToCurrentFilters(): void {
   if (!selectedMediaIds.size) return;
-  const matching = new Set(filterLibraryItems(filterPeople(items), mediaFilters).map((item) => item.id));
+  const matching = new Set(visibleLibraryItems().map((item) => item.id));
   for (const id of selectedMediaIds) if (!matching.has(id)) selectedMediaIds.delete(id);
   if (!selectedMediaIds.size) selectionMode = false;
 }
 
 function applyFilterChange(): void {
+  renderLimit = 60;
   pruneSelectionToCurrentFilters();
   renderGrid();
 }
@@ -604,6 +722,7 @@ function syncDynamicSelect(
 }
 
 function syncMediaFilterControls(): void {
+  syncActivityInputs(mediaFilters);
   if (mediaDateField) mediaDateField.value = mediaFilters.dateField;
   if (mediaDateStart) mediaDateStart.value = mediaFilters.startDate;
   if (mediaDateEnd) mediaDateEnd.value = mediaFilters.endDate;
@@ -653,6 +772,17 @@ function wireMediaFilters(): void {
   });
   document.getElementById('media-filter-reset')?.addEventListener('click', () => {
     mediaFilters = { ...DEFAULT_MEDIA_FILTERS };
+    nowPlayingOnly = false;
+    sortMode = 'date-desc';
+    if (sortSelect) sortSelect.value = sortMode;
+    const error = document.getElementById('activity-filter-error');
+    if (error) error.textContent = '';
+    renderLimit = 60;
+    peopleFilter = 'all'; labelFilter = '';
+    if (peopleFilterSelect) peopleFilterSelect.value = 'all';
+    syncPeopleLabels();
+    const search = document.getElementById('media-search') as HTMLInputElement | null;
+    if (search) search.value = '';
     syncMediaFilterOptions();
     syncMediaFilterControls();
     renderGrid();
@@ -754,9 +884,14 @@ async function pollPreviewPlayback(): Promise<void> {
 }
 
 function wirePlaybackPreviewSocket(): void {
+  let retry = 1000;
+  const connect = (): void => {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   try {
     const socket = new WebSocket(`${proto}://${location.host}/ws`);
+    socket.onopen = () => { retry = 1000; };
+    socket.onclose = () => { window.setTimeout(connect, retry); retry = Math.min(retry * 2, 30000); };
+    socket.onerror = () => socket.close();
     socket.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data as string) as FrameEvent;
@@ -765,6 +900,10 @@ function wirePlaybackPreviewSocket(): void {
           syncTvVolumeControl();
           void renderPhonePreview();
           void getPlayback().then(syncFacesPreview).catch(() => {});
+        } else if (msg.type === 'paused') {
+          void syncPlayback();
+        } else if (msg.type === 'activity') {
+          mergeActivityUpdates(msg.updates);
         } else if (msg.type === 'library') {
           items = msg.items;
           if (activeItem) activeItem = items.find((item) => item.id === activeItem?.id) ?? activeItem;
@@ -776,6 +915,8 @@ function wirePlaybackPreviewSocket(): void {
           if (nextActiveItem?.id !== activeItem?.id) lastVideoPlayback = null;
           activeItem = nextActiveItem;
           syncPlayingTileHighlight();
+          syncActivityDock();
+          if (nowPlayingOnly) renderGrid();
           renderVideoScrubber(lastVideoPlayback);
           renderFacesPanel();
           syncTvVolumeControl();
@@ -801,8 +942,11 @@ function wirePlaybackPreviewSocket(): void {
       }
     };
   } catch {
-    // Polling still keeps the preview roughly synchronized when WebSocket setup fails.
+    window.setTimeout(connect, retry);
+    retry = Math.min(retry * 2, 30000);
   }
+  };
+  connect();
   window.setInterval(() => { pollPreviewPlayback().catch(() => {}); }, 1000);
 }
 
@@ -1430,6 +1574,12 @@ async function syncPlayback(): Promise<void> {
     // accessible name describing what pressing it will do.
     play.setAttribute('aria-label', p.paused ? 'Resume slideshow' : 'Pause slideshow');
   }
+  const dockPlay = document.getElementById('activity-play') as HTMLButtonElement | null;
+  if (dockPlay) {
+    dockPlay.textContent = p.paused ? '▶' : '⏸';
+    dockPlay.setAttribute('aria-label', p.paused ? 'Resume playback' : 'Pause playback');
+    dockPlay.disabled = !p.itemId;
+  }
   const loop = document.getElementById('pb-loop');
   if (loop) {
     loop.classList.toggle('active', p.holding);
@@ -1459,17 +1609,13 @@ async function syncPlayback(): Promise<void> {
 
 async function onTileClick(item: MediaItem): Promise<void> {
   if (selectionMode) {
-    if (selectedIds.has(item.id)) selectedIds.delete(item.id); else selectedIds.add(item.id);
-    renderGrid();
-    syncTransformToolbar();
+    toggleSelection(item.id);
     return;
   }
   if (mode === 'cast') {
-    // Prefer a live Cast session (native Google Cast); fall back to the LAN REST flow.
-    const sent = await castControl({ type: 'cast', id: item.id });
-    if (!sent) await castItem(item.id);
+    await activateMedia(item, 'cast');
   } else if (mode === 'view') {
-    window.open(`/photos/${item.file}`, '_blank');
+    await activateMedia(item, 'view');
   } else if (mode === 'delete') {
     if (await confirmToast('Move this item to Trash? It can be restored for 30 days.', { confirmLabel: 'Move to Trash', danger: true })) {
       try {
@@ -1486,13 +1632,13 @@ async function onTileClick(item: MediaItem): Promise<void> {
 function syncTransformToolbar(): void {
   document.getElementById('media-transform-tools')?.classList.toggle('selection-active', selectionMode);
   const count = document.getElementById('media-selection-count');
-  if (count) count.textContent = selectionMode ? `${selectedIds.size} selected` : 'Current item';
+  if (count) count.textContent = selectionMode ? `${selectedMediaIds.size} selected` : 'Current item';
 }
 
 async function applyMediaTransform(action: 'left' | 'right' | 'horizontal' | 'vertical'): Promise<void> {
   const current = await fetchCurrent();
   const targetIds = selectionMode
-    ? [...selectedIds]
+    ? [...selectedMediaIds]
     : items.filter((item) => current.current.includes(item.file)).map((item) => item.id);
   if (!targetIds.length) return;
   const targets = targetIds.map((id) => items.find((item) => item.id === id)).filter((item): item is MediaItem => Boolean(item));
@@ -1511,7 +1657,7 @@ async function applyMediaTransform(action: 'left' | 'right' | 'horizontal' | 've
 function wireMediaTransforms(): void {
   document.getElementById('media-select')?.addEventListener('click', () => {
     selectionMode = !selectionMode;
-    if (!selectionMode) selectedIds.clear();
+    if (!selectionMode) selectedMediaIds.clear();
     renderGrid();
     syncTransformToolbar();
   });
@@ -1539,6 +1685,8 @@ async function refresh(): Promise<void> {
   renderTrash();
   const current = await fetchCurrent();
   activeItem = items.find((item) => current.current.includes(item.file));
+  syncPlayingTileHighlight();
+  syncActivityDock();
   activeConfig = current.data as Partial<FrameConfig>;
   renderedCropPreviewItemId = activeItem?.id;
   await renderSettings(settingsRoot, current.data, activeItem);
@@ -1551,10 +1699,13 @@ async function refresh(): Promise<void> {
 }
 
 function wireBulkActions(): void {
-  const visibleIds = () => sortItems(filterLibraryItems(filterPeople(items), mediaFilters)).map((item) => item.id);
+  const visibleIds = () => visibleLibraryItems().map((item) => item.id);
   document.getElementById('select-visible')?.addEventListener('click', () => {
+    const ids = visibleIds();
+    const newlySelected = ids.filter((id) => !selectedMediaIds.has(id));
     selectedMediaIds.clear();
-    for (const id of visibleIds()) selectedMediaIds.add(id);
+    for (const id of ids) selectedMediaIds.add(id);
+    trackInteraction(newlySelected, 'selection');
     selectionMode = selectedMediaIds.size > 0;
     renderGrid();
   });
@@ -1612,7 +1763,7 @@ function renderTrash(): void {
     const tile = document.createElement('div');
     tile.className = `tile trash${selected ? ' selected' : ''}`;
     tile.tabIndex = 0;
-    tile.setAttribute('role', 'button');
+    tile.setAttribute('role', 'group');
     tile.setAttribute('aria-pressed', String(selected));
     tile.setAttribute('aria-label', `${selected ? 'Deselect' : 'Select'} trashed ${item.originalFilename ?? item.file}`);
     tile.title = `${item.originalFilename ?? item.file} · ${formatBytes(item.sizeBytes)} · ${itemUploader(item)}`;
@@ -1624,7 +1775,7 @@ function renderTrash(): void {
       (hasImageThumb ? `<img loading="lazy" src="${thumbUrl(item)}" alt="" />` : '<div class="ph">🎞️</div>') +
       `<span class="badge">${item.kind === 'video' ? '▶ video' : 'photo'}</span>` +
       `<span class="trash-expiry">${daysLeft}d left</span>` +
-      `<button class="select-control" type="button" aria-label="${selected ? 'Deselect' : 'Select'} ${escapeHtml(item.originalFilename ?? item.file)}">${selected ? '✓' : ''}</button>`;
+      `<button class="select-control" type="button" aria-pressed="${selected}" aria-label="${selected ? 'Deselect' : 'Select'} ${escapeHtml(item.originalFilename ?? item.file)}">${selected ? '✓' : ''}</button>`;
     tile.addEventListener('click', () => toggleTrashSelection(item.id));
     tile.addEventListener('keydown', (event) => {
       if (event.key === 'Enter' || event.key === ' ') {
@@ -1883,6 +2034,30 @@ async function start(): Promise<void> {
     wireControlSheet();
     wirePeopleFilters();
     wireMediaFilters();
+    wireActivityFilters({
+      counts: (filters) => {
+        for (const key of ACTIVITY_RANGES.flat()) delete mediaFilters[key];
+        Object.assign(mediaFilters, filters);
+        nowPlayingOnly = false;
+        applyFilterChange();
+      },
+      search: (query) => { mediaFilters.query = query; applyFilterChange(); },
+      now: () => {
+        nowPlayingOnly = !nowPlayingOnly; applyFilterChange();
+        if (nowPlayingOnly) grid.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+      },
+      refresh: () => { pruneSelectionToCurrentFilters(); renderGrid(); },
+    });
+    document.getElementById('media-load-more')?.addEventListener('click', () => {
+      renderLimit += 60; renderGrid();
+    });
+    document.getElementById('activity-prev')?.addEventListener('click', () => void skipPlayback(-1));
+    document.getElementById('activity-next')?.addEventListener('click', () => void skipPlayback(1));
+    document.getElementById('activity-play')?.addEventListener('click', () => {
+      const button = document.getElementById('activity-play') as HTMLButtonElement;
+      void withBusy(button, async () => { const p = await getPlayback(); await setPaused(!p.paused); await syncPlayback(); });
+    });
+    document.getElementById('media-quick-dock')?.classList.remove('hidden');
     wireMediaTransforms();
     wireBulkActions();
     wireTrashActions();

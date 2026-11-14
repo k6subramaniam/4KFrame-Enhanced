@@ -17,9 +17,13 @@
  * before advancing.
  */
 
+import { randomUUID } from 'node:crypto';
 import { aspectRatio, type MediaItem } from '@4kframe/shared';
 import { getConfig, listItems, getItem } from './store.js';
 import { hub } from './hub.js';
+
+let presentationId = '';
+export function getCurrentPresentationId(): string { return presentationId; }
 
 let pointer = 0;
 let current: MediaItem[] = [];
@@ -162,7 +166,8 @@ export function isHolding(): boolean {
 }
 
 function show(interactive: boolean): void {
-  hub.emitEvent({ type: 'show', items: current, interactive });
+  presentationId = randomUUID();
+  hub.emitEvent({ type: 'show', items: current, interactive, presentationId });
   schedule();
 }
 

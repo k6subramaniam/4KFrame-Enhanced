@@ -4,6 +4,7 @@
  */
 
 import path from 'node:path';
+import { queryMediaActivity, registerMediaActivity } from '../mediaActivity.js';
 import { promises as fs } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import QRCode from 'qrcode';
@@ -113,6 +114,8 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
       return reply.code(401).send({ error: 'unauthorized' });
     }
   });
+
+  await registerMediaActivity(app);
 
   // --- Auth ---
   app.post('/api/login', async (req, reply) => {
@@ -447,9 +450,15 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
   });
 
   // --- Library listing (original `/api/thumbs`) ---
-  app.get('/api/thumbs', async () => {
+  app.get('/api/thumbs', async (req, reply) => {
     await purgeExpiredTrash();
-    return { items: await enrichMediaItems(listItems()) };
+    try {
+      const result = queryMediaActivity(listItems(), req.query as Record<string, unknown>);
+      return { items: await enrichMediaItems(result.items), total: result.total };
+    } catch (error) {
+      if (error instanceof RangeError) return reply.code(400).send({ error: error.message });
+      throw error;
+    }
   });
 
   // --- Recoverable Trash (30 days by default) ---

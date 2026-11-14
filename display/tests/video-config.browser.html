@@ -49,7 +49,9 @@
 
       const video = document.getElementById('video');
       let playCalls = 0;
-      let rejectNextPlay = false;
+      let rejectAudible = false;
+      let activated = false;
+      Object.defineProperty(navigator, 'userActivation', { configurable: true, get: () => ({ hasBeenActive: activated, isActive: activated }) });
       let mockSrc = '';
       Object.defineProperty(video, 'src', {
         configurable: true,
@@ -58,8 +60,7 @@
       });
       video.play = () => {
         playCalls += 1;
-        if (rejectNextPlay) {
-          rejectNextPlay = false;
+        if (rejectAudible && !video.muted) {
           return Promise.reject(new DOMException('User activation required', 'NotAllowedError'));
         }
         return Promise.resolve();
@@ -77,6 +78,7 @@
         emit({ type: 'paused', paused: false });
         emit({
           type: 'show',
+          presentationId: 'video-fixture-appearance',
           interactive: false,
           items: [{
             id: 'video-1',
@@ -96,7 +98,11 @@
           && video.defaultMuted === true
           && video.volume === 1
           && playCalls === 1;
-        rejectNextPlay = true;
+        // Remote config alone must not defeat the player's no-gesture muted autoplay policy.
+        emit({ type: 'config', config: { ...defaultConfig(), videoAudioMode: 'tv', videoLoop: false } });
+        const gestureRequired = video.muted && playCalls === 1;
+        activated = true;
+        rejectAudible = true;
         emit({ type: 'config', config: { ...defaultConfig(), videoAudioMode: 'tv', videoLoop: false } });
         const audibleAttemptStarted = video.muted === false
           && video.defaultMuted === false
@@ -106,11 +112,22 @@
         const mutedFallbackRecovered = video.muted === true
           && video.defaultMuted === true
           && video.classList.contains('visible')
-          && playCalls === 3;
+          && playCalls === 4;
 
+        const noPrematurePlayCount = !sent.some(message => message.type === 'mediaPresented');
+        // Decode readiness, not a resolved play() promise, is required for counting.
+        Object.defineProperties(video, {
+          paused: { configurable: true, value: false },
+          readyState: { configurable: true, value: 2 },
+          videoWidth: { configurable: true, value: 1920 },
+          currentTime: { configurable: true, value: 1 },
+        });
+        video.dispatchEvent(new Event('timeupdate'));
+        const confirmedReadyPlay = sent.some(message => message.type === 'mediaPresented'
+          && message.itemId === 'video-1' && message.presentationId === 'video-fixture-appearance');
         document.getElementById('next').click();
         const status = document.getElementById('status');
-        const passed = initialMutedPlayback
+        const passed = noPrematurePlayCount && confirmedReadyPlay && gestureRequired && initialMutedPlayback
           && audibleAttemptStarted
           && mutedFallbackRecovered
           && video.src.endsWith('/photos/sample.mp4')
@@ -119,6 +136,8 @@
 
         document.getElementById('result').textContent = JSON.stringify({
           passed,
+          noPrematurePlayCount,
+          confirmedReadyPlay,
           initialMutedPlayback,
           audibleAttemptStarted,
           mutedFallbackRecovered,

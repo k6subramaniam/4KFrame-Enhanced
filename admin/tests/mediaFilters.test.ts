@@ -82,3 +82,10 @@ test('formats useful file sizes', () => {
   assert.equal(formatBytes(5 * 1024 * 1024), '5.0 MB');
   assert.equal(formatBytes(undefined), 'Size unknown');
 });
+
+test('count ranges combine with search and existing media-kind filters', () => {
+  const activity = { viewCount: 0, playCount: 3, clickCount: 5, selectionCount: 1 };
+  const library = [item({ id: 'match', kind: 'video', originalFilename: 'Trip.mp4', activity }), item({ id: 'other', kind: 'photo' })];
+  assert.deepEqual(filterLibraryItems(library, { ...DEFAULT_MEDIA_FILTERS, query: 'TRIP', kind: 'video', minViews: 3, maxViews: 3, minClicks: 5 }).map(i=>i.id), ['match']);
+  assert.deepEqual(filterLibraryItems(library, { ...DEFAULT_MEDIA_FILTERS, maxViews: 0, maxSelections: 0 }).map(i=>i.id), ['other']);
+});
