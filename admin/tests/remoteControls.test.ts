@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createRemoteFramingQueue, normalizeRemoteFraming, planPlayingJump, type RemoteFramingState } from '../src/remoteControls.js';
+import { createRemoteFramingQueue, createRemoteHold, normalizeRemoteFraming, planPlayingJump, REMOTE_HOLD_DELAY_MS, REMOTE_HOLD_INTERVAL_MS, type RemoteFramingState } from '../src/remoteControls.js';
 
 test('now playing jump uses an existing tile or bypasses filters only when necessary', () => {
   assert.equal(planPlayingJump('photo', true, true), 'scroll');
@@ -69,4 +69,45 @@ test('reset and zoom-out return to centered 100 percent; failed requests discard
   await finished;
   assert.equal(errorCount, 1);
   assert.deepEqual(queue.state(), config);
+});
+
+
+test('a quick tap does not repeat, and a held key stops immediately on release', () => {
+  let task: (() => void) | undefined;
+  let delay = 0;
+  let count = 0;
+  const hold = createRemoteHold((fn, ms) => { task = fn; delay = ms; return () => { task = undefined; }; });
+  const step = () => { count++; return true; };
+  hold.begin(step);
+  assert.equal(delay, REMOTE_HOLD_DELAY_MS);
+  assert.equal(hold.end(), false, 'native click handles a tap');
+  assert.equal(task, undefined);
+  assert.equal(count, 0);
+  hold.begin(step);
+  assert.ok(task);
+  (task as () => void)();
+  assert.equal(count, 1);
+  assert.equal(delay, REMOTE_HOLD_INTERVAL_MS);
+  (task as () => void)();
+  assert.equal(count, 2);
+  assert.equal(hold.end(), true, 'release click must be suppressed after repeating');
+  assert.equal(task, undefined);
+});
+
+test('held input stops at the zoom limit or when the remote closes and does not carry into a new press', () => {
+  let task: (() => void) | undefined;
+  let available = true;
+  let count = 0;
+  const hold = createRemoteHold((fn) => { task = fn; return () => { task = undefined; }; });
+  hold.begin(() => { if (!available) return false; count++; return true; });
+  (task as unknown as () => void)();
+  available = false;
+  const limitTick = task;
+  task = undefined;
+  limitTick?.();
+  assert.equal(count, 1);
+  assert.equal(task, undefined);
+  assert.equal(hold.end(), true);
+  hold.begin(() => false);
+  assert.equal(hold.end(), false);
 });

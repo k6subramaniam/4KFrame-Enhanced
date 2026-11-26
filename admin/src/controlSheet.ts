@@ -124,7 +124,7 @@ export function wireControlSheet(elements: ControlSheetElements, initialOpen = f
     if (navigation) {
       const heading = sheet?.querySelector<HTMLElement>('#control-sheet-header h2');
       if (heading) heading.textContent = value ? 'All controls' : 'Remote control';
-      navigation.resize.textContent = value ? 'Compact remote' : 'Expand panel';
+      navigation.resize.textContent = value ? 'Remote' : 'Settings';
       navigation.resize.setAttribute('aria-pressed', String(value));
       navigation.resize.setAttribute('aria-label', value ? 'Use compact controls panel' : 'Expand controls panel');
     }

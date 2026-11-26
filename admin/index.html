@@ -403,7 +403,7 @@
         </div>
         <button id="remote-now-playing" type="button" aria-label="Go to media currently playing on TV" disabled>
           <span class="remote-now-art"><img id="remote-now-thumb" alt="" hidden /><span id="remote-now-placeholder" aria-hidden="true">▧</span></span>
-          <span class="remote-now-info"><small>NOW PLAYING ON TV</small><strong id="remote-now-name">Nothing playing</strong><span>Go to media in library →</span></span>
+          <span class="remote-now-info"><small>NOW PLAYING ON TV</small><strong id="remote-now-name">Nothing playing</strong><span>Find in library</span></span>
           <span class="remote-now-arrow" aria-hidden="true">›</span>
         </button>
         <div id="playback">
@@ -413,28 +413,39 @@
           <button id="pb-loop" title="Loop the current item" aria-label="Loop the current item" aria-pressed="false">🔁</button>
         </div>
         <section id="remote-framing" aria-label="Direct TV zoom and pan">
-          <div class="remote-framing-head"><strong>Zoom &amp; pan</strong><span id="remote-zoom-value" aria-live="polite">100%</span></div>
+          <div class="remote-framing-head"><strong>Frame position</strong><small>Hold to adjust</small></div>
           <div class="remote-framing-body">
-            <div class="remote-zoom-keys" role="group" aria-label="Zoom">
-              <button type="button" data-remote-crop-action="zoom-in" aria-label="Zoom in" disabled><span aria-hidden="true">＋</span><small>Zoom in</small></button>
-              <button type="button" data-remote-crop-action="zoom-out" aria-label="Zoom out" disabled><span aria-hidden="true">−</span><small>Zoom out</small></button>
-            </div>
             <div class="remote-pan-keys" role="group" aria-label="Pan direction">
-              <button type="button" data-remote-crop-action="pan-up" aria-label="Pan up" disabled>↑</button>
-              <button type="button" data-remote-crop-action="pan-left" aria-label="Pan left" disabled>←</button>
-              <button type="button" data-remote-crop-action="reset" aria-label="Reset zoom and pan" disabled>Reset</button>
-              <button type="button" data-remote-crop-action="pan-right" aria-label="Pan right" disabled>→</button>
-              <button type="button" data-remote-crop-action="pan-down" aria-label="Pan down" disabled>↓</button>
+              <button type="button" data-remote-crop-action="pan-up" aria-label="Pan up" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 15 6-6 6 6"/></svg></button>
+              <button type="button" data-remote-crop-action="pan-left" aria-label="Pan left" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button>
+              <button type="button" data-remote-crop-action="reset" aria-label="Reset zoom and pan to center" disabled><span>◎</span><small>Reset</small></button>
+              <button type="button" data-remote-crop-action="pan-right" aria-label="Pan right" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
+              <button type="button" data-remote-crop-action="pan-down" aria-label="Pan down" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+            </div>
+            <div class="remote-zoom-keys" role="group" aria-label="Zoom rocker">
+              <button type="button" data-remote-crop-action="zoom-in" aria-label="Zoom in" disabled><span aria-hidden="true">+</span></button>
+              <div class="remote-zoom-readout"><small>ZOOM</small><strong id="remote-zoom-value" aria-live="polite">100%</strong></div>
+              <button type="button" data-remote-crop-action="zoom-out" aria-label="Zoom out" disabled><span aria-hidden="true">−</span></button>
             </div>
           </div>
-          <div id="remote-framing-status" class="muted" role="status">Adjust the current TV view. Pan when zoomed or cropped.</div>
+          <div id="remote-framing-status" class="muted" role="status">Pan when zoomed or cropped.</div>
         </section>
+        <nav id="remote-transport" aria-label="Remote media navigation">
+          <button id="remote-prev" class="handheld-key" type="button" aria-label="Previous media" data-label="Previous" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h3v14H4zM20 5 8 12l12 7z"/></svg></button>
+          <button id="remote-play" class="handheld-key handheld-primary" type="button" aria-label="Pause playback" data-label="Pause" data-paused="false" disabled><svg class="remote-icon-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg><svg class="remote-icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16l14-8z"/></svg></button>
+          <button id="remote-next" class="handheld-key" type="button" aria-label="Next media" data-label="Next" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 5h3v14h-3zM4 5l12 7-12 7z"/></svg></button>
+          <button id="remote-repeat" class="handheld-key" type="button" aria-label="Repeat current media" aria-pressed="false" data-label="Repeat" disabled><svg class="remote-icon-stroke" viewBox="0 0 24 24" aria-hidden="true"><path d="M17 3l4 4-4 4M21 7H7a4 4 0 0 0-4 4v1M7 21l-4-4 4-4M3 17h14a4 4 0 0 0 4-4v-1"/></svg></button>
+        </nav>
         <section id="video-scrubber" class="hidden" aria-label="Video timeline">
           <div class="video-scrubber-times">
             <span id="video-current-time">0:00</span>
             <span id="video-duration">0:00</span>
           </div>
           <input id="video-seek-range" type="range" min="0" max="1000" step="1" value="0" aria-label="Video position" />
+          <div id="remote-video-seek-keys" role="group" aria-label="Video seeking">
+            <button id="remote-seek-back" type="button" aria-label="Rewind 10 seconds" disabled>↶ 10s</button>
+            <button id="remote-seek-forward" type="button" aria-label="Fast forward 10 seconds" disabled>10s ↷</button>
+          </div>
         </section>
         <section id="faces-control" class="hidden" aria-label="Video faces">
           <div class="faces-head">
@@ -455,7 +466,9 @@
           <div class="tv-volume-head"><span>TV volume</span><span class="muted">Video</span></div>
           <div class="tv-volume-row">
             <button id="tv-volume-mute" type="button" aria-label="Mute TV video" aria-pressed="false">🔊</button>
+            <button id="remote-volume-down" class="remote-volume-key" type="button" aria-label="Decrease TV video volume">−</button>
             <input id="tv-volume-range" type="range" min="0" max="100" step="1" value="100" aria-label="TV video volume" />
+            <button id="remote-volume-up" class="remote-volume-key" type="button" aria-label="Increase TV video volume">+</button>
             <span id="tv-volume-value">100%</span>
           </div>
         </section>

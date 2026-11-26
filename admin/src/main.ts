@@ -25,7 +25,7 @@ import { recordInteraction } from './activityClient.js';
 import { activityBadges, syncActivityInputs, updateActivityOverview, wireActivityFilters } from './activityUi.js';
 import './mediaActivity.css';
 import { renderActiveCropPreview } from './cropPreview.js';
-import { createRemoteFramingQueue, normalizeRemoteFraming, planPlayingJump, type RemoteFramingState } from './remoteControls.js';
+import { createRemoteFramingQueue, normalizeRemoteFraming, planPlayingJump, wireRemoteHoldKeys, type RemoteFramingState } from './remoteControls.js';
 import { toast, confirmToast } from './toast.js';
 import {
   initCastSender,
@@ -114,7 +114,7 @@ const facesList = document.getElementById('faces-list') as HTMLElement | null;
 const facesKnownLabels = document.getElementById('faces-known-labels') as HTMLDataListElement | null;
 let controlsController: ControlSheetController | null = null;
 let syncExpandedFraming: (state: RemoteFramingState) => void = () => {};
-let remoteFramingStatus = 'Adjust the current TV view. Pan when zoomed or cropped.';
+let remoteFramingStatus = 'Pan when zoomed or cropped.';
 let lastAudibleTvVolume = 0.7;
 let videoScrubbing = false;
 /** Last usable TV video report; retained across brief network/reporting gaps so the seek bar never flickers. */
@@ -470,15 +470,85 @@ function wireRemoteFraming(): void {
     const placeholder = document.getElementById('remote-now-placeholder');
     if (placeholder) placeholder.hidden = false;
   });
-  document.querySelectorAll<HTMLButtonElement>('[data-remote-crop-action]').forEach((button) => {
-    button.addEventListener('click', () => {
-      if (!activeItem || activeConfig.zoom === undefined) return;
-      remoteFramingStatus = 'Adjust the current TV view. Pan when zoomed or cropped.';
+  const stopHold = wireRemoteHoldKeys(document,
+    () => Boolean(activeItem && activeConfig.zoom !== undefined && controlsController?.isOpen()
+      && !controlsController.isExpanded() && !document.hidden),
+    (button, feedback) => {
+      remoteFramingStatus = 'Pan when zoomed or cropped.';
       remoteFraming.activate(button.dataset.remoteCropAction ?? '');
-      try { navigator.vibrate?.(8); } catch { /* enhancement only */ }
+      if (feedback) remoteHaptic();
     });
-  });
+  window.addEventListener('blur', stopHold);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) stopHold(); });
+  // Stop immediately if a held key is hidden by closing or expanding the sheet.
+  if (controlsSheet) new MutationObserver(() => {
+    if (!controlsController?.isOpen() || controlsController.isExpanded()) stopHold();
+  }).observe(controlsSheet, { attributes: true, attributeFilter: ['class', 'hidden'] });
+  wireHandheldTransport();
   syncRemoteFraming();
+}
+
+function remoteHaptic(): void {
+  try { navigator.vibrate?.(9); } catch { /* optional hardware feedback */ }
+}
+
+/** The compact remote always skips whole items; video seeking has its own keys. */
+function wireHandheldTransport(): void {
+  const byId = (id: string) => document.getElementById(id) as HTMLButtonElement | null;
+  const wire = (id: string, action: () => Promise<void>) => {
+    const button = byId(id);
+    button?.addEventListener('click', () => {
+      if (button.disabled) return;
+      remoteHaptic();
+      void withBusy(button, action).finally(() => { if (!activeItem) button.disabled = true; });
+    });
+  };
+  wire('remote-prev', () => skipPlayback(-1));
+  wire('remote-next', () => skipPlayback(1));
+  wire('remote-play', async () => {
+    const p = await getPlayback();
+    if (!p.itemId) return;
+    await setPaused(!p.paused);
+    await syncPlayback();
+  });
+  wire('remote-repeat', async () => {
+    const p = await getPlayback();
+    if (!p.itemId) return;
+    await setHold(!p.holding);
+    await syncPlayback();
+  });
+  const seek = async (direction: -1 | 1): Promise<void> => {
+    const p = await getPlayback();
+    if (p.itemId !== activeItem?.id || playbackNavigationState(p).action !== 'video-seek') {
+      toast('The current video is not ready to seek.');
+      return;
+    }
+    await seekBy(direction * VIDEO_SEEK_SECONDS);
+    await syncPlayback();
+  };
+  wire('remote-seek-back', () => seek(-1));
+  wire('remote-seek-forward', () => seek(1));
+}
+
+function syncHandheldTransport(p: Playback): void {
+  const play = document.getElementById('remote-play') as HTMLButtonElement | null;
+  if (play) {
+    play.dataset.paused = String(p.paused);
+    play.dataset.label = p.paused ? 'Play' : 'Pause';
+    play.setAttribute('aria-label', p.paused ? 'Resume playback' : 'Pause playback');
+    play.disabled = !p.itemId;
+  }
+  const repeat = document.getElementById('remote-repeat') as HTMLButtonElement | null;
+  if (repeat) {
+    repeat.setAttribute('aria-pressed', String(p.holding));
+    repeat.setAttribute('aria-label', p.holding ? 'Stop repeating current media' : 'Repeat current media');
+    repeat.dataset.label = p.holding ? 'Repeat on' : 'Repeat';
+    repeat.disabled = !p.itemId;
+  }
+  for (const id of ['remote-prev', 'remote-next']) {
+    const button = document.getElementById(id) as HTMLButtonElement | null;
+    if (button) button.disabled = !p.itemId;
+  }
 }
 
 function trackInteraction(ids: string[], kind: 'click' | 'selection'): void {
@@ -1038,7 +1108,7 @@ function wirePlaybackPreviewSocket(): void {
           renderVideoScrubber(lastVideoPlayback);
           renderFacesPanel();
           syncTvVolumeControl();
-          void getPlayback().then(syncFacesPreview).catch(() => {});
+          void syncPlayback();
           void renderPhonePreview();
           // Keep "Now playing crop" tracking what's actually live on the display — it
           // otherwise only re-renders on the next full refresh() (upload/delete/etc.),
@@ -1115,6 +1185,10 @@ function renderVideoScrubber(playback: Playback | null): void {
     ? display.duration
     : (Number.isFinite(metadataDuration) && metadataDuration > 0 ? metadataDuration : 0);
   const seekable = Boolean(display?.seekable && duration > 0);
+  for (const id of ['remote-seek-back', 'remote-seek-forward']) {
+    const button = document.getElementById(id) as HTMLButtonElement | null;
+    if (button) button.disabled = !seekable;
+  }
 
   // Keep the whole timeline visible for the active video. A transient missing/stale
   // playback report may freeze the thumb briefly, but it must not make the UI jump.
@@ -1480,6 +1554,10 @@ function renderTvVolume(value: number): void {
   if (volume > 0.01) lastAudibleTvVolume = volume;
   if (tvVolumeRange) tvVolumeRange.value = String(Math.round(volume * 100));
   if (tvVolumeValue) tvVolumeValue.textContent = `${Math.round(volume * 100)}%`;
+  const minus = document.getElementById('remote-volume-down') as HTMLButtonElement | null;
+  const plus = document.getElementById('remote-volume-up') as HTMLButtonElement | null;
+  if (minus) minus.disabled = volume <= 0;
+  if (plus) plus.disabled = volume >= 1;
   if (tvVolumeMute) {
     tvVolumeMute.textContent = volume <= 0.01 ? '🔇' : volume < 0.5 ? '🔉' : '🔊';
     tvVolumeMute.setAttribute('aria-label', volume <= 0.01 ? 'Unmute TV video' : 'Mute TV video');
@@ -1537,6 +1615,15 @@ function wireTvVolume(): void {
   tvVolumeRange.addEventListener('change', () => {
     scheduleTvVolumeCommit(Number(tvVolumeRange.value) / 100, true);
   });
+  for (const [id, step] of [['remote-volume-down', -0.1], ['remote-volume-up', 0.1]] as const) {
+    document.getElementById(id)?.addEventListener('click', () => {
+      if (activeItem?.kind !== 'video') return;
+      const volume = clampTvVolume(Number(tvVolumeRange.value) / 100 + step);
+      remoteHaptic();
+      renderTvVolume(volume);
+      scheduleTvVolumeCommit(volume);
+    });
+  }
   tvVolumeMute.addEventListener('click', () => {
     const current = clampTvVolume(Number(tvVolumeRange.value) / 100);
     const next = current <= 0.01 ? Math.max(0.1, lastAudibleTvVolume) : 0;
@@ -1684,6 +1771,7 @@ async function syncPlayback(): Promise<void> {
   const p = await getPlayback().catch(() => ({
     paused: false, holding: false, itemId: null, kind: null, display: null,
   }));
+  syncHandheldTransport(p);
   const play = document.getElementById('pb-play');
   if (play) {
     play.textContent = p.paused ? '▶' : '⏸';
