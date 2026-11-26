@@ -401,12 +401,34 @@
           <h2>Controls</h2>
           <button id="controls-close" type="button" aria-label="Close controls">✕</button>
         </div>
+        <button id="remote-now-playing" type="button" aria-label="Go to media currently playing on TV" disabled>
+          <span class="remote-now-art"><img id="remote-now-thumb" alt="" hidden /><span id="remote-now-placeholder" aria-hidden="true">▧</span></span>
+          <span class="remote-now-info"><small>NOW PLAYING ON TV</small><strong id="remote-now-name">Nothing playing</strong><span>Go to media in library →</span></span>
+          <span class="remote-now-arrow" aria-hidden="true">›</span>
+        </button>
         <div id="playback">
           <button id="pb-prev" title="Previous slideshow item" aria-label="Previous slideshow item">⏮</button>
           <button id="pb-play" title="Play / Pause" aria-label="Pause slideshow">⏸</button>
           <button id="pb-next" title="Next slideshow item" aria-label="Next slideshow item">⏭</button>
           <button id="pb-loop" title="Loop the current item" aria-label="Loop the current item" aria-pressed="false">🔁</button>
         </div>
+        <section id="remote-framing" aria-label="Direct TV zoom and pan">
+          <div class="remote-framing-head"><strong>Zoom &amp; pan</strong><span id="remote-zoom-value" aria-live="polite">100%</span></div>
+          <div class="remote-framing-body">
+            <div class="remote-zoom-keys" role="group" aria-label="Zoom">
+              <button type="button" data-remote-crop-action="zoom-in" aria-label="Zoom in" disabled><span aria-hidden="true">＋</span><small>Zoom in</small></button>
+              <button type="button" data-remote-crop-action="zoom-out" aria-label="Zoom out" disabled><span aria-hidden="true">−</span><small>Zoom out</small></button>
+            </div>
+            <div class="remote-pan-keys" role="group" aria-label="Pan direction">
+              <button type="button" data-remote-crop-action="pan-up" aria-label="Pan up" disabled>↑</button>
+              <button type="button" data-remote-crop-action="pan-left" aria-label="Pan left" disabled>←</button>
+              <button type="button" data-remote-crop-action="reset" aria-label="Reset zoom and pan" disabled>Reset</button>
+              <button type="button" data-remote-crop-action="pan-right" aria-label="Pan right" disabled>→</button>
+              <button type="button" data-remote-crop-action="pan-down" aria-label="Pan down" disabled>↓</button>
+            </div>
+          </div>
+          <div id="remote-framing-status" class="muted" role="status">Adjust the current TV view. Pan when zoomed or cropped.</div>
+        </section>
         <section id="video-scrubber" class="hidden" aria-label="Video timeline">
           <div class="video-scrubber-times">
             <span id="video-current-time">0:00</span>
@@ -635,7 +657,7 @@
     <div id="toasts" aria-live="polite" aria-atomic="false"></div>
     <script type="module" src="/src/main.ts"></script>
     <nav id="media-quick-dock" class="hidden" aria-label="Media playback controls">
-      <button id="activity-playing" type="button" title="Filter the library to the current item"><span>On TV</span><strong id="activity-now-title">Nothing playing</strong></button>
+      <button id="activity-playing" type="button" title="Go to the current media in the library" aria-label="Go to media currently playing on TV" disabled><span>On TV · Go to media →</span><strong id="activity-now-title">Nothing playing</strong></button>
       <button id="controls-toggle" type="button" aria-controls="control-sheet" aria-expanded="false">Remote</button>
       <button id="activity-prev" type="button" class="remote-key" data-label="Previous" aria-label="Previous media" title="Skip to previous media">⏮</button>
       <button id="activity-play" type="button" class="remote-key" data-label="Pause" aria-label="Pause playback" disabled>⏸</button>

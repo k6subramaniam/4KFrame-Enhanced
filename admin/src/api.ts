@@ -198,6 +198,12 @@ export async function sendControl(message: ControlMessage): Promise<boolean> {
   });
 }
 
+/** Acknowledged framing update for the remote's single-flight command queue. */
+export async function updateRemoteFraming(state: { zoom: number; panX: number; panY: number }): Promise<ApiDataPayload> {
+  const qs = new URLSearchParams({ zoom: String(state.zoom), panX: String(state.panX), panY: String(state.panY) });
+  return requestJson<ApiDataPayload>(`/api/data?${qs}`, { cache: 'no-store' });
+}
+
 export async function updateData(patch: Record<string, string>): Promise<void> {
   // Playback rate is admin-only, so use authenticated REST rather than the public-config
   // WebSocket allowlist.

@@ -13,7 +13,7 @@ import {
   me, login, logout, type AuthState, type Playback,
   patchMediaTransforms,
   setItemsEnabled, deleteItems, restoreTrashItems, purgeTrashItems, emptyTrash, playSequence,
-  updateData,
+  updateData, updateRemoteFraming,
   pushLiveCast, stopLiveCast,
   fetchAdminStatus, cancelProcessingJob, retryProcessingJob, clearFinishedProcessingJobs,
   createBackupSnapshot, downloadBackup, restoreBackup,
@@ -25,6 +25,7 @@ import { recordInteraction } from './activityClient.js';
 import { activityBadges, syncActivityInputs, updateActivityOverview, wireActivityFilters } from './activityUi.js';
 import './mediaActivity.css';
 import { renderActiveCropPreview } from './cropPreview.js';
+import { createRemoteFramingQueue, normalizeRemoteFraming, planPlayingJump, type RemoteFramingState } from './remoteControls.js';
 import { toast, confirmToast } from './toast.js';
 import {
   initCastSender,
@@ -112,6 +113,8 @@ const facesOverlay = document.getElementById('faces-overlay') as HTMLElement | n
 const facesList = document.getElementById('faces-list') as HTMLElement | null;
 const facesKnownLabels = document.getElementById('faces-known-labels') as HTMLDataListElement | null;
 let controlsController: ControlSheetController | null = null;
+let syncExpandedFraming: (state: RemoteFramingState) => void = () => {};
+let remoteFramingStatus = 'Adjust the current TV view. Pan when zoomed or cropped.';
 let lastAudibleTvVolume = 0.7;
 let videoScrubbing = false;
 /** Last usable TV video report; retained across brief network/reporting gaps so the seek bar never flickers. */
@@ -406,6 +409,78 @@ function mergeActivityUpdates(updates: MediaActivityUpdate[]): void {
   if (update && (isActivitySort(sortMode) || ACTIVITY_RANGES.flat().some((key) => mediaFilters[key] !== undefined))) update.hidden = false;
 }
 
+function playingTile(id: string): HTMLElement | undefined {
+  return [...grid.querySelectorAll<HTMLElement>('.tile[data-media-id]')].find((tile) => tile.dataset.mediaId === id);
+}
+
+/** Locate media without casting, opening a preview, or invoking the current delete mode. */
+function jumpToPlayingMedia(): void {
+  const id = activeItem?.id;
+  if (!id) { toast('Nothing is playing on the TV.'); return; }
+  const plan = planPlayingJump(id, Boolean(playingTile(id)), items.some((item) => item.id === id));
+  if (plan === 'missing') { toast('Current media is not in the library yet. Refresh the library and try again.', { error: true }); return; }
+  if (plan === 'focus-current') {
+    nowPlayingOnly = true;
+    applyFilterChange();
+  }
+  const tile = playingTile(id);
+  if (!tile) { toast('Could not locate the current media.', { error: true }); return; }
+  controlsController?.setOpen(false);
+  tile.focus({ preventScroll: true });
+  tile.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+}
+
+const remoteFraming = createRemoteFramingQueue({
+  read: () => activeConfig,
+  commit: async (state) => {
+    const response = await updateRemoteFraming(state);
+    const confirmed = normalizeRemoteFraming(response);
+    Object.assign(activeConfig, confirmed);
+    syncExpandedFraming(confirmed);
+  },
+  changed: () => syncRemoteFraming(),
+  failed: (error) => {
+    remoteFramingStatus = 'Could not update TV view. Try again.';
+    toast((error as Error).message || remoteFramingStatus, { error: true });
+  },
+});
+
+function syncRemoteFraming(): void {
+  const state = remoteFraming.state();
+  const available = Boolean(activeItem) && activeConfig.zoom !== undefined;
+  const value = document.getElementById('remote-zoom-value');
+  if (value) value.textContent = `${Math.round(state.zoom * 100)}%`;
+  const status = document.getElementById('remote-framing-status');
+  if (status) status.textContent = remoteFraming.pending() ? 'Applying TV view…' : remoteFramingStatus;
+  document.querySelectorAll<HTMLButtonElement>('[data-remote-crop-action]').forEach((button) => {
+    const action = button.dataset.remoteCropAction;
+    const atLimit = action === 'zoom-in' ? state.zoom >= 3 : action === 'zoom-out' ? state.zoom <= 1
+      : action === 'pan-left' ? state.panX <= -1 : action === 'pan-right' ? state.panX >= 1
+      : action === 'pan-up' ? state.panY <= -1 : action === 'pan-down' ? state.panY >= 1
+      : action === 'reset' && state.zoom === 1 && state.panX === 0 && state.panY === 0;
+    button.disabled = !available || atLimit;
+  });
+}
+
+function wireRemoteFraming(): void {
+  document.getElementById('remote-now-playing')?.addEventListener('click', jumpToPlayingMedia);
+  const thumb = document.getElementById('remote-now-thumb') as HTMLImageElement | null;
+  thumb?.addEventListener('error', () => {
+    thumb.hidden = true;
+    const placeholder = document.getElementById('remote-now-placeholder');
+    if (placeholder) placeholder.hidden = false;
+  });
+  document.querySelectorAll<HTMLButtonElement>('[data-remote-crop-action]').forEach((button) => {
+    button.addEventListener('click', () => {
+      if (!activeItem || activeConfig.zoom === undefined) return;
+      remoteFramingStatus = 'Adjust the current TV view. Pan when zoomed or cropped.';
+      remoteFraming.activate(button.dataset.remoteCropAction ?? '');
+      try { navigator.vibrate?.(8); } catch { /* enhancement only */ }
+    });
+  });
+  syncRemoteFraming();
+}
+
 function trackInteraction(ids: string[], kind: 'click' | 'selection'): void {
   if (!ids.length) return;
   void recordInteraction(ids, kind).then((updates) => {
@@ -420,7 +495,24 @@ function trackInteraction(ids: string[], kind: 'click' | 'selection'): void {
 
 function syncActivityDock(): void {
   const title = document.getElementById('activity-now-title');
-  if (title) title.textContent = activeItem?.originalFilename ?? activeItem?.caption ?? activeItem?.file ?? 'Nothing playing';
+  const name = activeItem?.originalFilename ?? activeItem?.caption ?? activeItem?.file ?? 'Nothing playing';
+  if (title) title.textContent = name;
+  const remoteName = document.getElementById('remote-now-name');
+  if (remoteName) remoteName.textContent = name;
+  for (const id of ['activity-playing', 'remote-now-playing']) {
+    const button = document.getElementById(id) as HTMLButtonElement | null;
+    if (button) button.disabled = !activeItem;
+  }
+  const thumb = document.getElementById('remote-now-thumb') as HTMLImageElement | null;
+  const placeholder = document.getElementById('remote-now-placeholder');
+  const src = activeItem && (activeItem.kind === 'photo' || activeItem.poster) ? thumbUrl(activeItem) : null;
+  if (thumb) {
+    if (src && thumb.getAttribute('src') !== src) thumb.src = src;
+    if (!src) thumb.removeAttribute('src');
+    thumb.hidden = !src;
+  }
+  if (placeholder) { placeholder.hidden = Boolean(src); placeholder.textContent = activeItem?.kind === 'video' ? '▷' : '▧'; }
+  syncRemoteFraming();
   const now = document.getElementById('activity-now');
   now?.classList.toggle('active', nowPlayingOnly);
   now?.setAttribute('aria-pressed', String(nowPlayingOnly));
@@ -917,6 +1009,9 @@ function wirePlaybackPreviewSocket(): void {
         const msg = JSON.parse(event.data as string) as FrameEvent;
         if (msg.type === 'config') {
           activeConfig = msg.config;
+          // Keep the compact readout and hidden expanded preview in sync with TV state.
+          if (!controlsController?.isExpanded()) syncExpandedFraming(normalizeRemoteFraming(activeConfig));
+          syncRemoteFraming();
           syncFavoritesUi(true);
           syncTvVolumeControl();
           void renderPhonePreview();
@@ -1718,10 +1813,12 @@ async function refresh(): Promise<void> {
   activeItem = items.find((item) => current.current.includes(item.file));
   syncPlayingTileHighlight();
   syncActivityDock();
-  activeConfig = current.data as Partial<FrameConfig>;
+  activeConfig = current.data as unknown as Partial<FrameConfig>;
   syncFavoritesUi(true);
+  syncRemoteFraming();
+  if (nowPlayingOnly) renderGrid();
   renderedCropPreviewItemId = activeItem?.id;
-  await renderSettings(settingsRoot, current.data, activeItem);
+  syncExpandedFraming = await renderSettings(settingsRoot, current.data, activeItem);
   await renderPhonePreview();
   renderFacesPanel();
   syncTvVolumeControl();
@@ -2176,6 +2273,7 @@ async function start(): Promise<void> {
     wireTvVolume();
     wirePlaybackPreviewSocket();
     wireControlSheet();
+    wireRemoteFraming();
     wirePeopleFilters();
     wireMediaFilters();
     wireActivityFilters({
@@ -2190,6 +2288,7 @@ async function start(): Promise<void> {
         nowPlayingOnly = !nowPlayingOnly; applyFilterChange();
         if (nowPlayingOnly) grid.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
       },
+      jumpToPlaying: jumpToPlayingMedia,
       refresh: () => { pruneSelectionToCurrentFilters(); renderGrid(); },
     });
     document.getElementById('media-load-more')?.addEventListener('click', () => {

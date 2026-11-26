@@ -27,6 +27,7 @@ export function wireActivityFilters(callbacks: {
   counts: (filters: ActivityFilters) => void;
   search: (query: string) => void;
   now: () => void;
+  jumpToPlaying: () => void;
   refresh: () => void;
 }): void {
   const form = document.getElementById('activity-filter-form') as HTMLFormElement;
@@ -59,6 +60,6 @@ export function wireActivityFilters(callbacks: {
   });
   document.getElementById('media-filter-reset')?.addEventListener('click', () => clearTimeout(timer));
   document.getElementById('activity-now')?.addEventListener('click', callbacks.now);
-  document.getElementById('activity-playing')?.addEventListener('click', callbacks.now);
+  document.getElementById('activity-playing')?.addEventListener('click', callbacks.jumpToPlaying);
   document.getElementById('activity-update')?.addEventListener('click', callbacks.refresh);
 }
