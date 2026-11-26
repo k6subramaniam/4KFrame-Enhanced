@@ -27,7 +27,7 @@ import {
 import { hub } from './hub.js';
 import { reportMediaPresented } from './mediaActivity.js';
 import { getConfig, setConfig } from './store.js';
-import { cast, next, previous, progress, getCurrent, getCurrentPresentationId, refresh, setPaused, playSequence, clearQueue } from './slideshow.js';
+import { cast, next, previous, progress, getCurrent, getCurrentPresentationId, refresh, setPaused, setHold, isPaused, isHolding, playSequence, clearQueue } from './slideshow.js';
 import * as auth from './auth.js';
 import { clearDisplayPlayback, reportDisplayPlayback } from './displayPlayback.js';
 import { getActiveLiveCast } from './liveCast.js';
@@ -56,7 +56,7 @@ const ADMIN_CONTROL_TYPES = new Set<ControlMessage['type']>(['progress', 'cast',
 // LAN mode), or when the operator explicitly opts back into the legacy behavior. This keeps
 // a public/cloud deployment from exposing remote-control and config mutations over /ws.
 const PUBLIC_DISPLAY_CONTROL_TYPES = new Set<ControlMessage['type']>([
-  'next', 'previous', 'pause', 'resume', 'seek', 'publicConfig', 'playbackState', 'displayHeartbeat', 'mediaPresented',
+  'next', 'previous', 'pause', 'resume', 'hold', 'getPlaybackState', 'seek', 'publicConfig', 'playbackState', 'displayHeartbeat', 'mediaPresented',
 ]);
 const PUBLIC_CONFIG_KEYS = new Set([
   'photoPeriod',
@@ -250,6 +250,13 @@ export async function registerWs(app: FastifyInstance): Promise<void> {
           break;
         case 'pause': setPaused(true); break;
         case 'resume': setPaused(false); break;
+        case 'getPlaybackState':
+          send({ type: 'paused', paused: isPaused() });
+          send({ type: 'hold', holding: isHolding() });
+          break;
+        case 'hold':
+          if (typeof msg.holding === 'boolean') setHold(msg.holding);
+          break;
         case 'mediaPresented':
           try { await reportMediaPresented(msg.itemId, msg.presentationId); }
           catch (error) { app.log.warn({ err: error }, 'Could not persist media activity'); }

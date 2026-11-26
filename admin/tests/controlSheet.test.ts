@@ -90,7 +90,9 @@ test('wireControlSheet opens with the floating toggle and closes with close, bac
     document: doc as Document,
   });
 
+  controller.setExpanded(true);
   toggle.dispatchEvent(new Event('click'));
+  assert.equal(controller.isExpanded(), false, 'opening from the dock returns to the remote');
   assert.equal(controller.isOpen(), true);
   assert.equal(sheet.hidden, false);
   assert.equal(sheet.inert, false);
@@ -128,7 +130,9 @@ test('expanded and compact sizes retain the open state and never reconstruct con
     document: new EventTarget() as Document,
   }, true);
   assert.equal(controller.isOpen(), true);
-  assert.equal(controller.isExpanded(), true);
+  assert.equal(controller.isExpanded(), false, 'the remote is compact by default');
+  assert.equal(sheet.classList.contains('controls-expanded'), false);
+  controller.setExpanded(true);
   assert.equal(sheet.classList.contains('controls-expanded'), true);
   sheet.scrollTop = 250;
   controller.setExpanded(false);

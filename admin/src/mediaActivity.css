@@ -149,3 +149,27 @@ body.favorites-selecting main { padding-bottom:calc(12rem + env(safe-area-inset-
 @media(max-width:700px) { .favorites-options { grid-template-columns:repeat(2,minmax(0,1fr)); } .favorites-heading h2 { flex-basis:100%; } .favorites-heading button { flex:1; } }
 /* The quick-save bar replaces a tall sticky bulk toolbar on small screens. */
 @media(max-width:700px) { #bulk-toolbar { position:static; } }
+
+/* The closed sheet still leaves a useful mini remote, not a row of tiny toolbar icons. */
+#media-quick-dock {
+  display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.4rem;
+  width:min(28rem,calc(100% - 1rem)); padding:.5rem;
+  background:#101318; border-color:rgba(255,255,255,.16); border-radius:1.15rem;
+}
+#media-quick-dock #activity-playing { grid-column:span 3; min-height:36px; padding:.25rem .4rem; }
+#media-quick-dock #controls-toggle { grid-column:span 1; min-height:40px; background:#263548; font-size:.75rem; padding:.25rem; border-radius:.65rem; }
+#media-quick-dock .remote-key {
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.25rem;
+  min-width:0; min-height:55px; padding:.35rem .15rem; border-radius:.8rem;
+  background:#22262e; font-size:1.25rem; font-variant-emoji:text;
+}
+#media-quick-dock .remote-key::after { content:attr(data-label); color:var(--muted); font:600 .62rem/1.1 system-ui,sans-serif; }
+#media-quick-dock #activity-play { color:#111822; background:#dce8fa; border-color:#dce8fa; }
+#media-quick-dock #activity-play::after { color:#34445b; }
+#media-quick-dock #activity-repeat[aria-pressed="true"] { background:#20466d; border-color:#78b6ff; }
+#media-quick-dock .remote-key:disabled { opacity:.45; cursor:not-allowed; }
+#media-quick-dock button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+#control-sheet:not(.controls-expanded) #pb-loop { font-variant-emoji:text; }
+main { padding-bottom:calc(9.5rem + env(safe-area-inset-bottom)); }
+#favorites-save-bar { bottom:calc(8rem + env(safe-area-inset-bottom)); }
+body.favorites-selecting main { padding-bottom:calc(15rem + env(safe-area-inset-bottom)); }

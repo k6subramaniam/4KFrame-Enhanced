@@ -325,3 +325,32 @@ test('a display connecting mid live-cast is told about it immediately', async (t
   assert.ok(event, `expected a liveCast replay, got ${collected.map((m) => m.type).join(', ')}`);
   assert.equal(event?.type === 'liveCast' ? event.liveCast.id : undefined, info.id);
 });
+
+
+test('remote reads initial playback state and toggles repeat through the existing authenticated channel', async (t) => {
+  const app = await buildApp();
+  slideshow.setHold(false);
+  const { ws, messages } = await connectWs(app, `frame_auth=${encodeURIComponent(auth.issueToken())}`);
+  t.after(async () => {
+    ws.terminate();
+    slideshow.setHold(false);
+    await app.close();
+  });
+  await waitForCollected(messages, 2);
+  ws.send(JSON.stringify({ type: 'getPlaybackState' }));
+  let collected = await waitForCollected(messages, 4);
+  assert.deepEqual(collected[2], { type: 'paused', paused: false });
+  assert.deepEqual(collected[3], { type: 'hold', holding: false });
+  ws.send(JSON.stringify({ type: 'hold', holding: true }));
+  collected = await waitForCollected(messages, 5);
+  assert.deepEqual(collected[4], { type: 'hold', holding: true });
+  assert.equal(slideshow.isHolding(), true);
+  ws.send(JSON.stringify({ type: 'hold', holding: 'false' }));
+  ws.send(JSON.stringify({ type: 'getPlaybackState' }));
+  collected = await waitForCollected(messages, 7);
+  assert.deepEqual(collected[6], { type: 'hold', holding: true });
+  ws.send(JSON.stringify({ type: 'hold', holding: false }));
+  collected = await waitForCollected(messages, 8);
+  assert.deepEqual(collected[7], { type: 'hold', holding: false });
+  assert.equal(slideshow.isHolding(), false);
+});

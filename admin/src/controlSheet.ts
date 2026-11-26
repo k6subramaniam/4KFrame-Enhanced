@@ -108,13 +108,13 @@ export function wireControlSheet(elements: ControlSheetElements, initialOpen = f
   } = elements;
   const navigation = installNavigation(doc, sheet);
   let controlsOpen = initialOpen;
-  let expanded = true;
+  let expanded = false;
   let opener: HTMLButtonElement | null = toggle;
 
   if (toggle) {
-    toggle.textContent = 'Expand';
-    toggle.setAttribute('aria-label', 'Expand all controls: zoom, pan and settings');
-    toggle.setAttribute('title', 'Expand all controls: zoom, pan and settings');
+    toggle.textContent = 'Remote';
+    toggle.setAttribute('aria-label', 'Open remote control');
+    toggle.setAttribute('title', 'Open remote control');
   }
 
   const setExpanded = (value: boolean): void => {
@@ -122,7 +122,9 @@ export function wireControlSheet(elements: ControlSheetElements, initialOpen = f
     sheet?.classList.toggle('controls-expanded', value);
     if (!value && sheet) sheet.scrollTop = 0; // Return to the transport when collapsing.
     if (navigation) {
-      navigation.resize.textContent = value ? 'Compact panel' : 'Expand panel';
+      const heading = sheet?.querySelector<HTMLElement>('#control-sheet-header h2');
+      if (heading) heading.textContent = value ? 'All controls' : 'Remote control';
+      navigation.resize.textContent = value ? 'Compact remote' : 'Expand panel';
       navigation.resize.setAttribute('aria-pressed', String(value));
       navigation.resize.setAttribute('aria-label', value ? 'Use compact controls panel' : 'Expand controls panel');
     }
@@ -146,6 +148,7 @@ export function wireControlSheet(elements: ControlSheetElements, initialOpen = f
 
   toggle?.addEventListener('click', () => {
     opener = toggle;
+    if (!controlsOpen) setExpanded(false);
     setOpen(!controlsOpen);
     if (controlsOpen) close?.focus({ preventScroll: true });
   });

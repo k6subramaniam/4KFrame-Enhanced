@@ -227,6 +227,8 @@ export type ControlMessage =
   | { type: 'seek'; offsetSec: SeekOffsetSec }
   | { type: 'pause' }
   | { type: 'resume' }
+  | { type: 'hold'; holding: boolean }
+  | { type: 'getPlaybackState' }
   | { type: 'playbackState'; itemId: string; currentTime: number; duration: number; seekable: boolean }
   | { type: 'displayHeartbeat' }
   | { type: 'mediaPresented'; itemId: string; presentationId: string }
