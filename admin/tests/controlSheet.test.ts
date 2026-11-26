@@ -21,6 +21,7 @@ class FakeElement extends EventTarget {
   hidden = false;
   inert = false;
   focusCount = 0;
+  scrollTop = 0;
 
   setAttribute(name: string, value: string): void { this.attributes.set(name, value); }
   getAttribute(name: string): string | null { return this.attributes.get(name) ?? null; }
@@ -129,7 +130,9 @@ test('expanded and compact sizes retain the open state and never reconstruct con
   assert.equal(controller.isOpen(), true);
   assert.equal(controller.isExpanded(), true);
   assert.equal(sheet.classList.contains('controls-expanded'), true);
+  sheet.scrollTop = 250;
   controller.setExpanded(false);
+  assert.equal(sheet.scrollTop, 0, 'collapsing restores the transport at the top');
   assert.equal(controller.isExpanded(), false);
   assert.equal(controller.isOpen(), true);
   assert.equal(sheet.inert, false);
