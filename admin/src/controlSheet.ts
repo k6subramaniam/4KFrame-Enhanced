@@ -120,6 +120,7 @@ export function wireControlSheet(elements: ControlSheetElements, initialOpen = f
   const setExpanded = (value: boolean): void => {
     expanded = value;
     sheet?.classList.toggle('controls-expanded', value);
+    if (!value && sheet) sheet.scrollTop = 0; // Return to the transport when collapsing.
     if (navigation) {
       navigation.resize.textContent = value ? 'Compact panel' : 'Expand panel';
       navigation.resize.setAttribute('aria-pressed', String(value));
@@ -157,6 +158,8 @@ export function wireControlSheet(elements: ControlSheetElements, initialOpen = f
   navigation?.resize.addEventListener('click', () => setExpanded(!expanded));
   navigation?.shortcuts.querySelectorAll<HTMLButtonElement>('[data-control-section]').forEach((button) => {
     button.addEventListener('click', () => {
+      // Compact mode deliberately hides the advanced panels. Expand before jumping.
+      setExpanded(true);
       if (sheet) revealSection(sheet, button.dataset.controlSection as ControlSection);
     });
   });

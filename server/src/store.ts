@@ -40,6 +40,8 @@ interface DbDocument {
 
 let doc: DbDocument | null = null;
 let writeChain: Promise<void> = Promise.resolve();
+// At most one write is active and one further batch is queued, regardless of burst size.
+let queuedWrite: Promise<void> | undefined;
 
 async function ensureDirs(): Promise<void> {
   await fs.mkdir(MEDIA_DIR, { recursive: true });
@@ -78,16 +80,25 @@ function db(): DbDocument {
   return doc;
 }
 
-/** Serialise the current document to disk, chained to avoid concurrent writes. */
+/**
+ * Persist the latest document atomically. Concurrent mutations share the next queued
+ * batch; serialize only once that batch actually starts. Each caller still awaits a
+ * snapshot containing its mutation, but a burst cannot retain one full JSON string
+ * per pending write.
+ */
 function flush(): Promise<void> {
-  const snapshot = JSON.stringify(db(), null, 2);
+  if (queuedWrite) return queuedWrite;
   // A transient write failure must not poison every subsequent persistence attempt.
-  writeChain = writeChain.catch(() => {}).then(async () => {
+  const batch = writeChain.catch(() => {}).then(async () => {
+    queuedWrite = undefined;
+    const snapshot = JSON.stringify(db());
     const tmp = path.join(DATA_DIR, `.frame.${process.pid}.tmp`);
     await fs.writeFile(tmp, snapshot, 'utf8');
     await fs.rename(tmp, DB_FILE);
   });
-  return writeChain;
+  queuedWrite = batch;
+  writeChain = batch;
+  return batch;
 }
 
 // --- Config ---

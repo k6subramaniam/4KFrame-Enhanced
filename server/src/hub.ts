@@ -10,10 +10,12 @@ import type { FrameEvent } from '@4kframe/shared';
 class FrameHub extends EventEmitter {
   /** Broadcast an event to all connected displays/controllers. */
   emitEvent(event: FrameEvent): void {
-    this.emit('event', event);
+    // Serialize lazily once per emission, not once per connected socket.
+    let serialized: string | undefined;
+    this.emit('event', event, () => serialized ??= JSON.stringify(event));
   }
 
-  onEvent(listener: (event: FrameEvent) => void): () => void {
+  onEvent(listener: (event: FrameEvent, serialize: () => string) => void): () => void {
     this.on('event', listener);
     return () => this.off('event', listener);
   }

@@ -206,8 +206,17 @@ export async function registerWs(app: FastifyInstance): Promise<void> {
       return;
     }
 
-    const send = (event: FrameEvent) => {
-      if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(event));
+    const send = (event: FrameEvent, serialize = () => JSON.stringify(event)) => {
+      if (socket.readyState !== socket.OPEN) return;
+      // A stalled receiver must not accumulate unlimited pending catalog/event buffers.
+      // Reconnection gets fresh state through the existing connection handshake.
+      if (socket.bufferedAmount > 8 * 1024 * 1024) {
+        socket.terminate();
+        return;
+      }
+      socket.send(serialize(), (error?: Error) => {
+        if (error) socket.terminate();
+      });
     };
 
     // Bridge hub events to this client.

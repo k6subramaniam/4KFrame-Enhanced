@@ -23,6 +23,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg openssl 
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production
+# Production has a 9 GB container limit; leave headroom for native media processing.
+ENV NODE_OPTIONS="--max-old-space-size=4096"
 ENV FRAME_DATA_DIR=/data
 COPY --from=build /app .
 # Keep the opt-in Tiny Face Detector weights available to the runtime.

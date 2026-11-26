@@ -1,6 +1,7 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import Fastify from 'fastify';
@@ -34,6 +35,37 @@ test('concurrent increments and retries are durable and count each event exactly
   assert.equal(getMediaActivity(store.getItem('concurrent')!).selectionCount, 0);
   const persisted = JSON.parse(await readFile(path.join(directory, 'frame.json'), 'utf8'));
   assert.equal(persisted.items.find((i: MediaItem) => i.id === 'concurrent').activity.clickCount, 20);
+});
+test('a burst during a slow catalog write coalesces into one queued snapshot without losing counts', { timeout: 10000 }, async (t) => {
+  await store.addItem(item('coalesced'));
+  const originalWrite = fs.writeFile;
+  let writes = 0;
+  let markStarted!: () => void;
+  let release!: () => void;
+  const started = new Promise<void>(resolve => { markStarted = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const spy = t.mock.method(fs, 'writeFile', async (...args: Parameters<typeof fs.writeFile>) => {
+    writes += 1;
+    if (writes === 1) {
+      markStarted();
+      await gate;
+    }
+    return originalWrite(...args);
+  });
+  const first = store.recordMediaInteraction(['coalesced'], 'click', 'coalesce-first');
+  try {
+    await started;
+    const burst = Array.from({ length: 64 }, (_, i) =>
+      store.recordMediaInteraction(['coalesced'], 'click', `coalesce-${i}`));
+    release();
+    await Promise.all([first, ...burst]);
+    assert.equal(writes, 2, 'one active write and one coalesced follow-up');
+    const persisted = JSON.parse(await readFile(path.join(directory, 'frame.json'), 'utf8'));
+    assert.equal(persisted.items.find((i: MediaItem) => i.id === 'coalesced').activity.clickCount, 65);
+  } finally {
+    release();
+    spy.mock.restore();
+  }
 });
 test('missing IDs reject the whole interaction; select-all duplicates count once per item', async () => {
   await store.addItem(item('selected'));
