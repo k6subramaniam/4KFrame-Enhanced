@@ -29,6 +29,12 @@ function numeric(value: unknown, fallback: number): number {
 
 export type CropPreviewUpdater = (patch: CropPreviewConfig) => void;
 
+// Sync a wired preview in place, including one replaced by a later playback event.
+const cropPreviewSyncers = new WeakMap<HTMLElement, CropPreviewUpdater>();
+export function syncCropPreviewConfig(root: ParentNode, patch: CropPreviewConfig): void {
+  root.querySelectorAll<HTMLElement>('[data-crop-preview]').forEach((preview) => cropPreviewSyncers.get(preview)?.(patch));
+}
+
 export function cropPreviewControlPatch(
   action: string,
   state: { zoom: number; panX: number; panY: number },
@@ -122,8 +128,8 @@ export function wireCropPreview(
   updateConfig: (patch: Record<string, string>) => void | Promise<void>,
 ): CropPreviewUpdater {
   const previews = [...root.querySelectorAll<HTMLElement>('[data-crop-preview]')];
-  const syncers = previews.map((preview) => wireSingleCropPreview(preview, updateConfig));
-  return (patch) => syncers.forEach((sync) => sync(patch));
+  for (const preview of previews) cropPreviewSyncers.set(preview, wireSingleCropPreview(preview, updateConfig));
+  return (patch) => syncCropPreviewConfig(root, patch);
 }
 
 function wireSingleCropPreview(

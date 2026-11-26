@@ -24,7 +24,8 @@ import {
   fetchItems,
   upscaleVideo,
 } from './api.js';
-import { activeCropPreviewSectionHtml, wireCropPreview } from './cropPreview.js';
+import { activeCropPreviewSectionHtml, wireCropPreview, syncCropPreviewConfig } from './cropPreview.js';
+import type { RemoteFramingState } from './remoteControls.js';
 import { toast } from './toast.js';
 
 const SETTINGS_PANEL_STATE_KEY = '4kframe.settings.panels';
@@ -232,7 +233,7 @@ function wireRetention(root: HTMLElement, data: ApiDataPayload): void {
   });
 }
 
-export async function renderSettings(root: HTMLElement, data: ApiDataPayload, currentItem?: MediaItem): Promise<void> {
+export async function renderSettings(root: HTMLElement, data: ApiDataPayload, currentItem?: MediaItem): Promise<(state: RemoteFramingState) => void> {
   const usedMB = Math.round(Number(data.storageUsed ?? 0) / 1e6);
   const freeMB = Math.round(Number(data.storageFree ?? 0) / 1e6);
   const total = usedMB + freeMB;
@@ -340,6 +341,19 @@ export async function renderSettings(root: HTMLElement, data: ApiDataPayload, cu
   wirePickerImport(root);
   wireRetention(root, data);
   restore();
+
+  // Direct remote adjustments update the existing preview and sliders without
+  // rebuilding the settings panel or restarting a preview video.
+  return (state) => {
+    for (const key of ['zoom', 'panX', 'panY'] as const) {
+      data[key] = String(state[key]);
+      const input = root.querySelector<HTMLInputElement>(`[data-range-key="${key}"]`);
+      if (input) input.value = String(Math.round(state[key] * 100));
+    }
+    const value = root.querySelector<HTMLElement>('[data-zoom-val]');
+    if (value) value.textContent = `${Math.round(state.zoom * 100)}%`;
+    syncCropPreviewConfig(root, state);
+  };
 }
 
 /**
