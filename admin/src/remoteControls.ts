@@ -62,3 +62,89 @@ export function createRemoteFramingQueue(options: {
     },
   };
 }
+
+
+export const REMOTE_HOLD_DELAY_MS = 350;
+export const REMOTE_HOLD_INTERVAL_MS = 160;
+type HoldSchedule = (task: () => void, delay: number) => () => void;
+
+/** A tap keeps its normal click semantics; a held key repeats until release or cancellation. */
+export function createRemoteHold(schedule: HoldSchedule = (task, delay) => {
+  const timer = setTimeout(task, delay);
+  return () => clearTimeout(timer);
+}) {
+  let active = false;
+  let repeated = false;
+  let cancelTimer: (() => void) | undefined;
+  const end = (): boolean => {
+    active = false;
+    cancelTimer?.();
+    cancelTimer = undefined;
+    return repeated;
+  };
+  return {
+    begin(step: () => boolean): void {
+      end();
+      active = true;
+      repeated = false;
+      const tick = () => {
+        cancelTimer = undefined;
+        if (!active) return;
+        if (!step()) { end(); return; }
+        repeated = true;
+        if (active) cancelTimer = schedule(tick, REMOTE_HOLD_INTERVAL_MS);
+      };
+      cancelTimer = schedule(tick, REMOTE_HOLD_DELAY_MS);
+    },
+    end,
+  };
+}
+
+/** Install one repeat controller for the whole remote. Keyboard and assistive clicks remain native. */
+export function wireRemoteHoldKeys(
+  root: ParentNode,
+  available: () => boolean,
+  activate: (button: HTMLButtonElement, feedback: boolean) => void,
+): () => void {
+  const hold = createRemoteHold();
+  let held: HTMLButtonElement | null = null;
+  let pointer = -1;
+  let suppress: HTMLButtonElement | null = null;
+  const stop = () => {
+    if (!held) return;
+    if (hold.end()) suppress = held;
+    held.classList.remove('remote-held');
+    held = null;
+    pointer = -1;
+  };
+  root.querySelectorAll<HTMLButtonElement>('[data-remote-crop-action]').forEach((button) => {
+    button.addEventListener('pointerdown', (event) => {
+      if (button.disabled || !available() || event.button !== 0 || !event.isPrimary) return;
+      stop();
+      suppress = null;
+      if (button.dataset.remoteCropAction === 'reset') return;
+      held = button;
+      pointer = event.pointerId;
+      button.classList.add('remote-held');
+      try { button.setPointerCapture(pointer); } catch { /* old TV/mobile engines */ }
+      let first = true;
+      hold.begin(() => {
+        if (held !== button || button.disabled || !available()) { stop(); return false; }
+        activate(button, first);
+        first = false;
+        return true;
+      });
+    });
+    for (const type of ['pointerup', 'pointercancel', 'lostpointercapture'] as const) {
+      button.addEventListener(type, (event) => {
+        if (held === button && event.pointerId === pointer) stop();
+      });
+    }
+    button.addEventListener('click', (event) => {
+      if (event.detail > 0 && suppress === button) { suppress = null; event.preventDefault(); return; }
+      if (available() && !button.disabled) activate(button, true);
+    });
+    button.addEventListener('contextmenu', (event) => event.preventDefault());
+  });
+  return stop;
+}
