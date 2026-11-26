@@ -214,7 +214,7 @@ export async function registerWs(app: FastifyInstance): Promise<void> {
         socket.terminate();
         return;
       }
-      socket.send(serialize(), (error) => {
+      socket.send(serialize(), (error?: Error) => {
         if (error) socket.terminate();
       });
     };
