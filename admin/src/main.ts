@@ -921,7 +921,7 @@ function wirePlaybackPreviewSocket(): void {
           syncTvVolumeControl();
           void renderPhonePreview();
           void getPlayback().then(syncFacesPreview).catch(() => {});
-        } else if (msg.type === 'paused') {
+        } else if (msg.type === 'paused' || msg.type === 'hold') {
           void syncPlayback();
         } else if (msg.type === 'activity') {
           mergeActivityUpdates(msg.updates);
@@ -1601,7 +1601,15 @@ async function syncPlayback(): Promise<void> {
   if (dockPlay) {
     dockPlay.textContent = p.paused ? '▶' : '⏸';
     dockPlay.setAttribute('aria-label', p.paused ? 'Resume playback' : 'Pause playback');
+    dockPlay.dataset.label = p.paused ? 'Play' : 'Pause';
     dockPlay.disabled = !p.itemId;
+  }
+  const dockRepeat = document.getElementById('activity-repeat') as HTMLButtonElement | null;
+  if (dockRepeat) {
+    dockRepeat.setAttribute('aria-pressed', String(p.holding));
+    dockRepeat.setAttribute('aria-label', p.holding ? 'Stop repeating current item' : 'Repeat current item');
+    dockRepeat.dataset.label = p.holding ? 'Repeat on' : 'Repeat';
+    dockRepeat.disabled = !p.itemId;
   }
   const loop = document.getElementById('pb-loop');
   if (loop) {
@@ -2192,6 +2200,10 @@ async function start(): Promise<void> {
     document.getElementById('activity-play')?.addEventListener('click', () => {
       const button = document.getElementById('activity-play') as HTMLButtonElement;
       void withBusy(button, async () => { const p = await getPlayback(); await setPaused(!p.paused); await syncPlayback(); });
+    });
+    document.getElementById('activity-repeat')?.addEventListener('click', () => {
+      const button = document.getElementById('activity-repeat') as HTMLButtonElement;
+      void withBusy(button, async () => { const p = await getPlayback(); await setHold(!p.holding); await syncPlayback(); });
     });
     document.getElementById('media-quick-dock')?.classList.remove('hidden');
     wireMediaTransforms();

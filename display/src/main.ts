@@ -49,6 +49,7 @@ let paused = false;
 let holding = false;
 let receivedConfigEvent = false;
 let receivedPausedEvent = false;
+let receivedHoldEvent = false;
 let lastPlaybackReportAt = 0;
 let renderGeneration = 0;
 let activePresentationId = '';
@@ -964,9 +965,11 @@ function handleEvent(event: FrameEvent): void {
       updateControlStates();
       break;
     case 'hold':
+      receivedHoldEvent = true;
       holding = event.holding;
       if (showingVideo) syncActiveVideoPlaybackProperties();
       setStatus(statusText());
+      updateControlStates();
       break;
     case 'log':
       if (event.level === 'error') console.error(event.message);
@@ -1230,11 +1233,13 @@ function moveControlFocus(delta: number): boolean {
   const current = list.indexOf(document.activeElement as HTMLElement);
   if (current < 0) {
     list[0].focus({ preventScroll: true });
+    list[0].scrollIntoView({ block: 'nearest' });
     return true;
   }
   const next = current + delta;
   if (next < 0 || next >= list.length) return false; // let the caller decide (e.g. exit)
   list[next].focus({ preventScroll: true });
+  list[next].scrollIntoView({ block: 'nearest' });
   return true;
 }
 
@@ -1258,9 +1263,11 @@ function isDisplayRemoteKey(key: string): boolean {
 function setControlsOpen(open: boolean, revealController = true): void {
   if (!controlsToggle || !publicControls) return;
   publicControls.hidden = !open;
+  publicControlsRoot?.classList.toggle('remote-expanded', open);
   controlsToggle.setAttribute('aria-expanded', String(open));
-  controlsToggle.setAttribute('aria-label', open ? 'Close slideshow controls' : 'Open slideshow controls');
-  controlsToggle.textContent = open ? '✕' : '•••';
+  controlsToggle.setAttribute('aria-label', open ? 'Collapse to compact remote' : 'Expand remote controls');
+  controlsToggle.textContent = open ? 'Compact' : 'Expand panel';
+  if (!open && bottomController) bottomController.scrollTop = 0;
   if (revealController) registerPublicControlActivity();
 }
 
@@ -1515,12 +1522,12 @@ function syncPublicControls(): void {
     && video.duration > 0;
 
   publicControlsRoot?.querySelectorAll<HTMLButtonElement>('[data-control="previous"], #control-previous').forEach((button) => {
-    button.textContent = videoSeekMode ? `↶${VIDEO_SEEK_SECONDS}` : '‹';
+    button.textContent = videoSeekMode ? `↶${VIDEO_SEEK_SECONDS}` : '⏮';
     button.setAttribute('data-label', videoSeekMode ? `Back ${VIDEO_SEEK_SECONDS}s` : 'Previous');
     button.setAttribute('aria-label', videoSeekMode ? `Seek backward ${VIDEO_SEEK_SECONDS} seconds` : 'Previous item');
   });
   publicControlsRoot?.querySelectorAll<HTMLButtonElement>('[data-control="next"], #control-next').forEach((button) => {
-    button.textContent = videoSeekMode ? `${VIDEO_SEEK_SECONDS}↷` : '›';
+    button.textContent = videoSeekMode ? `${VIDEO_SEEK_SECONDS}↷` : '⏭';
     button.setAttribute('data-label', videoSeekMode ? `Forward ${VIDEO_SEEK_SECONDS}s` : 'Next');
     button.setAttribute('aria-label', videoSeekMode ? `Seek forward ${VIDEO_SEEK_SECONDS} seconds` : 'Next item');
   });
@@ -1528,6 +1535,12 @@ function syncPublicControls(): void {
     button.textContent = paused ? '▶' : '⏸';
     button.setAttribute('aria-label', paused ? 'Resume slideshow' : 'Pause slideshow');
     button.setAttribute('aria-pressed', String(paused));
+    button.dataset.label = paused ? 'Play' : 'Pause';
+  });
+  publicControlsRoot?.querySelectorAll<HTMLButtonElement>('[data-control="repeat"]').forEach((button) => {
+    button.setAttribute('aria-pressed', String(holding));
+    button.setAttribute('aria-label', holding ? 'Stop repeating current item' : 'Repeat current item');
+    button.dataset.label = holding ? 'Repeat on' : 'Repeat';
   });
 
   // The shared settings panel renders its own controls and wires them via
@@ -1544,6 +1557,37 @@ function wirePublicControls(): void {
     setControlsOpen(publicControls?.hidden ?? true);
   });
   wireZoomPanSection();
+  document.getElementById('public-remote-close')?.addEventListener('click', () => {
+    setControlsOpen(false, false);
+    (document.activeElement as HTMLElement | null)?.blur();
+    clearControlIdleTimers();
+    bottomController?.classList.add('is-hidden');
+    controlsToggle?.classList.add('is-hidden');
+  });
+  publicControlsRoot.querySelectorAll<HTMLButtonElement>('[data-remote-section]').forEach((button) => {
+    button.addEventListener('click', () => {
+      setControlsOpen(true);
+      const section = button.dataset.remoteSection;
+      let target: HTMLElement | null | undefined;
+      if (section === 'zoom') {
+        setZoomPanSectionOpen(true);
+        target = zoomPanToggle;
+      } else if (section === 'media') {
+        target = publicSettingsRoot?.querySelector<HTMLElement>('[data-panel-id="playback-media"] .panel-toggle');
+      } else {
+        target = publicSettingsRoot?.querySelector<HTMLElement>('.panel-toggle');
+      }
+      if (target instanceof HTMLButtonElement && target.getAttribute('aria-expanded') === 'false') target.click();
+      target?.focus({ preventScroll: true });
+      target?.scrollIntoView({ block: 'nearest' });
+    });
+  });
+  publicControlsRoot.querySelectorAll<HTMLButtonElement>('[data-control="repeat"]').forEach((button) => {
+    button.addEventListener('click', () => {
+      registerPublicControlActivity();
+      sendControl({ type: 'hold', holding: !holding });
+    });
+  });
 
   publicControlsRoot.querySelectorAll<HTMLButtonElement>('[data-control="previous"], #control-previous').forEach((button) => {
     button.addEventListener('click', () => {
@@ -1718,6 +1762,7 @@ function updateControlStates(): void {
 
   setPublicControlDisabled('[data-control="previous"], [data-control="next"], #control-previous, #control-next', !connected);
   setPublicControlDisabled('[data-control="play-pause"], #control-pause', !pauseControlReady);
+  setPublicControlDisabled('[data-control="repeat"]', !connected || !receivedHoldEvent);
   setPublicControlDisabled('#public-settings button, #public-settings input, #public-settings select', !configControlsReady);
   if (publicControlsRoot) updateQuickActionDisabledStates(publicControlsRoot, configControlsReady);
   syncPublicControls();
@@ -1738,6 +1783,9 @@ function connect(): void {
   };
   ws.onopen = () => {
     window.clearInterval(displayHeartbeatTimer);
+    receivedPausedEvent = false;
+    receivedHoldEvent = false;
+    ws.send(JSON.stringify({ type: 'getPlaybackState' }));
     heartbeat();
     displayHeartbeatTimer = window.setInterval(heartbeat, DISPLAY_HEARTBEAT_MS);
     // Restore the real indicator rather than blanking it — setStatus('') used to wipe the

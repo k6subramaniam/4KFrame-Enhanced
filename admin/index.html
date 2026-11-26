@@ -636,10 +636,11 @@
     <script type="module" src="/src/main.ts"></script>
     <nav id="media-quick-dock" class="hidden" aria-label="Media playback controls">
       <button id="activity-playing" type="button" title="Filter the library to the current item"><span>On TV</span><strong id="activity-now-title">Nothing playing</strong></button>
-      <button id="activity-prev" type="button" aria-label="Previous media" title="Skip to previous media">⏮</button>
-      <button id="activity-play" type="button" aria-label="Pause playback" disabled>⏸</button>
-      <button id="activity-next" type="button" aria-label="Next media" title="Skip to next media">⏭</button>
-    <button id="controls-toggle" type="button" aria-controls="control-sheet" aria-expanded="false">Controls</button>
+      <button id="controls-toggle" type="button" aria-controls="control-sheet" aria-expanded="false">Remote</button>
+      <button id="activity-prev" type="button" class="remote-key" data-label="Previous" aria-label="Previous media" title="Skip to previous media">⏮</button>
+      <button id="activity-play" type="button" class="remote-key" data-label="Pause" aria-label="Pause playback" disabled>⏸</button>
+      <button id="activity-next" type="button" class="remote-key" data-label="Next" aria-label="Next media" title="Skip to next media">⏭</button>
+      <button id="activity-repeat" type="button" class="remote-key" data-label="Repeat" aria-label="Repeat current item" aria-pressed="false" disabled>↻</button>
     </nav>
   </body>
 </html>
